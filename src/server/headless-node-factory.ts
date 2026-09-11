@@ -11,6 +11,7 @@ import {
   type NodeColor
 } from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
+import { placeOpened, type Box } from '../shared/placement'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
   AGENT_CONFIG,
@@ -124,8 +125,6 @@ const TERMINAL_COLS = 120
 const TERMINAL_ROWS = 36
 const TERMINAL_SIZE = { width: 640, height: 440 }
 const STICKY_SIZE = { width: 240, height: 200 }
-const H_GAP = 80
-const V_GAP = 36
 const GROUP_PAD = 28
 const GROUP_HEADER = 34
 const AFTER_RETRY_MS = 500
@@ -208,44 +207,38 @@ function absolutePosition(project: Project, node: CanvasNodeState): { x: number;
   return { x, y }
 }
 
-function placeRight(
+function nodeBox(project: Project, node: CanvasNodeState): Box {
+  const p = absolutePosition(project, node)
+  return {
+    x: p.x,
+    y: p.y,
+    w: Math.max(1, node.size?.width || TERMINAL_SIZE.width),
+    h: Math.max(1, node.size?.height || TERMINAL_SIZE.height)
+  }
+}
+
+/**
+ * Where a node this factory opens lands — the shared engine's `placeOpened`, the desktop's own
+ * rule, over the project's stored nodes plus the nodes this same call already made (`reserved`,
+ * not in `project.nodes` yet): RIGHT of its `--after` deps (`deps`, resolved to stored nodes),
+ * else BELOW the source as sibling `reserved.length`. This factory used to scan a 3-row column to
+ * the RIGHT of the source, so one verb laid out two ways depending on the edition.
+ */
+function placeNode(
   project: Project,
   source: CanvasNodeState,
   size: { width: number; height: number },
-  reserved: readonly CanvasNodeState[] = []
+  reserved: readonly CanvasNodeState[] = [],
+  deps: readonly CanvasNodeState[] = []
 ): { x: number; y: number } {
-  const origin = absolutePosition(project, source)
-  const sourceWidth = source.size?.width || TERMINAL_SIZE.width
-  const occupied = [...project.nodes, ...reserved].map((node) => {
-    const position = absolutePosition(project, node)
-    return {
-      x: position.x,
-      y: position.y,
-      width: Math.max(1, node.size?.width || TERMINAL_SIZE.width),
-      height: Math.max(1, node.size?.height || TERMINAL_SIZE.height)
-    }
-  })
-
-  // Keep the existing compact three-row grid, but scan it rather than assuming this request's
-  // local index is globally free. Repeated requests therefore continue into the first available
-  // row/column instead of returning to slot zero and stacking nodes on top of one another.
-  for (let slot = 0; ; slot++) {
-    const column = Math.floor(slot / 3)
-    const row = slot % 3
-    const candidate = {
-      x: origin.x + sourceWidth + H_GAP + column * (size.width + H_GAP),
-      y: origin.y + row * (size.height + V_GAP),
-      width: size.width,
-      height: size.height
-    }
-    const collides = occupied.some((rect) =>
-      candidate.x < rect.x + rect.width &&
-      candidate.x + candidate.width > rect.x &&
-      candidate.y < rect.y + rect.height &&
-      candidate.y + candidate.height > rect.y
-    )
-    if (!collides) return { x: candidate.x, y: candidate.y }
-  }
+  const existing = [...project.nodes, ...reserved].map((node) => nodeBox(project, node))
+  return placeOpened(
+    existing,
+    nodeBox(project, source),
+    deps.map((dep) => nodeBox(project, dep)),
+    { w: size.width, h: size.height },
+    reserved.length
+  )
 }
 
 function addEdge(list: BridgeLink[], source: string, target: string, prefix: string): void {
@@ -1103,6 +1096,11 @@ export class HeadlessNodeFactory {
 
       const count = parseCount(args.count, verb === 'open-terminal' ? TERMINAL_LIMIT : AGENT_LIMIT)
       const created: CanvasNodeState[] = []
+      // `--after` deps that are stored nodes: the node goes RIGHT of them (the desktop's rule).
+      // Waiting on the opener itself is still lineage, so that one stays below the opener.
+      const afterNodes = after
+        .filter((depId) => depId !== source.node.id)
+        .flatMap((depId) => target.nodes.filter((candidate) => candidate.id === depId))
       const commands = new Map<string, string>()
       const ropes = [...(target.ropes ?? [])]
       const bridges = [...(target.bridges ?? [])]
@@ -1171,7 +1169,7 @@ export class HeadlessNodeFactory {
         const node: CanvasNodeState = {
           id,
           kind: 'terminal',
-          position: placeRight(target, source.node, nodeSize, created),
+          position: placeNode(target, source.node, nodeSize, created, afterNodes),
           size: { ...nodeSize },
           title,
           ...(verb === 'open-agent' ? { titleAuto: true } : {}),
@@ -1279,7 +1277,7 @@ export class HeadlessNodeFactory {
         node = {
           id: nextId('sticky'),
           kind: 'sticky',
-          position: placeRight(source.project, source.node, STICKY_SIZE),
+          position: placeNode(source.project, source.node, STICKY_SIZE),
           size: { ...STICKY_SIZE },
           title: oneLine(parsed.ref) || 'Note',
           color: '#ffd60a',

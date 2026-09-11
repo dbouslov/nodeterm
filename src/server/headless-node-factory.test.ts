@@ -202,7 +202,8 @@ describe('HeadlessNodeFactory', () => {
     const created = raw.nodes.find((node) => node.id === id)
     // Local project files store cwd portably; WorkspaceStore resolves it back to absolute on load.
     expect(created).toMatchObject({ kind: 'terminal', cwd: '.' })
-    expect(created!.position.x).toBeGreaterThan(terminal('x', 'x').position.x)
+    // Below its opener, like the desktop (this factory used to place to the RIGHT).
+    expect(created!.position.y).toBeGreaterThan(terminal('x', 'x').position.y)
 
     const reloaded = await new WorkspaceStore().load({ sideline: false })
     expect(reloaded.projects[0].nodes.find((node) => node.id === id)).toMatchObject({
@@ -863,8 +864,12 @@ describe('HeadlessNodeFactory', () => {
 
   it('places repeated spawns in the first free deterministic slots without overlapping busy nodes', async () => {
     const workspace = await store.load({ sideline: false })
-    // Slot zero to the right of the source is already busy before any control request arrives.
-    workspace.projects[0].nodes.push(terminal('term-busy-slot', 'Busy slot', 'gemini', 740))
+    // Slot zero BELOW the source (the desktop's opener→child rule) is already busy before any
+    // control request arrives.
+    workspace.projects[0].nodes.push({
+      ...terminal('term-busy-slot', 'Busy slot', 'gemini', 20),
+      position: { x: 20, y: 30 + 440 + 80 }
+    })
     await store.save(workspace)
 
     const spawnedIds: string[] = []
@@ -888,6 +893,27 @@ describe('HeadlessNodeFactory', () => {
       const node = nodes.find((candidate) => candidate.id === id)!
       return `${node.position.x},${node.position.y}`
     })).size).toBe(spawnedIds.length)
+  })
+
+  it('opens BELOW the opener like the desktop (siblings fanned right), an --after dependent RIGHT of its dep', async () => {
+    const src = terminal('term-source', 'Director')
+    const pair = await factory.openTerminal('term-source', { count: '2' }, true)
+    const dependent = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume', after: 'term-upstream' },
+      true
+    )
+    const nodes = (await store.load({ sideline: false })).projects[0].nodes
+    const byId = (id: string) => nodes.find((node) => node.id === id)!
+    const [a, b] = (pair.result as { ids: string[] }).ids.map(byId)
+    // ROW_GAP (80) below the opener, left-aligned with it; the sibling one node + gap (40) right.
+    expect(a.position).toEqual({ x: src.position.x, y: src.position.y + src.size.height + 80 })
+    expect(b.position).toEqual({ x: a.position.x + a.size.width + 40, y: a.position.y })
+    // term-upstream (x 80, 640 wide) is the dep: the dependent is top-aligned with it and to its
+    // right, on the first clear cell (term-owned at x 900 blocks the nearer ones).
+    const d = byId((dependent.result as { id: string }).id)
+    expect(d.position.y).toBe(30)
+    expect(d.position.x).toBeGreaterThanOrEqual(80 + 640 + 40)
   })
 
   it.each([
