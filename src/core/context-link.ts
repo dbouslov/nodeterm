@@ -187,16 +187,26 @@ async function writeLinkFiles(map: ContextLinkMap): Promise<void> {
 /** Read a linked node's transcript bytes — from the remote host when it lives there, else from
  *  this machine's disk. null when there is no path yet or it could not be read. */
 async function fetchTranscript(node: LinkDocEntry): Promise<string | null> {
-  if (!node.transcriptPath) return null
+  // The document holds the path known when the map was last pushed. A node is linked the moment it
+  // is created — before its CLI has started — and the renderer does not re-push a map whose content
+  // did not change, so a session that reported its transcript after that push is resolved here,
+  // with the same resolver (and the same remote refusal) the push uses.
+  const transcriptPath =
+    node.transcriptPath ||
+    (await resolveLinkTranscript(
+      { id: node.id, agentId: node.agent, sessionId: node.sessionId, accountId: node.accountId, note: node.note },
+      { hooked: transcriptPathOf, locators: LINK_LOCATORS, isRemote: deps.isRemoteNode }
+    ))
+  if (!transcriptPath) return null
   if (deps.isRemoteNode?.(node.id)) {
     // The path was jailed at ingest (isSafeRemoteTranscriptPath, where the hook payload arrives),
     // so what reaches here is already confined to the host's transcript roots.
     return deps.readRemoteFile
-      ? await deps.readRemoteFile(node.id, node.transcriptPath, REMOTE_TRANSCRIPT_MAX_BYTES)
+      ? await deps.readRemoteFile(node.id, transcriptPath, REMOTE_TRANSCRIPT_MAX_BYTES)
       : null
   }
   try {
-    return await fs.promises.readFile(node.transcriptPath, 'utf-8')
+    return await fs.promises.readFile(transcriptPath, 'utf-8')
   } catch {
     return null
   }
