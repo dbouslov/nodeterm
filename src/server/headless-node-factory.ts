@@ -302,6 +302,19 @@ function groupsFirst(nodes: CanvasNodeState[]): CanvasNodeState[] {
   return [...groups, ...nodes.filter((node) => node.kind !== 'group')]
 }
 
+/** Whether a stored node is pinned, or sits inside a pinned frame. Only a literal `true` counts. */
+function pinnedInProject(nodes: readonly CanvasNodeState[], node: CanvasNodeState): boolean {
+  const seen = new Set<string>()
+  let cur: CanvasNodeState | undefined = node
+  while (cur && !seen.has(cur.id)) {
+    if (cur.pinned === true) return true
+    seen.add(cur.id)
+    const parentId: string | undefined = cur.parentId
+    cur = parentId ? nodes.find((candidate) => candidate.id === parentId) : undefined
+  }
+  return false
+}
+
 /** Re-fit one persisted group around its direct children without moving them in parent space. */
 function fitGroupToChildren(
   nodes: CanvasNodeState[],
@@ -311,6 +324,15 @@ function fitGroupToChildren(
   if (!group || group.kind !== 'group') return nodes
   const children = nodes.filter((node) => node.parentId === groupId)
   if (!children.length) return nodes
+  // A pinned frame (or one inside a pinned frame) never moves and never shrinks — it grows in
+  // place, right and down. The desktop's rule (`fitGroupToChildren`, renderer/state/workspace).
+  if (pinnedInProject(nodes, group)) {
+    const size = {
+      width: Math.max(group.size.width, ...children.map((c) => c.position.x + c.size.width + GROUP_PAD)),
+      height: Math.max(group.size.height, ...children.map((c) => c.position.y + c.size.height + GROUP_PAD))
+    }
+    return nodes.map((node) => (node.id === groupId ? { ...node, size } : node))
+  }
   const absoluteX = (child: CanvasNodeState): number => group.position.x + child.position.x
   const absoluteY = (child: CanvasNodeState): number => group.position.y + child.position.y
   const minX = Math.min(...children.map(absoluteX))

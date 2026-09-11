@@ -340,6 +340,9 @@ export interface CanvasNodeState {
   tags?: string[]
   /** When true the node body is hidden (header-only). */
   collapsed?: boolean
+  /** Pinned in place: automatic layout (arrange, align, Restructure, frame fitting) never moves it
+   *  or anything inside it. The file is hand-editable, so only a literal `true` is honoured. */
+  pinned?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /**

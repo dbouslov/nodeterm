@@ -79,6 +79,8 @@ export interface NodeData {
   group: string | null
   tags?: string[]
   collapsed?: boolean
+  /** Pinned in place — see `CanvasNodeState.pinned` and `isPinned`. */
+  pinned?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /** Expanded height to restore when un-collapsing (kept out of the persisted size). */
@@ -1251,7 +1253,8 @@ export function arrangeNodes(
   opts?: { layout?: ArrangeLayout; cols?: number; gap?: number; origin?: { x: number; y: number } }
 ): CanvasNode[] {
   const set = new Set(ids)
-  const members = nodes.filter((nd) => set.has(nd.id))
+  // A pinned member (or one inside a pinned frame) stays where it is; only the rest are laid out.
+  const members = nodes.filter((nd) => set.has(nd.id) && !isPinned(nd, nodes))
   // Only meaningful within one coordinate space (see commonParentId) — mixed containers → no-op.
   if (members.length === 0 || new Set(members.map((m) => m.parentId ?? null)).size > 1) return nodes
   const layout = opts?.layout ?? 'grid'
@@ -1314,8 +1317,26 @@ export function alignNodes(nodes: CanvasNode[], ids: string[], edge: AlignEdge):
         return { x: m.position.x, y: cy - nodeH(m) / 2 }
     }
   }
-  const set2 = new Set(members.map((m) => m.id))
-  return nodes.map((nd) => (set2.has(nd.id) ? { ...nd, position: move(nd) } : nd))
+  // The bbox counts a pinned member, so the rest can be aligned TO it — but it never moves.
+  const movers = new Set(members.filter((m) => !isPinned(m, nodes)).map((m) => m.id))
+  if (movers.size === 0) return nodes
+  return nodes.map((nd) => (movers.has(nd.id) ? { ...nd, position: move(nd) } : nd))
+}
+
+/**
+ * Whether automatic layout must leave `node` where it is: it is pinned, or it sits inside a pinned
+ * frame (a frame carries its children). Only a literal `true` counts. Cycle-guarded.
+ */
+export function isPinned(node: CanvasNode, all: readonly CanvasNode[]): boolean {
+  const byId = new Map(all.map((n) => [n.id, n]))
+  const seen = new Set<string>()
+  let cur: CanvasNode | undefined = node
+  while (cur && !seen.has(cur.id)) {
+    if (cur.data?.pinned === true) return true
+    seen.add(cur.id)
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined
+  }
+  return false
 }
 
 /**
@@ -1677,6 +1698,17 @@ export function fitGroupToChildren(
   if (!group || group.type !== 'group') return nodes
   const children = nodes.filter((n) => n.parentId === groupId)
   if (children.length === 0) return nodes
+  // A pinned frame (or one inside a pinned frame) never moves and never shrinks: it only grows,
+  // right and down, to take in its children where they are — a child added with `--group` fits.
+  if (isPinned(group, nodes)) {
+    const pad = grid > 0 ? Math.max(GROUP_PAD, grid) : GROUP_PAD
+    const width = Math.max(nodeW(group), ...children.map((c) => c.position.x + nodeW(c) + pad))
+    const height = Math.max(nodeH(group), ...children.map((c) => c.position.y + nodeH(c) + pad))
+    if (width === nodeW(group) && height === nodeH(group)) return nodes
+    return nodes.map((n) =>
+      n.id === groupId ? { ...n, width, height, style: { ...n.style, width, height } } : n
+    )
+  }
   // Child positions are group-relative; convert to absolute via the current frame origin.
   const absX = (c: CanvasNode) => group.position.x + c.position.x
   const absY = (c: CanvasNode) => group.position.y + c.position.y
@@ -1914,6 +1946,8 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         group: n.group,
         tags: n.tags,
         collapsed,
+        // Hand-editable input: only a literal true pins — a stray "yes" must not freeze a layout.
+        pinned: n.pinned === true ? true : undefined,
         hideFanout: n.hideFanout,
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
         // node data — so every surface that renders an icon gets a value this module vouched for
@@ -1994,6 +2028,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         group: n.data.group,
         tags: n.data.tags,
         collapsed: n.data.collapsed,
+        pinned: n.data.pinned === true ? true : undefined,
         hideFanout: n.data.hideFanout,
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out
         // untyped. Re-validating on the way OUT (not just on the way in) also means a value a

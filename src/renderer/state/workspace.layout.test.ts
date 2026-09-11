@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { arrangeNodes, alignNodes, type CanvasNode } from './workspace'
+import { arrangeNodes, alignNodes, fitGroupToChildren, isPinned, type CanvasNode } from './workspace'
 
 // Minimal node stub: only the fields the layout fns read (id, position, width/height, parentId).
 const n = (id: string, x: number, y: number, w = 100, h = 50): CanvasNode =>
@@ -77,5 +77,56 @@ describe('alignNodes', () => {
   it('unknown ids only → same array', () => {
     const nodes = pair()
     expect(alignNodes(nodes, ['ghost'], 'left')).toBe(nodes)
+  })
+})
+
+describe('pinned nodes stay put under automatic layout', () => {
+  const pin = (node: CanvasNode): CanvasNode => ({ ...node, data: { ...node.data, pinned: true } }) as CanvasNode
+  const frame = (id: string, x: number, y: number, w: number, h: number): CanvasNode =>
+    ({ ...n(id, x, y, w, h), type: 'group' }) as CanvasNode
+  const child = (id: string, x: number, y: number, parentId: string, w = 100, h = 50): CanvasNode =>
+    ({ ...n(id, x, y, w, h), parentId }) as CanvasNode
+
+  it('isPinned is inherited from an ancestor frame', () => {
+    const all = [pin(frame('g', 0, 0, 400, 300)), child('kid', 10, 10, 'g'), n('loose', 500, 0)]
+    expect(isPinned(all[0], all)).toBe(true)
+    expect(isPinned(all[1], all)).toBe(true)
+    expect(isPinned(all[2], all)).toBe(false)
+  })
+
+  it('arrangeNodes lays out the rest and leaves a pinned member where it is', () => {
+    const nodes = [n('a', 0, 0), pin(n('p', 900, 900)), n('b', 500, 0)]
+    const out = arrangeNodes(nodes, ['a', 'p', 'b'], { layout: 'row', gap: 20, origin: { x: 0, y: 0 } })
+    expect(out.find((x) => x.id === 'p')!.position).toEqual({ x: 900, y: 900 })
+    expect(out.find((x) => x.id === 'a')!.position).toEqual({ x: 0, y: 0 })
+    expect(out.find((x) => x.id === 'b')!.position).toEqual({ x: 120, y: 0 })
+  })
+
+  it('arrangeNodes over pinned members only is a no-op (same array)', () => {
+    const nodes = [pin(n('p', 5, 5)), pin(n('q', 50, 50))]
+    expect(arrangeNodes(nodes, ['p', 'q'])).toBe(nodes)
+  })
+
+  it('alignNodes aligns the rest TO a pinned member and never moves it', () => {
+    const nodes = [pin(n('p', 5, 300)), n('a', 100, 20)]
+    const out = alignNodes(nodes, ['p', 'a'], 'left')
+    expect(out.find((x) => x.id === 'p')!.position).toEqual({ x: 5, y: 300 })
+    expect(out.find((x) => x.id === 'a')!.position).toEqual({ x: 5, y: 20 })
+    // 'right': the bbox's right edge is a's (200); an unpinned p would be moved to x 100.
+    const right = alignNodes(nodes, ['p', 'a'], 'right')
+    expect(right.find((x) => x.id === 'p')!.position).toEqual({ x: 5, y: 300 })
+  })
+
+  it('fitGroupToChildren grows a pinned frame in place — never re-anchors or shrinks it', () => {
+    const grown = fitGroupToChildren([pin(frame('g', 100, 100, 200, 150)), child('kid', 300, 200, 'g')], 'g')
+    const g = grown.find((x) => x.id === 'g')!
+    expect(g.position).toEqual({ x: 100, y: 100 })
+    expect(grown.find((x) => x.id === 'kid')!.position).toEqual({ x: 300, y: 200 })
+    expect(g.width as number).toBeGreaterThanOrEqual(300 + 100)
+    expect(g.height as number).toBeGreaterThanOrEqual(200 + 50)
+    const kept = fitGroupToChildren([pin(frame('g', 100, 100, 2000, 2000)), child('kid', 30, 60, 'g')], 'g')
+    expect(kept.find((x) => x.id === 'g')!.position).toEqual({ x: 100, y: 100 })
+    expect(kept.find((x) => x.id === 'g')!.width).toBe(2000)
+    expect(kept.find((x) => x.id === 'g')!.height).toBe(2000)
   })
 })

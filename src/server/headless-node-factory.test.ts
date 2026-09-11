@@ -559,6 +559,35 @@ describe('HeadlessNodeFactory', () => {
     })
   })
 
+  it('never re-anchors a PINNED ancestor frame when it wraps that frame\'s children', async () => {
+    const workspace = await store.load({ sideline: false })
+    const nodes = workspace.projects[0].nodes
+    nodes.unshift({
+      id: 'group-pin',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      size: { width: 2400, height: 1200 },
+      title: 'Pinned',
+      color: '#7aa2f7',
+      group: null,
+      pinned: true
+    })
+    for (const node of nodes) {
+      if (node.id === 'term-upstream' || node.id === 'term-owned') node.parentId = 'group-pin'
+    }
+    await store.save(workspace)
+    ownership.record('group-pin', { sourceNodeId: 'term-source', projectId: 'project-1' })
+
+    const reply = await factory.group('term-source', { nodes: 'term-upstream,term-owned', label: 'Inner' })
+    expect(reply).toMatchObject({ ok: true })
+    const pinned = (await store.load({ sideline: false })).projects[0].nodes.find(
+      (node) => node.id === 'group-pin'
+    )!
+    expect(pinned.position).toEqual({ x: 0, y: 0 })
+    expect(pinned.size.width).toBeGreaterThanOrEqual(2400)
+    expect(pinned.size.height).toBeGreaterThanOrEqual(1200)
+  })
+
   it('lets the creator close a nested frame only, promoting surviving members to its parent', async () => {
     const outerReply = await factory.group('term-source', {
       nodes: 'term-upstream,term-owned',
