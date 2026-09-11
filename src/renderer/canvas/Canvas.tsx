@@ -447,7 +447,8 @@ import {
   reconnectRelayTab,
   type RelayTab,
 } from '../session/relay-tab'
-import { buildBackgroundLinkMaps, buildContextLinkNote, buildLinkMap, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
+import { buildContextLinkNote, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
+import { startContextLinkSync, type ContextLinkSync } from '../lib/contextLinkSync'
 import {
   launchesToFire,
   launchRetryDelay,
@@ -852,6 +853,15 @@ const minimapNodeColor = (n: Node): string =>
  *  reads as `not-resumable`. */
 const restartAgentIdOf = (n: Node | undefined): AgentId | undefined =>
   !n || n.type !== 'terminal' ? undefined : createdAgentId(n.data)
+
+/** `agentIdOf` (below) for a node already in hand, so a caller reading a snapshot of the canvas
+ *  never resolves the id against a different array. */
+const agentIdOfNode = (n: Node | undefined): AgentId | undefined =>
+  !n || n.type !== 'terminal'
+    ? undefined
+    : ((n.data.agentId as AgentId | undefined) ??
+      (((n.data.tags as string[]) ?? []).includes('claude') ? 'claude' : undefined) ??
+      useAgentStatus.getState().byId[n.id]?.agentId)
 
 /** Stable empty card list, so the closed board's memo never churns array identity. */
 const NO_KANBAN_SESSIONS: KanbanSession[] = []
@@ -1568,6 +1578,11 @@ export function Canvas() {
    *  WORKTREE_SSH_HINT). Reactive, so the menus rebuild when the user switches projects. */
   const isSshProject = !!activeSshServer
   nodesRef.current = nodes
+  // The context-link push reads the live canvas from a timer, so it takes the edges, the nodes and
+  // the project they belong to from ONE render: across a switch `nodesRef` and `nodesProjectIdRef`
+  // are re-pointed before the new edges land (see lib/contextLinkSync).
+  const liveLinkRef = useRef({ projectId: nodesProjectIdRef.current, edges: linkEdges, nodes })
+  liveLinkRef.current = { projectId: nodesProjectIdRef.current, edges: linkEdges, nodes }
   /**
    * ONE confirm dialog at a time — mirrored into a ref so the []-dep agent-control effect sees the
    * CURRENT dialogs (it closes over a stale `confirm`).
@@ -3389,15 +3404,10 @@ export function Canvas() {
   // every local session carries the hook env (pty-manager defaults agentId to 'claude'), so
   // the managed hooks report who's actually running inside even when data.agentId was never
   // set at node creation.
-  const agentIdOf = useCallback((id: string): AgentId | undefined => {
-    const n = nodesRef.current.find((x) => x.id === id)
-    if (!n || n.type !== 'terminal') return undefined
-    return (
-      (n.data.agentId as AgentId | undefined) ??
-      (((n.data.tags as string[]) ?? []).includes('claude') ? 'claude' : undefined) ??
-      useAgentStatus.getState().byId[id]?.agentId
-    )
-  }, [])
+  const agentIdOf = useCallback(
+    (id: string): AgentId | undefined => agentIdOfNode(nodesRef.current.find((x) => x.id === id)),
+    []
+  )
 
   // Endpoint descriptor for classifyLink: node kind + whether it's a context-link-capable
   // agent session (claude/codex/gemini). Null when the node doesn't exist.
@@ -3557,24 +3567,47 @@ export function Canvas() {
     })
   }, [nodes])
 
-  // Rewrite link files when a linked node's session starts/changes: main resolves
-  // codex/gemini transcripts by sessionId, so a session that appears after the edge was
-  // drawn must trigger a rewrite. agentId is part of the signature for the same reason: a
-  // plain terminal's identity arrives from hooks after the fact, and the map entry gains
-  // its agentId/sessionId only once it's known. Primitive signature, not the byId map (see
-  // loopSig).
-  const linkSessionSig = useAgentStatus((s) => {
-    let sig = ''
-    for (const e of linkEdges) {
-      const a = s.byId[e.source]
-      const b = s.byId[e.target]
-      sig += `${a?.agentId ?? ''}:${a?.sessionId ?? ''}|${b?.agentId ?? ''}:${b?.sessionId ?? ''}|`
+  // Push the context-link map to main whenever anything it is built from changes: this canvas's
+  // edges and nodes (the effect below), every other project's stored bridges and every linked
+  // agent's identity (the sync subscribes to those two stores itself). See lib/contextLinkSync —
+  // a bridge written into a project that is not on screen used to reach main only by accident.
+  const linkSyncRef = useRef<ContextLinkSync | null>(null)
+  useEffect(() => {
+    const sync = startContextLinkSync({
+      live: () => {
+        const { projectId, edges, nodes: liveNodes } = liveLinkRef.current
+        const byId = new Map(liveNodes.map((n) => [n.id, n]))
+        return {
+          projectId,
+          edges: edges.filter((e) => byId.has(e.source) && byId.has(e.target)),
+          infoOf: (id) => {
+            const n = byId.get(id)
+            const sticky = n?.type === 'sticky'
+            const agentId = sticky ? undefined : agentIdOfNode(n)
+            return {
+              id,
+              title: (n?.data.title as string) || id,
+              cwd: (n?.data.cwd as string) || '',
+              note: sticky ? ((n?.data.text as string) ?? '') : undefined,
+              sticky,
+              agentId,
+              sessionId: agentId ? useAgentStatus.getState().byId[id]?.sessionId : undefined,
+              accountId: sticky ? undefined : ((n?.data.accountId as string) || undefined)
+            }
+          }
+        }
+      },
+      send: (map) => window.nodeTerminal.contextLink.setLinks(map)
+    })
+    linkSyncRef.current = sync
+    return () => {
+      sync.stop()
+      linkSyncRef.current = null
     }
-    return sig
-  })
+  }, [])
 
-  // Prune links whose endpoints were deleted, then push the link map to main (debounced) so
-  // it can rewrite the per-node link files the context CLI reads.
+  // Prune links whose endpoints were deleted; any other change to this canvas's edges or nodes is
+  // a reason to rebuild the map.
   useEffect(() => {
     const ids = new Set(nodes.map((n) => n.id))
     const valid = linkEdges.filter((e) => ids.has(e.source) && ids.has(e.target))
@@ -3582,38 +3615,8 @@ export function Canvas() {
       setLinkEdges(valid)
       return // re-runs with the pruned set
     }
-    const infoOf = (id: string) => {
-      const n = nodes.find((nn) => nn.id === id)
-      const sticky = n?.type === 'sticky'
-      const agentId = sticky ? undefined : agentIdOf(id)
-      return {
-        id,
-        title: (n?.data.title as string) || id,
-        cwd: (n?.data.cwd as string) || '',
-        note: sticky ? ((n?.data.text as string) ?? '') : undefined,
-        sticky,
-        agentId,
-        sessionId: agentId ? useAgentStatus.getState().byId[id]?.sessionId : undefined,
-        accountId: sticky ? undefined : ((n?.data.accountId as string) || undefined)
-      }
-    }
-    // Merge in the link maps of every OTHER project (from their serialized nodes + bridges):
-    // main clears all link files before writing the pushed map, so pushing only the active
-    // project's map would sever the links of background projects whose agents keep running.
-    const { projects, activeProjectId } = useProjects.getState()
-    const map = {
-      ...buildBackgroundLinkMaps(
-        projects,
-        activeProjectId,
-        (id) => useAgentStatus.getState().byId[id]?.sessionId,
-        (id) => useAgentStatus.getState().byId[id]?.agentId
-      ),
-      ...buildLinkMap(valid, infoOf)
-    }
-    const t = setTimeout(() => void window.nodeTerminal.contextLink.setLinks(map), 150)
-    return () => clearTimeout(t)
-    // linkSessionSig is read only as an effect trigger — infoOf re-reads sessionIds via getState().
-  }, [linkEdges, nodes, setLinkEdges, agentIdOf, linkSessionSig])
+    linkSyncRef.current?.invalidate()
+  }, [linkEdges, nodes, setLinkEdges])
 
   // Reflect Claude nodes with unread output as a macOS Dock badge count (across all projects).
   // Subscribes to the derived count (a primitive), not the byId map, for the same reason as

@@ -2229,8 +2229,14 @@ else, and its context links must keep classifying across restarts).
   **authorization** = the doc is selected by the REQUESTER's node id, so a token-holding caller
   can only read nodes in its own (directional) link map. Codex/gemini paths resolve via the
   handoff locators (`locateCodex`/`locateGemini` by sessionId); claude keeps the hook-fed path +
-  `locateClaude(sessionId, accountId)` fallback (cwd-newest is claude-only); Canvas rewrites link
-  files when a linked node's sessionId appears (`linkSessionSig`). **SSH projects:** the shim +
+  `locateClaude(sessionId, accountId)` fallback (cwd-newest is claude-only). **One owner pushes the
+  map**, `renderer/lib/contextLinkSync.ts` (mounted by Canvas): it re-pushes when the mounted
+  canvas's edges/nodes, ANY project's stored `bridges`, or a linked agent's identity change —
+  coalesced (a later change never resets its timer) and sent only when the content changed, with
+  main resolving a still-missing transcript at READ time. It used to be a Canvas effect keyed on
+  the visible canvas alone, so a bridge a cold open wrote into a background project
+  (`appendCanvasLinks`) was unreadable from both ends until some unrelated canvas edit
+  (2026-09-11). **SSH projects:** the shim +
   skill are installed on the remote host at connect (`RemoteHooks.installContextLink`, gated on
   the VERIFIED reverse hook tunnel; POSTs ride `--unix-socket` through it); a remote node's
   transcript is read over the ControlMaster (`initContextLink(ptyManager, deps)` — `src/main`
