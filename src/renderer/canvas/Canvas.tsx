@@ -264,15 +264,12 @@ import {
 } from '../lib/controlRouting'
 import {
   coldGroupCwd,
-  coldGroupChildCount,
   coldOpenMessage,
   coldPlaceBelow,
   offCanvasNoticeText,
   offCanvasReplyClause,
   coldResolveAfter,
   coldResolveGroup,
-  groupSizeFor,
-  groupSlot,
   storedAgentIdOf,
   type ColdNode
 } from '../lib/coldOpen'
@@ -459,6 +456,8 @@ import {
 import { WAIT_LABEL, dropAfterDep, edgeHidden, hiddenEdgeNodeIds, missingDepRopes, ropeInfoOf, ropeVisual } from '../lib/edgeModel'
 import { triggerEdges } from '../lib/triggerCard'
 import {
+  GROUP_PAD_X,
+  PLACEMENT_GAP,
   centerOf,
   placeByHand,
   placeChild,
@@ -9476,7 +9475,9 @@ export function Canvas() {
             const w = (node.width as number) ?? 640
             const h = (node.height as number) ?? 440
             if (i === 0) tgBase = nextFreePosition(tgPlacedNodes, { width: w, height: h })
-            node.position = { x: tgBase.x + i * (w + 60) - w / 2, y: tgBase.y - h / 2 }
+            // One row below the lowest node: clear of everything by construction, since every
+            // other node ends above the row's top edge (`nextFreePosition` → the engine's `placeLoose`).
+            node.position = { x: tgBase.x + i * (w + PLACEMENT_GAP) - w / 2, y: tgBase.y - h / 2 }
             tgMade.push(node)
           }
           const tgIds = tgMade.map((n) => n.id)
@@ -9781,16 +9782,36 @@ export function Canvas() {
                   useSettings.getState().settings.claudeAccounts
                 )
             const coldMode = coldTerminal ? undefined : projectPermissionMode(owner, coldAgentId)
-            const coldExistingInGroup = coldGroup.groupId
-              ? coldGroupChildCount(coldNodes, coldGroup.groupId)
-              : 0
+            // The engine's rules over the STORED nodes: siblings this call places are reserved (the
+            // store is written after the loop), an `--after` dependent goes right of its deps, and a
+            // `--group` child takes the first slot no current child occupies (frame-relative).
+            const coldSize = newNodeSize()
+            const coldReserved: Box[] = []
+            const coldDeps = coldAfterIds.flatMap((id) => {
+              const dep = coldNodes.find((n) => n.id === id)
+              return dep ? [dep] : []
+            })
+            const coldKids: Box[] = coldGroup.groupId
+              ? coldNodes
+                  .filter((n) => n.parentId === coldGroup.groupId)
+                  .map((n) => ({
+                    x: n.position.x,
+                    y: n.position.y,
+                    w: n.size?.width ?? 600,
+                    h: n.size?.height ?? 400
+                  }))
+              : []
             const coldMade: CanvasNode[] = []
             for (let i = 0; i < coldCount; i++) {
               const built = coldTerminal
                 ? createTerminalNode(
                     coldNodes.length + i,
                     coldCwd,
-                    coldPlaceBelow(coldNodes, coldSrcNode, i),
+                    coldPlaceBelow(coldNodes, coldSrcNode, i, {
+                      reserved: coldReserved,
+                      size: coldSize,
+                      deps: coldDeps
+                    }),
                     args.cmd,
                     coldSsh
                   )
@@ -9798,7 +9819,11 @@ export function Canvas() {
                     coldAgentId,
                     coldNodes.length + i,
                     coldCwd,
-                    coldPlaceBelow(coldNodes, coldSrcNode, i),
+                    coldPlaceBelow(coldNodes, coldSrcNode, i, {
+                      reserved: coldReserved,
+                      size: coldSize,
+                      deps: coldDeps
+                    }),
                     args.prompt,
                     coldSsh,
                     coldAccount,
@@ -9819,23 +9844,28 @@ export function Canvas() {
                       data: { ...armed.data, pendingLaunch: { ...held, after: coldAfterIds } }
                     }
                   : armed
+              const coldNodeSize = { w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }
               if (coldGroup.groupId) {
-                const w = (node.width as number) ?? 600
-                const h = (node.height as number) ?? 400
-                node.position = groupSlot(coldExistingInGroup + i, w, h)
+                const slot = placeInFrame(coldKids, coldNodeSize)
+                coldKids.push({ ...slot, ...coldNodeSize })
+                node.position = slot
                 node.parentId = coldGroup.groupId
                 node.extent = 'parent'
+              } else {
+                coldReserved.push({ ...node.position, ...coldNodeSize })
               }
               coldMade.push(node)
             }
-            // Grow the frame BEFORE the children land, exactly as `addGrouped` does — `extent:
-            // 'parent'` clamps a child that falls outside it.
+            // Grow the frame to hold every child BEFORE the children land — `extent: 'parent'`
+            // clamps a child that falls outside it. Sized from the slots actually taken (plus the
+            // frame's padding), not from a child count that assumed every child sat in its slot.
             if (coldGroup.groupId) {
               const frame = owner.nodes.find((n) => n.id === coldGroup.groupId)
-              if (frame) {
-                const w = (coldMade[0]?.width as number) ?? 600
-                const h = (coldMade[0]?.height as number) ?? 400
-                const need = groupSizeFor(coldExistingInGroup + coldCount, w, h)
+              if (frame && coldKids.length) {
+                const need = {
+                  width: Math.max(...coldKids.map((k) => k.x + k.w)) + GROUP_PAD_X,
+                  height: Math.max(...coldKids.map((k) => k.y + k.h)) + GROUP_PAD_X
+                }
                 coldStore.applyNodeMutation(owner.id, {
                   op: 'upsert',
                   node: {
@@ -10124,11 +10154,10 @@ export function Canvas() {
       // nodes, so counting it would colour by a number that has nothing to do with where the node
       // lands. One name for the two sources, so no verb body has to ask which it is on.
       const nodeCount = () => (offCanvas ? offCanvas.project.nodes.length : nodesRef.current.length)
-      // Grid slots INSIDE a group frame (open-agent --group): 2 columns of terminal-sized
-      // cells under the header. Pure geometry — the frame is grown to fit before children land.
-      // `groupSlot`/`groupSizeFor` live in lib/coldOpen so the COLD path (an open answered out of a
-      // non-active project's serialized nodes) lands children on the identical grid; two copies of
-      // this arithmetic would be two layouts.
+      // Grid slots INSIDE a group frame (open-agent --group): 2 columns of terminal-sized cells
+      // under the header, first free slot first (`placeInFrame`). The geometry lives in
+      // @shared/placement so the COLD path (an open answered out of a non-active project's
+      // serialized nodes) lands children on the identical grid; two copies would be two layouts.
       // Validate `--group` (open-terminal / open-claude / open-agent): must name an existing
       // group frame. Returns its id, or null with the error already replied.
       const resolveIntoGroup = (): string | null | undefined => {

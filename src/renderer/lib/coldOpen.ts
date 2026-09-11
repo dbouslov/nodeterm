@@ -20,7 +20,7 @@
 // the React component is not testable and these are.
 
 import { rootPositionIn, type PlacedNode } from './projectOpen'
-import { centerOf, placeChild, type Box } from '@shared/placement'
+import { centerOf, placeOpened, type Box, type Size } from '@shared/placement'
 
 /** A serialized node, as the projects store keeps them for non-active projects. Structural subset
  *  of `CanvasNodeState` — deliberately not the type itself, so tests can build one in a line. */
@@ -155,30 +155,27 @@ export function coldBox(nodes: readonly ColdNode[], n: ColdNode): Box {
 
 /**
  * Where the i-th opened node lands when the source IS in this project: the shared engine's
- * opener→child rule (below the source, fanned right, never overlapping) over the stored nodes plus
- * `reserved` — the siblings this same call already placed, which are not in `nodes` because the
- * store has not been written yet. Resolved to ROOT space so a source inside a frame still places
- * correctly. Returns a CENTER point — the factories' `center` parameter.
+ * `placeOpened` — the live canvas's rule — over the stored nodes. Below the source, fanned right,
+ * or RIGHT of its `--after` deps (`deps`; waiting on the opener itself stays below it). `reserved`
+ * holds the siblings this same call already placed, which are not in `nodes` because the store has
+ * not been written yet. Resolved to ROOT space so a source inside a frame still places correctly.
+ * Returns a CENTER point — the factories' `center` parameter.
  */
 export function coldPlaceBelow(
   nodes: readonly ColdNode[],
   source: ColdNode,
   i: number,
-  reserved: readonly Box[] = [],
-  size: { w: number; h: number } = { w: 600, h: 400 }
+  opts: { reserved?: readonly Box[]; size?: Size; deps?: readonly ColdNode[] } = {}
 ): { x: number; y: number } {
-  const existing = [...nodes.map((n) => coldBox(nodes, n)), ...reserved]
-  return centerOf(placeChild(existing, coldBox(nodes, source), size, i), size)
+  const size = opts.size ?? { w: 600, h: 400 }
+  const existing = [...nodes.map((n) => coldBox(nodes, n)), ...(opts.reserved ?? [])]
+  const deps = (opts.deps ?? []).filter((d) => d.id !== source.id).map((d) => coldBox(nodes, d))
+  return centerOf(placeOpened(existing, coldBox(nodes, source), deps, size, i), size)
 }
 
 // Grid geometry for nodes opened INTO a group frame lives in the shared placement engine, so the
 // cold and live paths cannot drift into two layouts. Re-exported to keep this import path.
 export { GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP, groupSlot, groupSizeFor } from '@shared/placement'
-
-/** How many direct children a stored frame already holds — the `existing` offset for `groupSlot`. */
-export function coldGroupChildCount(nodes: readonly ColdNode[], groupId: string): number {
-  return nodes.filter((n) => n.parentId === groupId).length
-}
 
 /**
  * The reply sentence for a session that was opened into a project the user is not looking at.

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import {
-  coldGroupChildCount,
   coldGroupCwd,
   coldOpenMessage,
   coldPlaceBelow,
@@ -180,6 +179,22 @@ describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometr
     const src = N('src', { position: { x: 0, y: 0 } })
     expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 300, y: 680 })
   })
+
+  it('does not stack two siblings when the first is passed back as reserved', () => {
+    const src = N('src', { position: { x: 0, y: 0 }, size: { width: 600, height: 400 } })
+    const a = coldPlaceBelow([src], src, 0)
+    const b = coldPlaceBelow([src], src, 0, { reserved: [{ x: a.x - 300, y: a.y - 200, w: 600, h: 400 }] })
+    expect(b).not.toEqual(a)
+    expect(b.x).toBeGreaterThan(a.x)
+  })
+
+  it('an --after dependent goes RIGHT of its dep, the live rule (waiting on the opener stays below)', () => {
+    const src = N('src', { position: { x: 0, y: 0 }, size: { width: 600, height: 400 } })
+    const dep = N('dep', { position: { x: 0, y: 1000 }, size: { width: 600, height: 400 } })
+    // top-left (600 + PLACEMENT_GAP 40, 1000), a 600×400 node → center (+300, +200)
+    expect(coldPlaceBelow([src, dep], src, 0, { deps: [dep] })).toEqual({ x: 940, y: 1200 })
+    expect(coldPlaceBelow([src, dep], src, 0, { deps: [src] })).toEqual(coldPlaceBelow([src, dep], src, 0))
+  })
 })
 
 describe('group grid geometry (shared with the live addGrouped path)', () => {
@@ -192,19 +207,7 @@ describe('group grid geometry (shared with the live addGrouped path)', () => {
   it('sizes the frame to hold N children', () => {
     expect(groupSizeFor(1, 600, 400)).toEqual({ width: 648, height: 480 })
     expect(groupSizeFor(3, 600, 400)).toEqual({ width: 1272, height: 904 })
-  })
-
-  it('counts only DIRECT children of the frame', () => {
-    const nodes = [
-      N('g'),
-      N('a', { parentId: 'g' }),
-      N('b', { parentId: 'g' }),
-      N('c', { parentId: 'other' }),
-      N('d')
-    ]
-    expect(coldGroupChildCount(nodes, 'g')).toBe(2)
-  })
-})
+  })})
 
 describe('coldOpenMessage — ONE sentence for both cold-open sites', () => {
   it('names the count, the agent, the project and the ids, and says when it starts', () => {
