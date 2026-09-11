@@ -1668,3 +1668,28 @@ Claude-Session: https://claude.ai/code/session_01Mv17s3ACpA4JGc7b24orua"
 - **Spec coverage**: §3 engine → Task 1; §3.3 rules (reserve, root space, ephemeral, frame growth) → Tasks 4–7; §4 rope kind → Task 3; §5 restructure (rows centered + §5.4b radial) → Task 8, wiring/renames/verb + `--layout` → Task 9; §6 consumer table → Tasks 4 (hand, besideNode, emptyNodePos, stagger), 5 (placeBelow, addGrouped, spawn-team), 6 (cold, `--project`), 7 (headless); §7/§8 docs → Task 10; §9 tests → each task's Step 1 plus the source pin in Task 5 and the headless "below" case in Task 7 (the three-consumer parity is enforced by construction: all three call the same function, and the Task 5 pin + Task 7 test lock the two that used to differ).
 - **Names used consistently**: `placeByHand/placeChild/placeDependent/placeLoose/placeInFrame/centerOf/Box` (Task 1) are the only placement names used later; `ropeLink`/`ropeEdge(…, kind)` (Task 3) are what Task 9 reads; `liveBoxes`/`newNodeSize` (Task 4) are what Task 5 reads; `coldPlaceBelow(nodes, source, i, reserved, size)` (Task 2) is what Task 6 calls; `restructureNodes`/`rankUnits` (Task 8) are what Task 9 calls.
 - **Placeholders**: Task 7 Step 1 asks the implementer to copy fixture setup lines from the neighbouring test in the same file (named by line); the assertions are spelled out. Nothing else defers content.
+
+---
+
+### Task 11: Pin (added 2026-09-11 at the orchestrator's request, after Tasks 1–10 landed)
+
+**Goal:** a node or frame can be pinned — "Pin" / "Unpin" in the node menu and the frame menu, and the agent verb `pin --node <id> --set on|off` — persisted in `project.json`. A pinned item and everything inside it never moves under `arrange`, `align`, Restructure (the old Tidy) or agent placement; Restructure treats a pinned unit as a fixed obstacle and lays everything else out around it.
+
+**Files:**
+- Modify: `src/shared/types.ts` (`CanvasNodeState.pinned?`), `src/renderer/state/workspace.ts` (`NodeData.pinned?`, the `nodeStatesToFlow` / `flowToNodeStates` mapping, new `isPinned`, `arrangeNodes` / `alignNodes` / `fitGroupToChildren`)
+- Modify: `src/renderer/lib/restructure.ts`; `src/server/headless-node-factory.ts` (its own `fitGroupToChildren` copy)
+- Modify: `src/core/canvas-control-core.ts` (verb + both agent-facing bodies), `src/renderer/canvas/Canvas.tsx` (dispatch case, `selectionItems` + `groupItems` rows), `src/renderer/lib/ui-visibility.ts` (hideable `pin` row)
+- Modify: `CLAUDE.md`, `CONTRIBUTING.md`
+- Tests: `src/renderer/state/workspace.test.ts`, `src/renderer/state/workspace.layout.test.ts`, `src/renderer/lib/restructure.test.ts`, `src/server/headless-node-factory.test.ts`, `src/main/canvas-control-core.test.ts`, `src/renderer/lib/ui-visibility.test.ts`, `src/server/control-unsupported.test.ts`
+
+**Rules:**
+- Stored as `pinned: true` on the node. `project.json` is hand-editable, so only a literal `true` survives the load seam (`nodeStatesToFlow`); an unpinned node writes nothing.
+- Pinned is inherited: `isPinned(node, all)` is true when the node or any ancestor frame is pinned (a frame carries its children). For Restructure, a pinned child fixes the top-level frame it rides in, because moving that frame would move the child.
+- `arrangeNodes` / `alignNodes` leave pinned members where they are and lay out the rest; the `arrange` / `align` verb reply counts the pinned ones it left.
+- `fitGroupToChildren` never re-anchors or shrinks a pinned frame — it grows in place (right / down), so a child added with `--group` still fits. The same rule in the server's copy.
+- Restructure: a FIXED unit keeps its position and still counts for ranking; every other unit is laid out as before and then moved off anything it would overlap (a directed scan from its ideal slot, `freeSpotDirected`). With no pins that pass changes nothing. All units fixed ⇒ the input array comes back unchanged (no phantom undo / write).
+- Not blocked: dragging by hand (a pin means "automatic layout leaves it alone"). Kanban: N/A (the board has no positions). Server Edition: the browser canvas gets the menu rows and the live verb; the HEADLESS `pin` is refused like `restructure` (follow-up).
+
+- [ ] **Step 1: failing tests** — the mapping round-trips `pinned` and drops a non-`true` value; `isPinned` inherits from an ancestor frame; `arrangeNodes` / `alignNodes` skip a pinned member; `fitGroupToChildren` grows a pinned frame in place; Restructure keeps a pinned node, a pinned frame (children untouched) and the frame of a pinned child fixed, with nothing overlapping them, and returns the input when every unit is fixed; the headless `group` leaves a pinned ancestor frame in place; `pin` parses (`--node` required, `--set on|off`) and both bodies describe it; the hideable inventory lists `pin`; the Server Edition refuses `pin`. Run each, see it fail.
+- [ ] **Step 2: implement** in that order (persistence → layout helpers → restructure → verb, menus); each file's tests green; `npm run typecheck` clean; commit per unit.
+- [ ] **Step 3: docs + full run** — CLAUDE.md (Canvas section, next to Restructure) and the CONTRIBUTING placement rule; `npm run typecheck && npm test`, no failing file beyond the baseline.
