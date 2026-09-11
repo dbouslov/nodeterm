@@ -124,6 +124,15 @@ describe('restructureNodes', () => {
         }
   })
 
+  it('radial is idempotent with several roots — the rings hang off the roots, not off the topmost unit', () => {
+    // Two roots put rank 1 on the FULL circle, so one child sits ABOVE the roots. Taking the ring's
+    // top from every unit would read that child as the new top and lift the tree one radius per run.
+    const nodes = [n('a', 0, 0), n('b', 300, 0), n('a1', 0, 300), n('b1', 300, 300)]
+    const ropes = [rope('a', 'a1'), rope('b', 'b1')]
+    const once = restructureNodes(nodes, ropes, 'radial')
+    expect(restructureNodes(once, ropes, 'radial')).toEqual(once)
+  })
+
   it('frames are rigid: the frame moves as one block, its children keep their relative positions', () => {
     const nodes = [n('o', 0, 0), n('g', 300, 900, 400, 200, undefined, 'group'), n('m', 37, 41, 100, 50, 'g')]
     const out = restructureNodes(nodes, [rope('o', 'm')])

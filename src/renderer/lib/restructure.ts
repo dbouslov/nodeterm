@@ -215,8 +215,11 @@ export function restructureNodes(
     // neighbours on a ring sit a disc + PLACEMENT_GAP apart, so no two units can overlap.
     const root = rows[0]
     const rootMovers = root.filter(moves)
-    next = packRow(next, rootMovers, { x: cx - rowWidth(rootMovers, byId) / 2, y: top }, byId)
-    const c = { x: cx, y: top + tallest(root, byId) / 2 }
+    // The rings' top is the RANK-0 row's, not every unit's: with several roots a ring child sits
+    // above them, and reading it as the top would lift the whole tree by one radius per run.
+    const rootTop = Math.min(...root.map((id) => at(id).y))
+    next = packRow(next, rootMovers, { x: cx - rowWidth(rootMovers, byId) / 2, y: rootTop }, byId)
+    const c = { x: cx, y: rootTop + tallest(root, byId) / 2 }
     const arc = root.length > 1 ? 2 * Math.PI : Math.PI
     let inner = Math.hypot(rowWidth(root, byId), tallest(root, byId)) / 2
     let R = 0
