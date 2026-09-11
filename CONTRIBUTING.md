@@ -111,9 +111,12 @@ lane unaffected.
   creates a node (hand, dock, agent verb, cold open, headless server) goes through the one engine
   in `src/shared/placement/` — the eight independent rules it replaced are how nodes came to spawn
   on top of each other. When one call opens several nodes, reserve what you place (append its box
-  to `existing`) before placing the next. Moving EXISTING nodes is `lib/restructure.ts`'s job and
-  happens only on the explicit Restructure action — and anything that moves existing nodes
-  automatically must skip pinned ones (`isPinned`, `renderer/state/workspace.ts`): the user pinned
+  to `existing`) before placing the next. A node opened FROM a node inside a frame is filed into
+  that frame, which grows to hold it; the live, cold and headless paths must agree on where it
+  lands, and `test/acceptance/placement-parity.test.ts` fails when they do not. Moving EXISTING
+  nodes is `lib/restructure.ts`'s job and happens only on the explicit Restructure action — and
+  anything that moves existing nodes automatically must skip pinned ones (`isPinned`,
+  `renderer/state/workspace.ts`): the user pinned
   them so layout would leave them alone. Deep version: CLAUDE.md § Canvas interaction & panels.
 
 - **Every loosening of a security gate must be a SETTING the user can see and revoke.** A "don't

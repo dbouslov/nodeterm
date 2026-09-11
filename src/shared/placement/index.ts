@@ -106,7 +106,8 @@ export function placeOpened(
 /**
  * The frames node `id` sits inside, innermost first. What an agent opens FROM a framed node is
  * filed into the innermost one, which grows to take it — so none of them is an obstacle for it;
- * their other children are. Cycle-guarded.
+ * their other children are. The one framed-source rule the live dispatch, the cold open and the
+ * headless factory share (test/acceptance/placement-parity.test.ts). Cycle-guarded.
  */
 export function ancestorFrameIds(
   nodes: readonly { id: string; parentId?: string }[],

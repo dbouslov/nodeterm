@@ -945,6 +945,47 @@ describe('HeadlessNodeFactory', () => {
     expect(d.position.x).toBeGreaterThanOrEqual(80 + 640 + 40)
   })
 
+  /** Puts term-source inside a frame that hugs it (pad 28, header 34), so the slot below the
+   *  source is past the frame's bottom edge. The source's ROOT position becomes (28, 1062). */
+  const frameTheSource = async (): Promise<void> => {
+    const workspace = await store.load({ sideline: false })
+    const nodes = workspace.projects[0].nodes
+    nodes.unshift({
+      id: 'frame-1',
+      kind: 'group',
+      position: { x: 0, y: 1000 },
+      size: { width: 696, height: 530 },
+      title: 'Frame',
+      color: '#7aa2f7',
+      group: null
+    })
+    const source = nodes.find((node) => node.id === 'term-source')!
+    source.parentId = 'frame-1'
+    source.position = { x: 28, y: 62 }
+    await store.save(workspace)
+  }
+
+  it('files a framed source’s child INTO its frame, below the source, and grows the frame (the desktop rule)', async () => {
+    await frameTheSource()
+    const reply = await factory.openTerminal('term-source', {}, true)
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const child = saved.find((node) => node.id === id)!
+    const frame = saved.find((node) => node.id === 'frame-1')!
+    expect(child.parentId).toBe('frame-1')
+    // ROOT space: straight below the source (1062 + 440 + ROW_GAP 80); its own frame is no obstacle.
+    expect({ x: frame.position.x + child.position.x, y: frame.position.y + child.position.y }).toEqual({
+      x: 28,
+      y: 1062 + 440 + 80
+    })
+    // The frame holds it: a browser client applies extent:'parent' exactly as the desktop does.
+    expect(child.position.x + child.size.width).toBeLessThanOrEqual(frame.size.width)
+    expect(child.position.y + child.size.height).toBeLessThanOrEqual(frame.size.height)
+    // And the grown frame reaches Server clients, not only the disk.
+    expect(published.find((node) => node.id === 'frame-1')?.size).toEqual(frame.size)
+  })
+
   it.each([
     ['claude', "claude 'do work'"],
     ['codex', "codex 'do work' --ask-for-approval untrusted"],
@@ -1174,6 +1215,26 @@ describe('HeadlessNodeFactory', () => {
       'Round 1 complete\nRound 2 ready'
     )
     expect(published.filter((node) => node.id === id)).toHaveLength(2)
+  })
+
+  it('files a note created from a framed source into that frame, which grows (the desktop rule)', async () => {
+    await frameTheSource()
+    const reply = await factory.sticky('term-source', { node: 'Plan', create: 'yes', text: 'hello' })
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const note = saved.find((node) => node.id === id)!
+    const frame = saved.find((node) => node.id === 'frame-1')!
+    expect(note.parentId).toBe('frame-1')
+    // The text survives the fit, which replaces the node object it was written on.
+    expect(note.text).toBe('hello')
+    expect({ x: frame.position.x + note.position.x, y: frame.position.y + note.position.y }).toEqual({
+      x: 28,
+      y: 1062 + 440 + 80
+    })
+    expect(note.position.x + note.size.width).toBeLessThanOrEqual(frame.size.width)
+    expect(note.position.y + note.size.height).toBeLessThanOrEqual(frame.size.height)
+    expect(published.find((node) => node.id === 'frame-1')?.size).toEqual(frame.size)
   })
 
   it('refuses a non-v1 agent before a node or PTY is created', async () => {

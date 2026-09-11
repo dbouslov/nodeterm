@@ -3143,12 +3143,16 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   `placeOpened` — BELOW the opener, fanned right (`placeChild`), or RIGHT of its `--after` deps
   (`placeDependent`; dependency outranks lineage, and waiting on the opener itself stays below
   it) — with a DIRECTED scan (right, then down; never above/left of the anchor). The live
-  dispatch, `coldPlaceBelow` and the headless `placeNode` all call `placeOpened`, so the three
-  cannot drift back into three layouts. Into a frame: the first grid slot no CURRENT child
+  dispatch (`renderer/lib/livePlacement.ts`), `coldPlaceBelow` and the headless `placeNode` all
+  call `placeOpened` over the same obstacle set, and `test/acceptance/placement-parity.test.ts`
+  fails the day they disagree (they did once: cold and headless kept the source's own frame as
+  an obstacle). Into a frame: the first grid slot no CURRENT child
   occupies (`placeInFrame`; the old `groupSlot(count)` collided whenever a child had been moved),
   then the frame hugs its children. Callers RESERVE each box they place before placing the next
   (`setNodes` is async). Boxes are root space; ephemeral cards are not obstacles; the frames a
-  node is spawned FROM are not obstacles for it (`ancestorFrameIds` — it is filed into them).
+  node is spawned FROM are not obstacles for it (`ancestorFrameIds`): it is filed into the
+  innermost one and the frame chain grows in the same write — live `withOpenedNode`, cold
+  `coldFileIntoSourceFrame`, headless open-* and `sticky --create`.
   `PLACEMENT_GAP` (40) = `arrangeNodes`'s gap on purpose. The engine never moves an existing
   node — only Restructure does, on an explicit action. `staggeredPosition` (360×320 steps keyed
   on node COUNT for 600×400 nodes) is gone. Ropes carry `kind: 'opener' | 'dep'` (`BridgeLink`;

@@ -11,7 +11,7 @@ import {
   type NodeColor
 } from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
-import { placeOpened, type Box } from '../shared/placement'
+import { ancestorFrameIds, placeOpened, type Box } from '../shared/placement'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
   AGENT_CONFIG,
@@ -224,14 +224,19 @@ function nodeBox(project: Project, node: CanvasNodeState): Box {
  * else BELOW the source as sibling `reserved.length`. This factory used to scan a 3-row column to
  * the RIGHT of the source, so one verb laid out two ways depending on the edition.
  */
-function placeNode(
+export function placeNode(
   project: Project,
   source: CanvasNodeState,
   size: { width: number; height: number },
   reserved: readonly CanvasNodeState[] = [],
   deps: readonly CanvasNodeState[] = []
 ): { x: number; y: number } {
-  const existing = [...project.nodes, ...reserved].map((node) => nodeBox(project, node))
+  // The source's own frames are not obstacles: what it opens is filed into the innermost one,
+  // which grows to hold it (the desktop's rule).
+  const frames = ancestorFrameIds(project.nodes, source.id)
+  const existing = [...project.nodes.filter((node) => !frames.has(node.id)), ...reserved].map((node) =>
+    nodeBox(project, node)
+  )
   return placeOpened(
     existing,
     nodeBox(project, source),
@@ -1118,6 +1123,14 @@ export class HeadlessNodeFactory {
 
       const count = parseCount(args.count, verb === 'open-terminal' ? TERMINAL_LIMIT : AGENT_LIMIT)
       const created: CanvasNodeState[] = []
+      // A source inside a frame keeps what it opens inside that frame (the desktop's rule): each
+      // node is placed below the source in ROOT space, filed into the frame, and the frame chain is
+      // re-fitted once every node of this call is in. Only in the source's own project — a
+      // `--project` target does not hold that frame.
+      const srcFrame =
+        target === source.project
+          ? target.nodes.find((node) => node.id === source.node.parentId && node.kind === 'group')
+          : undefined
       // `--after` deps that are stored nodes: the node goes RIGHT of them (the desktop's rule).
       // Waiting on the opener itself is still lineage, so that one stays below the opener.
       const afterNodes = after
@@ -1188,10 +1201,13 @@ export class HeadlessNodeFactory {
               ...(awaitWorking.length ? { awaitWorking: [...awaitWorking] } : {})
             }
           : undefined
+        const at = placeNode(target, source.node, nodeSize, created, afterNodes)
+        const origin = srcFrame ? absolutePosition(target, srcFrame) : { x: 0, y: 0 }
         const node: CanvasNodeState = {
           id,
           kind: 'terminal',
-          position: placeNode(target, source.node, nodeSize, created, afterNodes),
+          position: { x: at.x - origin.x, y: at.y - origin.y },
+          ...(srcFrame ? { parentId: srcFrame.id } : {}),
           size: { ...nodeSize },
           title,
           ...(verb === 'open-agent' ? { titleAuto: true } : {}),
@@ -1226,14 +1242,19 @@ export class HeadlessNodeFactory {
         }
       }
 
+      // Grow the source's frame chain around what landed in it — once, after every node of this
+      // call is in, so no sibling was converted against a frame origin a fit then moved. A fit
+      // rewrites the frame (and re-anchors its children), so everything it changed is published.
+      const prior = new Set(target.nodes)
       target.nodes.push(...created)
+      if (srcFrame) target.nodes = fitAncestorChain(target.nodes, srcFrame.id)
       target.ropes = ropes
       target.bridges = bridges
       await this.deps.workspaceStore.save(workspace)
       for (const node of created) {
         this.ownership.record(node.id, { sourceNodeId, projectId: target.id })
       }
-      this.publish(target, created)
+      this.publish(target, target.nodes.filter((node) => !prior.has(node)))
 
       const failed: string[] = []
       for (const node of created) {
@@ -1296,10 +1317,17 @@ export class HeadlessNodeFactory {
       if ('id' in resolved) node = source.project.nodes.find((candidate) => candidate.id === resolved.id)
       else if (parsed.create) {
         created = true
+        // Into the source's frame, like an opened node (the desktop files a note the same way).
+        const frame = source.project.nodes.find(
+          (candidate) => candidate.id === source.node.parentId && candidate.kind === 'group'
+        )
+        const at = placeNode(source.project, source.node, STICKY_SIZE)
+        const origin = frame ? absolutePosition(source.project, frame) : { x: 0, y: 0 }
         node = {
           id: nextId('sticky'),
           kind: 'sticky',
-          position: placeNode(source.project, source.node, STICKY_SIZE),
+          position: { x: at.x - origin.x, y: at.y - origin.y },
+          ...(frame ? { parentId: frame.id } : {}),
           size: { ...STICKY_SIZE },
           title: oneLine(parsed.ref) || 'Note',
           color: '#ffd60a',
@@ -1326,11 +1354,22 @@ export class HeadlessNodeFactory {
       node.text = write.text
       node.textUpdatedAt = (this.deps.now ?? Date.now)()
       node.textUpdatedBy = source.node.title || source.node.id
+      // A new note filed into its source's frame grows that frame chain. Fitted only now, after the
+      // text is on the node: a fit replaces the node objects it touches, so everything it changed
+      // (the frame, its re-anchored children) is published along with the note.
+      const prior = new Set(source.project.nodes)
+      const noteId = node.id
+      if (created && node.parentId) {
+        source.project.nodes = fitAncestorChain(source.project.nodes, node.parentId)
+      }
+      const changed = source.project.nodes.filter(
+        (candidate) => !prior.has(candidate) || candidate.id === noteId
+      )
       await this.deps.workspaceStore.save(workspace)
       if (created) {
         this.ownership.record(node.id, { sourceNodeId, projectId: source.project.id })
       }
-      this.publish(source.project, [node])
+      this.publish(source.project, changed)
       return {
         ok: true,
         message: `${created ? 'created' : 'updated'} sticky ${node.id} (${write.mode})`,

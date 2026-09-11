@@ -264,6 +264,7 @@ import {
   type BrowserResolveProject
 } from '../lib/controlRouting'
 import {
+  coldFileIntoSourceFrame,
   coldGroupCwd,
   coldOpenMessage,
   coldPlaceBelow,
@@ -9898,6 +9899,36 @@ export function Canvas() {
                     }
                   }
                 })
+              }
+            }
+            // A source inside a frame keeps what it opens inside that frame, as on the live canvas:
+            // each node filed in where `coldPlaceBelow` put it, the frame chain grown to hold it,
+            // frames written first. (A `--group` child already went into the frame it named.)
+            if (!coldGroup.groupId) {
+              const filed = coldFileIntoSourceFrame(
+                coldNodes,
+                coldSrcNode,
+                coldMade.map((n) => ({
+                  ...n.position,
+                  w: (n.width as number) ?? 600,
+                  h: (n.height as number) ?? 400
+                }))
+              )
+              if (filed.frameId) {
+                coldMade.forEach((node, i) => {
+                  node.position = filed.positions[i]
+                  node.parentId = filed.frameId
+                  node.extent = 'parent'
+                })
+              }
+              for (const grown of filed.frames) {
+                const frame = owner.nodes.find((n) => n.id === grown.id)
+                if (frame) {
+                  coldStore.applyNodeMutation(owner.id, {
+                    op: 'upsert',
+                    node: { ...frame, size: grown.size }
+                  })
+                }
               }
             }
             for (const node of coldMade) {

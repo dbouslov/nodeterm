@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  coldFileIntoSourceFrame,
   coldGroupCwd,
   coldOpenMessage,
   coldPlaceBelow,
@@ -192,6 +193,44 @@ describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometr
     // top-left (600 + PLACEMENT_GAP 40, 1000), a 600×400 node → center (+300, +200)
     expect(coldPlaceBelow([src, dep], src, 0, { deps: [dep] })).toEqual({ x: 940, y: 1200 })
     expect(coldPlaceBelow([src, dep], src, 0, { deps: [src] })).toEqual(coldPlaceBelow([src, dep], src, 0))
+  })
+})
+
+describe('coldFileIntoSourceFrame — a framed source keeps what it opens inside its frame', () => {
+  // A frame hugging its source; the node placed below the source (ROOT space, 1056 + 400 + ROW_GAP
+  // 80) is past the frame's bottom edge, where extent:'parent' would clamp it onto the source.
+  const g = N('g', { kind: 'group', position: { x: 1000, y: 1000 }, size: { width: 648, height: 510 } })
+  const src = N('src', { parentId: 'g', position: { x: 24, y: 56 }, size: { width: 600, height: 400 } })
+  const placed = { x: 1024, y: 1536, w: 600, h: 400 }
+
+  it('files each placed node into the frame, frame-relative, and grows the frame right and down to hold it', () => {
+    const r = coldFileIntoSourceFrame([g, src], src, [placed])
+    expect(r.frameId).toBe('g')
+    expect(r.positions).toEqual([{ x: 24, y: 536 }])
+    // Grow-only, never moved (the cold --group rule): the farthest child edge + GROUP_PAD_X (24).
+    expect(r.frames).toEqual([{ id: 'g', size: { width: 648, height: 536 + 400 + 24 } }])
+  })
+
+  it('grows every frame up the chain', () => {
+    const outer = N('outer', { kind: 'group', position: { x: 900, y: 900 }, size: { width: 800, height: 660 } })
+    const inner = { ...g, parentId: 'outer', position: { x: 100, y: 100 } } // root (1000, 1000), as before
+    const r = coldFileIntoSourceFrame([outer, inner, src], src, [placed])
+    expect(r.positions).toEqual([{ x: 24, y: 536 }])
+    expect(r.frames).toEqual([
+      { id: 'g', size: { width: 648, height: 960 } },
+      { id: 'outer', size: { width: 800, height: 100 + 960 + 24 } }
+    ])
+  })
+
+  it('files nothing for a top-level source, or one whose frame is gone', () => {
+    const loose = N('loose', { position: { x: 0, y: 0 } })
+    const orphan = N('orphan', { parentId: 'gone', position: { x: 0, y: 0 } })
+    for (const s of [loose, orphan]) {
+      expect(coldFileIntoSourceFrame([loose, orphan], s, [placed])).toEqual({
+        positions: [{ x: 1024, y: 1536 }],
+        frames: []
+      })
+    }
   })
 })
 
