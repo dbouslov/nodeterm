@@ -140,8 +140,10 @@ describe('the off-canvas dispatch block (source pins)', () => {
         addAndConnectBody().indexOf('setNodes((ns) =>')
       )
     )
+    // `ropeLink` flattens the live edge to the persisted shape, so the rope's `opener` kind lands
+    // on the stored rope itself (not inside React Flow's `data`).
     expect(off).toContain(
-      'ropes: [ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id)]'
+      "ropes: [ropeLink(ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id, 'opener'))]"
     )
     expect(off).not.toContain('bridges:')
   })
