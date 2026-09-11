@@ -3102,12 +3102,24 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
 
 - **Context menus** (`components/ContextMenu.tsx`, portal, icons from `components/icons.tsx`):
   pane right-click = add nodes at cursor (terminal / Claude / sticky / open file) + select
-  all + fit + **Tidy canvas** (`arrangeAllNodes` — packs every top-level node, including group
-  frames as rigid units, into a non-overlapping grid via `arrangeNodes`, sorted by current
-  (y, x) so the pack roughly preserves reading order; mirrored in ⌘K as "Tidy canvas" and in the
-  keybinding registry as `canvas.tidy` (default ⌘/Ctrl+Shift+A, remappable); both
-  hidden below 2 top-level nodes, where it could only be a visual no-op that still writes
-  `project.json`) + restart-idle-agents (the bulk in-place agent restart, mirrored in ⌘K; both
+  all + fit + **Restructure canvas** (`arrangeAllNodes` → `lib/restructure.ts`
+  `restructureNodes`; ⌘/Ctrl+Shift+A, ⌘K, the pane menu, and the agent verb `restructure`) —
+  re-lays out every top-level UNIT (a node, or a frame: it moves as one block, its inside
+  untouched) by the rope graph. Rank = the longest OPENER chain from a root (`rankUnits`; a `dep`
+  rope keeps a dependent on its dependency's row, never above it; a cycle from a hand-edited file
+  is broken at its back edge). Within a row: deps before dependents, then children under their
+  opener, then current x — packed by restructure's own row packer, because `arrangeNodes` packs
+  in node-ARRAY order, not in the order of the ids it is handed (the old Tidy's "(y, x) sort"
+  never reached it). Rows are CENTERED under the rank-0 row's current center (the orchestrator
+  stays put horizontally, its tree hangs beneath it), ROW_GAP apart; loose units (no ropes) pack
+  below as the old Tidy grid (`arrangeNodes`), so with no ropes the result is a translation of
+  Tidy — which is why it replaced Tidy behind the same command id (`canvas.tidy`: only the title
+  changed, user overrides keep working). `--layout radial` (verb) / "Restructure canvas (radial)"
+  (⌘K) puts each generation on a ring around the root instead — opt-in, never the chord — spacing
+  units as discs of half their diagonal so nothing can overlap. Idempotent by test. The verb moves
+  nodes but, like `arrange`, never the user's camera; the Server Edition refuses it (it needs a
+  live canvas). The menu row and ⌘K entries are hidden below 2 top-level nodes, where it could
+  only be a visual no-op that still writes `project.json`) + restart-idle-agents (the bulk in-place agent restart, mirrored in ⌘K; both
   hidden when the canvas holds no restartable agent node, where they could only report "0
   restarted");
   node/selection right-click = group, color, duplicate, align-to-grid, collapse,
@@ -3124,6 +3136,25 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   ids it knows — so Delete, restart-agent, branch/transfer, terminal Search and Close can never
   be hidden, whatever settings.json says. The group-frame menu's colors strip answers to the same
   `colors` id; builders run through `tidySeparators` so a hidden row leaves no dangling rule.
+- **New-node placement is ONE engine** (`src/shared/placement/`, pure, imported by the renderer,
+  the cold-open path AND the Server Edition's headless factory — it lives in shared for that
+  reason). By hand: centered on the cursor, nudged to the nearest clear spot (`placeByHand`; the
+  old `emptyNodePos` passed a CENTER to a top-left check and cleared the wrong box). By agent:
+  `placeOpened` — BELOW the opener, fanned right (`placeChild`), or RIGHT of its `--after` deps
+  (`placeDependent`; dependency outranks lineage, and waiting on the opener itself stays below
+  it) — with a DIRECTED scan (right, then down; never above/left of the anchor). The live
+  dispatch, `coldPlaceBelow` and the headless `placeNode` all call `placeOpened`, so the three
+  cannot drift back into three layouts. Into a frame: the first grid slot no CURRENT child
+  occupies (`placeInFrame`; the old `groupSlot(count)` collided whenever a child had been moved),
+  then the frame hugs its children. Callers RESERVE each box they place before placing the next
+  (`setNodes` is async). Boxes are root space; ephemeral cards are not obstacles; the frames a
+  node is spawned FROM are not obstacles for it (`ancestorFrameIds` — it is filed into them).
+  `PLACEMENT_GAP` (40) = `arrangeNodes`'s gap on purpose. The engine never moves an existing
+  node — only Restructure does, on an explicit action. `staggeredPosition` (360×320 steps keyed
+  on node COUNT for 600×400 nodes) is gone. Ropes carry `kind: 'opener' | 'dep'` (`BridgeLink`;
+  `sanitizeRopes` on both load seams; untagged = opener, and a restore never stamps a kind the
+  file did not carry, so a legacy dep rope is not rewritten as lineage on the next save) so the
+  ranker can tell the two apart after launch, when `pendingLaunch.after` is gone.
 - **Add menu** = bottom dock (`Dock.tsx`) `+`, mirrored by the pane menu and command palette.
 - **Edges** are all one React Flow type, `floating` (`canvas/FloatingEdge.tsx` over the pure
   `lib/floatingEdge.ts`): every family — ropes, context bridges, note links, subagent/loop card

@@ -107,6 +107,14 @@ lane unaffected.
   white, take `SYSTEM_NODE_COLOR_SWATCHES` instead, with the contrast reason in a comment. Deep
   version, including the measured numbers: CLAUDE.md § Node colors.
 
+- **Placing a new node? Call `@shared/placement`, never a local `{x, y}` rule.** Every path that
+  creates a node (hand, dock, agent verb, cold open, headless server) goes through the one engine
+  in `src/shared/placement/` — the eight independent rules it replaced are how nodes came to spawn
+  on top of each other. When one call opens several nodes, reserve what you place (append its box
+  to `existing`) before placing the next. Moving EXISTING nodes is `lib/restructure.ts`'s job and
+  happens only on the explicit Restructure action. Deep version: CLAUDE.md § Canvas interaction &
+  panels.
+
 - **Every loosening of a security gate must be a SETTING the user can see and revoke.** A "don't
   ask again" that lives only in a dialog is a permission granted once and never findable again. The
   canvas-control destructive confirm is the pattern to copy (`@shared/control-confirm`): the dialog
