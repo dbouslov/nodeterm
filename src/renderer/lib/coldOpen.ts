@@ -172,11 +172,6 @@ export function coldPlaceBelow(
   const deps = (opts.deps ?? []).filter((d) => d.id !== source.id).map((d) => coldBox(nodes, d))
   return centerOf(placeOpened(existing, coldBox(nodes, source), deps, size, i), size)
 }
-
-// Grid geometry for nodes opened INTO a group frame lives in the shared placement engine, so the
-// cold and live paths cannot drift into two layouts. Re-exported to keep this import path.
-export { GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP, groupSlot, groupSizeFor } from '@shared/placement'
-
 /**
  * The reply sentence for a session that was opened into a project the user is not looking at.
  *

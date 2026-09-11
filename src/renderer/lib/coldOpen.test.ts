@@ -5,8 +5,6 @@ import {
   coldPlaceBelow,
   coldResolveAfter,
   coldResolveGroup,
-  groupSizeFor,
-  groupSlot,
   offCanvasNoticeText,
   offCanvasReplyClause,
   storedAgentIdOf,
@@ -196,18 +194,6 @@ describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometr
     expect(coldPlaceBelow([src, dep], src, 0, { deps: [src] })).toEqual(coldPlaceBelow([src, dep], src, 0))
   })
 })
-
-describe('group grid geometry (shared with the live addGrouped path)', () => {
-  it('lays children out in two columns under the frame header', () => {
-    expect(groupSlot(0, 600, 400)).toEqual({ x: 24, y: 56 })
-    expect(groupSlot(1, 600, 400)).toEqual({ x: 648, y: 56 })
-    expect(groupSlot(2, 600, 400)).toEqual({ x: 24, y: 480 })
-  })
-
-  it('sizes the frame to hold N children', () => {
-    expect(groupSizeFor(1, 600, 400)).toEqual({ width: 648, height: 480 })
-    expect(groupSizeFor(3, 600, 400)).toEqual({ width: 1272, height: 904 })
-  })})
 
 describe('coldOpenMessage — ONE sentence for both cold-open sites', () => {
   it('names the count, the agent, the project and the ids, and says when it starts', () => {

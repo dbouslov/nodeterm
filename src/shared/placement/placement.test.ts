@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   freeSpot, freeSpotDirected, placeByHand, placeChild, placeDependent, placeLoose, placeInFrame, placeOpened,
-  groupSlot, groupSizeFor, centerOf, overlaps, PLACEMENT_GAP, ROW_GAP, GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP,
+  groupSlot, centerOf, overlaps, PLACEMENT_GAP, ROW_GAP, GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP,
   type Box
 } from './index'
 
@@ -129,12 +129,6 @@ describe('grid geometry', () => {
     expect(groupSlot(0, 100, 50)).toEqual({ x: GROUP_PAD_X, y: GROUP_PAD_TOP })
     expect(groupSlot(1, 100, 50)).toEqual({ x: GROUP_PAD_X + 100 + GROUP_GAP, y: GROUP_PAD_TOP })
     expect(groupSlot(2, 100, 50)).toEqual({ x: GROUP_PAD_X, y: GROUP_PAD_TOP + 50 + GROUP_GAP })
-  })
-  it('groupSizeFor hugs N children of one size', () => {
-    expect(groupSizeFor(3, 100, 50)).toEqual({
-      width: GROUP_PAD_X * 2 + 2 * 100 + GROUP_GAP,
-      height: GROUP_PAD_TOP + 2 * 50 + GROUP_GAP + GROUP_PAD_X
-    })
   })
   it('centerOf inverts a top-left', () => {
     expect(centerOf({ x: 0, y: 0 }, size)).toEqual({ x: 50, y: 50 })

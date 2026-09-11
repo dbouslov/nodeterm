@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { freeSpot, type Box } from './placement'
+import { freeSpot, type Box } from './index'
 
 const size = { w: 100, h: 100 }
 

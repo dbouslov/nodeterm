@@ -118,15 +118,6 @@ export function groupSlot(slot: number, w: number, h: number): Point {
   }
 }
 
-export function groupSizeFor(children: number, w: number, h: number): { width: number; height: number } {
-  const cols = Math.min(2, Math.max(1, children))
-  const rows = Math.max(1, Math.ceil(children / 2))
-  return {
-    width: GROUP_PAD_X * 2 + cols * w + (cols - 1) * GROUP_GAP,
-    height: GROUP_PAD_TOP + rows * h + (rows - 1) * GROUP_GAP + GROUP_PAD_X
-  }
-}
-
 /**
  * Inside a frame: the first grid slot no CURRENT child occupies (frame-relative boxes). The old
  * rule returned slot `children.length` blind, which collided whenever a child had been moved.
