@@ -76,6 +76,7 @@ import { effectiveSize, type PtySize } from './pty-size'
 import { machOArch, archMismatch } from './macho-arch'
 import { writeScrollback, readScrollback, deleteScrollback } from './scrollback-store'
 import { claudeConfigDirFor } from './claude-config-dir'
+import { stripClaudeSessionEnv } from './claude-session-env'
 import { findExecutableSync, findInPathString, resolveShellPath, shellPathNow } from './exec-path'
 import {
   AUTH_ENV_STRIP,
@@ -2666,6 +2667,9 @@ export class PtyManager {
     delete env.NODETERM_SERVER_PASSWORD
     delete env.TMUX
     delete env.TMUX_PANE
+    // Same reasoning for a Claude Code session the APP was launched from: an agent in a pane starts
+    // its own session, and one that inherits CLAUDE_CODE_CHILD_SESSION writes no transcript.
+    stripClaudeSessionEnv(env)
 
     // A GUI app launched from Finder/Dock inherits only a minimal PATH, so spawned terminals
     // couldn't find tools in /usr/local/bin, Homebrew, ~/.local/bin, nvm, bun, etc. (the classic
