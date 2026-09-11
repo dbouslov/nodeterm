@@ -110,6 +110,7 @@ export type ControlVerb =
   | 'move'
   | 'arrange'
   | 'align'
+  | 'restructure'
   | 'link'
   | 'verify'
   | 'spawn-team'
@@ -148,6 +149,7 @@ const VERBS: ControlVerb[] = [
   'move',
   'arrange',
   'align',
+  'restructure',
   'link',
   'verify',
   'spawn-team',
@@ -230,6 +232,9 @@ export function parseControlRequest(
   if (v === 'move' && !args.nodes) return { error: 'move requires --nodes <id,id>' }
   if (v === 'align' && !args.nodes) return { error: 'align requires --nodes <id,id>' }
   if (v === 'align' && !args.edge) return { error: 'align requires --edge' }
+  if (v === 'restructure' && args.layout && args.layout !== 'rows' && args.layout !== 'radial') {
+    return { error: 'restructure --layout must be rows or radial' }
+  }
   if (v === 'link' && !args.to) return { error: 'link requires --to <id,id>' }
   if (v === 'verify' && !args.node) return { error: 'verify requires --node <id>' }
   if (v === 'spawn-team' && !args.team) return { error: 'spawn-team requires --team <json>' }
@@ -396,6 +401,12 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  `align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter` — tidy a layout. Works on',
     '  top-level nodes OR on the children of ONE frame (all ids must share a container — you cannot',
     '  arrange across frames in one call); arranging a frame\'s children also shrinks the frame to fit.',
+    '- `restructure [--layout rows|radial]` — re-lay out the WHOLE project by lineage, centered on',
+    '  the opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their',
+    '  children beneath those; a node armed `--after` sits to the right of what it waits on; a frame',
+    '  moves as one block with its inside untouched; unconnected nodes pack below. `radial` puts each',
+    '  generation on a ring around you instead. The same action as the user\'s ⌘⇧A "Restructure',
+    '  canvas", and undoable. Prefer it to hand-arranging after a fan-out.',
     '- `link --to <id,id> [--from <id>]` — context-link nodes so each can READ the other\'s transcript',
     '  on demand (nodeterm linked-context CLI). `--from` defaults to you; nothing is pushed into the',
     '  linked sessions. Agent sessions you open, and the stations you name in `--after`, are already',
@@ -474,8 +485,10 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     'idle (do not poll for that yourself). Then break the task into 2-5 workstreams;',
     'per stream `open-worktree --branch <slug>` then `open-agent --agent claude --group <groupId>',
     '--prompt "<concrete task>"` (each stream on its own branch, no tree conflicts). Members land',
-    'in grid slots inside the frame automatically; align the frames themselves with',
-    '`arrange --nodes <groupId,…> --layout row` (pass sibling GROUP ids from one container)',
+    'in grid slots inside the frame automatically; once the fan-out is open, run `restructure`',
+    '(you top-center, your stations in a centered row below, dependents to the right), or align',
+    'the frames yourself with `arrange --nodes <groupId,…> --layout row` (pass sibling GROUP ids',
+    'from one container)',
     'and `rename` each by subject. When a station goes idle, READ what it did through the',
     'context link (the linked-context CLI — see the get-linked-context section in your global',
     'agent instructions) and reconcile the streams into ONE synthesis yourself; a station you',
@@ -878,6 +891,12 @@ Verbs:
   arrange nodes from two different frames, or mix framed + loose, in one call). When the ids are a
   frame's children, the frame is also shrunk to hug the tidied layout. Since grouping preserves each
   node's scattered position, a fresh frame is usually too wide: \`arrange\` its children to fix that.
+- \`restructure [--layout rows|radial]\` — re-lay out the WHOLE project by lineage, centered on the
+  opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their
+  children beneath those; a node armed \`--after\` sits to the right of what it waits on; a frame
+  moves as one block with its inside untouched; unconnected nodes pack below. \`radial\` puts each
+  generation on a ring around you instead. The same action as the user's ⌘⇧A "Restructure canvas",
+  and undoable. Prefer it to hand-arranging after a fan-out.
 - \`align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter\` — align edges/centers. Same
   one-container rule as \`arrange\`.
 - \`link --to <id,id> [--from <id>]\` — context-link nodes, so each can READ the other's
@@ -1029,7 +1048,8 @@ across Nodeterm sessions), be the orchestration chef — plan the kitchen, then 
    Each stream now works on its own branch in its own worktree group — no tree conflicts.
 3. Keep the kitchen tidy: members opened with \`--group\` land in neat grid slots inside the
    frame automatically (the frame grows to fit), and successive \`open-worktree\` frames fan
-   out side by side — after opening all stations, align the frames with
+   out side by side — after opening all stations, run \`restructure\` (you top-center, your
+   stations in a centered row below, dependents to the right), or align the frames yourself with
    \`arrange --nodes <groupId,groupId,…> --layout row\` (pass sibling GROUP ids from one
    container, not their children). \`rename\` each group by subject.
 4. Track progress (their status badges show working/waiting) and coordinate.

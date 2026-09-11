@@ -273,6 +273,7 @@ import {
   storedAgentIdOf,
   type ColdNode
 } from '../lib/coldOpen'
+import { rankUnits, restructureNodes, type RestructureLayout } from '../lib/restructure'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
 import {
   unavailableRecovery,
@@ -6842,31 +6843,30 @@ export function Canvas() {
     setNodes((ns) => ns.map((n) => ({ ...n, selected: true })))
   }, [setNodes])
 
-  // Pane-level "Tidy canvas": packs every top-level node (terminal, agent, sticky, editor, diff,
-  // group frame — a frame moves as one unit, its children ride along untouched) into a
-  // non-overlapping grid via the same `arrangeNodes` selection/canvas-control already use.
-  // `arrangeNodes` no-ops on a mixed-container id set (workspace.ts commonParentId), which is why
-  // only top-level ids (`!n.parentId`) are collected here — a populated group frame would
-  // otherwise silently block the whole action. Sorted by current (y, x) first so the packed grid
-  // roughly preserves the canvas's existing reading order instead of falling back to array/
-  // persistence order (which puts every group frame first).
+  // Pane-level "Restructure canvas" (the old "Tidy canvas": same command id `canvas.tidy`, same
+  // chord). Re-lays out every top-level UNIT — terminal, agent, sticky, editor, diff, or a group
+  // frame, which moves as one block with its children untouched — by the rope graph
+  // (lib/restructure.ts): lineage in rows centered under the opener, an `--after` dependent to the
+  // right of what it waits on, unconnected nodes as a grid below. With no ropes the result is the
+  // old tidy grid, translated. `radial` (palette / agent verb only) rings each generation around
+  // the root instead.
   const hasArrangeableNodes = useCallback((): boolean => {
     return nodesRef.current.filter((n) => !n.parentId).length >= 2
   }, [])
-  const arrangeAllNodes = useCallback(() => {
-    if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
-    const targets = nodesRef.current
-      .filter((n) => !n.parentId)
-      .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
-    // Fewer than 2 nodes: nothing to tidy — and running arrangeNodes anyway would still emit a
-    // fresh node array (a no-op position rewrite), triggering an undo entry + markDirty + a
-    // project.json write for a canvas that visibly didn't change.
-    if (targets.length < 2) return
-    const ids = targets.map((n) => n.id)
-    setNodes((ns) => arrangeNodes(ns, ids, { layout: 'grid' }))
-    markDirty()
-    fitAll()
-  }, [setNodes, markDirty, fitAll])
+  const arrangeAllNodes = useCallback(
+    (layout: RestructureLayout = 'rows') => {
+      if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
+      // Under 2 units there is nothing to lay out: restructureNodes hands back the SAME array, and
+      // setting it would still cost an undo entry + markDirty + a project.json write for a canvas
+      // that visibly didn't change.
+      const next = restructureNodes(nodesRef.current, controlEdgesRef.current.map(ropeLink), layout)
+      if (next === nodesRef.current) return
+      setNodes(next)
+      markDirty()
+      fitAll()
+    },
+    [setNodes, markDirty, fitAll]
+  )
 
   const toggleCollapseNodes = useCallback(
     (ids: string[]) => {
@@ -8575,7 +8575,7 @@ export function Canvas() {
           // Hidden below 2 top-level nodes — same reasoning as restart-idle-agents just below:
           // with 0 or 1 node the action can only be a visual no-op that still writes project.json.
           ...(hasArrangeableNodes()
-            ? [{ label: 'Tidy canvas', icon: <IconGrid />, onClick: arrangeAllNodes } as MenuItem]
+            ? [{ label: 'Restructure canvas', icon: <IconGrid />, onClick: () => arrangeAllNodes() } as MenuItem]
             : []),
           // Project-wide: restart every idle agent CLI in place (new model pickup). Hidden on a
           // canvas with no restartable agent node — there it could only ever report "0 restarted".
@@ -10777,6 +10777,37 @@ export function Canvas() {
             markDirty()
             const how = verb === 'arrange' ? `as ${layout}` : `to ${edge}`
             reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${ids.length} node(s) ${how}`, result: { count: ids.length, container } })
+            return
+          }
+          case 'restructure': {
+            // The user's "Restructure canvas" for an agent. Like `arrange`, it moves nodes but not
+            // the user's camera — an agent does not get to reframe the view.
+            if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) {
+              reply({ ok: false, error: 'restructure: the kanban board is open — close it first' })
+              return
+            }
+            const layout: RestructureLayout = args.layout === 'radial' ? 'radial' : 'rows'
+            const live = nodesRef.current as CanvasNode[]
+            const ropesNow = controlEdgesRef.current.map(ropeLink)
+            const ranked = rankUnits(live, ropesNow)
+            const units = ranked.rows.flat().length + ranked.loose.length
+            const result = { units, layout, rows: ranked.rows.length, loose: ranked.loose.length }
+            const next = restructureNodes(live, ropesNow, layout)
+            if (next === live) {
+              reply({ ok: true, message: 'restructure: fewer than 2 top-level nodes — nothing to lay out', result })
+              return
+            }
+            setNodes(next)
+            markDirty()
+            const tiers =
+              layout === 'radial' ? `${Math.max(0, ranked.rows.length - 1)} ring(s)` : `${ranked.rows.length} row(s)`
+            reply({
+              ok: true,
+              message:
+                `restructured ${units} unit(s) in ${tiers}` +
+                (ranked.loose.length ? ` + ${ranked.loose.length} loose` : ''),
+              result
+            })
             return
           }
           case 'link': {
@@ -13443,10 +13474,18 @@ export function Canvas() {
         ? [
             {
               id: 'arrange-all',
-              label: 'Tidy canvas',
-              hint: 'arrange grid layout organize clean up',
+              label: 'Restructure canvas',
+              // The old name stays searchable: this row replaced "Tidy canvas".
+              hint: 'tidy arrange grid layout organize clean up lineage',
               icon: <IconGrid />,
-              run: arrangeAllNodes
+              run: () => arrangeAllNodes()
+            } as Command,
+            {
+              id: 'arrange-all-radial',
+              label: 'Restructure canvas (radial)',
+              hint: 'tidy arrange ring fan radial layout lineage',
+              icon: <IconGrid />,
+              run: () => arrangeAllNodes('radial')
             } as Command
           ]
         : []),

@@ -185,6 +185,15 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
   })
 
+  it('refuses restructure — it needs a live canvas, so no headless action is reachable for it', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await expect(
+      handler({ verb: 'restructure', nodeId: 'term-source', args: {}, verified: true })
+    ).resolves.toMatchObject({ ok: false, error: CONTROL_UNSUPPORTED_ERROR })
+    for (const action of Object.values(a)) expect(action).not.toHaveBeenCalled()
+  })
+
   it('shares parser validation and forwards source identity to an open', async () => {
     const a = actions()
     const handler = createServerEditionControlHandler(a)

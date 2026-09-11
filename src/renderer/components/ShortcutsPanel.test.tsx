@@ -123,7 +123,7 @@ describe('buildShortcutSections — bindings', () => {
     )
     const sections = build((id) => getEffectiveBindings(id, overrides, true))
     expect(labelsOf(sections)).not.toContain('Command palette')
-    expect(rowFor(sections, 'Tidy canvas')).toEqual(['⌘', '⌥', '⇧', 'F9'])
+    expect(rowFor(sections, 'Restructure canvas')).toEqual(['⌘', '⌥', '⇧', 'F9'])
   })
 
   it('shows EVERY effective chord of a multi-binding command', () => {
@@ -230,7 +230,7 @@ describe('ShortcutsPanel (DOM)', () => {
     })
     render()
     expect(rowLabels()).toContain('Command palette')
-    expect(rowLabels()).not.toContain('Tidy canvas')
+    expect(rowLabels()).not.toContain('Restructure canvas')
   })
 
   it('separates a row\'s alternative chords rather than printing one run of badges', () => {
