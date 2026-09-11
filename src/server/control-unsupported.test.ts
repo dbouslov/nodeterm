@@ -194,6 +194,15 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     for (const action of Object.values(a)) expect(action).not.toHaveBeenCalled()
   })
 
+  it('refuses pin headlessly for now — no headless action is reachable for it', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await expect(
+      handler({ verb: 'pin', nodeId: 'term-source', args: { node: 'term-source', set: 'on' }, verified: true })
+    ).resolves.toMatchObject({ ok: false, error: CONTROL_UNSUPPORTED_ERROR })
+    for (const action of Object.values(a)) expect(action).not.toHaveBeenCalled()
+  })
+
   it('shares parser validation and forwards source identity to an open', async () => {
     const a = actions()
     const handler = createServerEditionControlHandler(a)

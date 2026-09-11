@@ -811,3 +811,29 @@ describe('restructure verb', () => {
     }
   })
 })
+
+describe('pin verb', () => {
+  it('requires --node and --set on|off', () => {
+    expect(parseControlRequest('pin', { node: 'n1', set: 'on' })).toEqual({
+      verb: 'pin',
+      args: { node: 'n1', set: 'on' }
+    })
+    expect(parseControlRequest('pin', { node: 'n1', set: 'off' })).toEqual({
+      verb: 'pin',
+      args: { node: 'n1', set: 'off' }
+    })
+    expect(parseControlRequest('pin', { set: 'on' })).toEqual({ error: 'pin requires --node <id>' })
+    expect(parseControlRequest('pin', { node: 'n1' })).toEqual({ error: 'pin requires --set on|off' })
+    expect(parseControlRequest('pin', { node: 'n1', set: 'yes' })).toEqual({ error: 'pin requires --set on|off' })
+  })
+
+  it('both agent-facing bodies describe it', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`pin --node <id> --set on|off`')
+      expect(body).toMatch(/never move/i)
+    }
+  })
+})

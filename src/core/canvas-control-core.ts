@@ -119,6 +119,7 @@ export type ControlVerb =
   | 'branch'
   | 'rename'
   | 'color'
+  | 'pin'
   | 'write'
   | 'close'
   | 'board'
@@ -158,6 +159,7 @@ const VERBS: ControlVerb[] = [
   'branch',
   'rename',
   'color',
+  'pin',
   'write',
   'close',
   'board',
@@ -235,6 +237,8 @@ export function parseControlRequest(
   if (v === 'restructure' && args.layout && args.layout !== 'rows' && args.layout !== 'radial') {
     return { error: 'restructure --layout must be rows or radial' }
   }
+  if (v === 'pin' && !args.node) return { error: 'pin requires --node <id>' }
+  if (v === 'pin' && args.set !== 'on' && args.set !== 'off') return { error: 'pin requires --set on|off' }
   if (v === 'link' && !args.to) return { error: 'link requires --to <id,id>' }
   if (v === 'verify' && !args.node) return { error: 'verify requires --node <id>' }
   if (v === 'spawn-team' && !args.team) return { error: 'spawn-team requires --team <json>' }
@@ -437,6 +441,10 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  session, and the reply says `already named`. Re-assert your own name as often as you like.',
     `- \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is a palette NAME`,
     `  or its hex: ${nodeColorChoices()}. The agent names paint a node its CLI's own brand color.`,
+    '- `pin --node <id> --set on|off` — pin a node or frame in place: `restructure`, `arrange` /',
+    '  `align` and `--group` placement never move it or anything inside it (a pinned frame is a fixed',
+    '  obstacle the rest is laid out around, and it grows in place to take a new child). The user',
+    '  pins from the node menu; dragging by hand still works.',
     '- `write --node <id> --text "..."` / `close --node <id,id>` — type into / close nodes.',
     '  `close` takes a COMMA LIST and asks about the whole list in ONE dialog, so close a finished',
     '  wave in a single call rather than one call per node. Every id must exist on the canvas: an',
@@ -948,6 +956,10 @@ Verbs:
   its hex (either is accepted, and the hex is case-insensitive): ${nodeColorChoices()}.
   The agent names are that CLI's own brand color — \`--color claude\` paints a node the color a
   Claude node is born with. \`group\` takes the same \`--color\`.
+- \`pin --node <id> --set on|off\` — pin a node or frame in place: \`restructure\`, \`arrange\` /
+  \`align\` and \`--group\` placement never move it or anything inside it (a pinned frame is a
+  fixed obstacle the rest is laid out around, and it grows in place to take a new child). The user
+  pins from the node menu; dragging by hand still works.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id,id>\` — close one node or several. \`--node\` takes a COMMA LIST, and the whole
   list is confirmed in ONE dialog — so when a wave of stations is finished, close them in a single

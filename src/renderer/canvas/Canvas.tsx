@@ -98,6 +98,7 @@ import {
   IconCanvasView,
   IconClose,
   IconCollapse,
+  IconPin,
   IconDino,
   IconDuplicate,
   IconEditor,
@@ -600,6 +601,7 @@ import {
   restoreMaximizedNode,
   placeNodeInRect,
   terminalNodeSize,
+  isPinned,
   type CanvasNode
 } from '../state/workspace'
 import { codexAccountSelectable, codexAccountSwitchStillEligible } from './codex-account-switch'
@@ -6868,6 +6870,20 @@ export function Canvas() {
     [setNodes, markDirty, fitAll]
   )
 
+  /** Pin / unpin nodes or frames. Automatic layout (Restructure, arrange / align, frame fitting)
+   *  leaves a pinned item — and everything inside it — where it is (`isPinned`). Persisted as
+   *  `pinned: true`; dragging by hand still works. */
+  const setPinned = useCallback(
+    (ids: string[], on: boolean) => {
+      const set = new Set(ids)
+      setNodes((ns) =>
+        ns.map((n) => (set.has(n.id) ? { ...n, data: { ...n.data, pinned: on ? true : undefined } } : n))
+      )
+      markDirty()
+    },
+    [setNodes, markDirty]
+  )
+
   const toggleCollapseNodes = useCallback(
     (ids: string[]) => {
       const set = new Set(ids)
@@ -7944,6 +7960,22 @@ export function Canvas() {
               onClick: () => toggleCollapseNodes(ids)
             }
           ] as MenuItem[])),
+      ...(isHidden('pin', hidden)
+        ? []
+        : (() => {
+            // Every target pinned → the row unpins them; otherwise it pins them all.
+            const pinnedNow = ids.every(
+              (nid) => nodesRef.current.find((n) => n.id === nid)?.data.pinned === true
+            )
+            return [
+              {
+                label: pinnedNow ? 'Unpin' : 'Pin',
+                icon: <IconPin />,
+                ...(pinnedNow ? {} : { hint: 'Restructure, arrange and agents leave it where it is.' }),
+                onClick: () => setPinned(ids, !pinnedNow)
+              }
+            ] as MenuItem[]
+          })()),
       ...(ids.some((nid) => nodesRef.current.find((n) => n.id === nid)?.type === 'terminal')
         ? ([
             ...(isHidden('markdown-view', hidden)
@@ -8221,6 +8253,7 @@ export function Canvas() {
     transferConversation,
     agentIdOf,
     toggleCollapseNodes,
+    setPinned,
     toggleMarkdown,
     reloadTerminals,
     restartAgentNode,
@@ -8423,6 +8456,19 @@ export function Canvas() {
         ...(isHidden('colors', useSettings.getState().settings.hiddenNodeMenuItems)
           ? []
           : ([{ type: 'colors', onPick: (c) => setNodesColor([groupId], c) }] as MenuItem[])),
+        // Same `pin` id as the node menu row, so one Appearance toggle hides both.
+        ...(isHidden('pin', useSettings.getState().settings.hiddenNodeMenuItems)
+          ? []
+          : (() => {
+              const pinnedNow = nodesRef.current.find((n) => n.id === groupId)?.data.pinned === true
+              return [
+                {
+                  label: pinnedNow ? 'Unpin frame' : 'Pin frame',
+                  icon: <IconPin />,
+                  onClick: () => setPinned([groupId], !pinnedNow)
+                }
+              ] as MenuItem[]
+            })()),
         { type: 'separator' },
         ...(groupHasWorktree(groupId)
           ? []
@@ -8448,6 +8494,7 @@ export function Canvas() {
     },
     [
       setNodesColor,
+      setPinned,
       ungroup,
       groupHasWorktree,
       openWorktreeDialog,
@@ -10776,7 +10823,14 @@ export function Canvas() {
             setNodes(next)
             markDirty()
             const how = verb === 'arrange' ? `as ${layout}` : `to ${edge}`
-            reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${ids.length} node(s) ${how}`, result: { count: ids.length, container } })
+            // Pinned members (or members of a pinned frame) were left where they are — say so.
+            const pinnedIds = ids.filter((id) => {
+              const nd = live.find((x) => x.id === id)
+              return !!nd && isPinned(nd, live)
+            })
+            const count = ids.length - pinnedIds.length
+            const note = pinnedIds.length ? ` (${pinnedIds.length} pinned, left in place)` : ''
+            reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${count} node(s) ${how}${note}`, result: { count, container, pinned: pinnedIds } })
             return
           }
           case 'restructure': {
@@ -11412,6 +11466,26 @@ export function Canvas() {
               message: `colored ${colored.length} node(s) ${color}${note}`,
               result: { colored, skipped, color }
             })
+            return
+          }
+          case 'pin': {
+            // Pin / unpin ONE node or frame (the user's node-menu row, for an agent). A pinned item
+            // and everything inside it is left in place by Restructure, arrange / align and frame
+            // fitting (`isPinned`). Subagent/loop cards are not persisted, so a pin would vanish.
+            const id = (args.node ?? '').trim()
+            const target = nodesRef.current.find((node) => node.id === id)
+            if (!target || target.type === 'subagent' || target.type === 'loop') {
+              reply({ ok: false, error: `pin: --node names no pinnable node (${id})` })
+              return
+            }
+            const on = args.set === 'on'
+            setNodes((nodes) =>
+              nodes.map((node) =>
+                node.id === id ? { ...node, data: { ...node.data, pinned: on ? true : undefined } } : node
+              )
+            )
+            markDirty()
+            reply({ ok: true, message: `${on ? 'pinned' : 'unpinned'} ${id}`, result: { id, pinned: on } })
             return
           }
           case 'sticky': {
