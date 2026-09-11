@@ -495,6 +495,7 @@ import type {
   PendingLaunch,
   Project,
   ProjectKanban,
+  RopeKind,
   SshPassphraseRequest,
   SshProjectStatus,
   TranscriptHit
@@ -831,12 +832,21 @@ async function waitForCanvasNode(
 // persisted per project as `ropes`, so the lineage survives restarts. Selectable; removed with ⌫ /
 // double-click like a context link. Colour and the waiting look are NOT stored here — displayEdges
 // derives both from the endpoints every render (lib/edgeModel.ts `ropeVisual`).
-const ropeEdge = (id: string, source: string, target: string): Edge => ({
+const ropeEdge = (id: string, source: string, target: string, kind?: RopeKind): Edge => ({
   id,
   source,
   target,
-  type: 'floating'
+  type: 'floating',
+  // Lineage vs dependency (Restructure ranks by it). Left ABSENT when unknown — a pre-kind file —
+  // because stamping `opener` on restore would rewrite a legacy dep rope as lineage on the next save.
+  ...(kind ? { data: { kind } } : {})
 })
+
+/** The persisted shape of a live rope edge: `kind` rides `data`, so commit and merge keep it. */
+const ropeLink = (e: Edge): BridgeLink => {
+  const kind = (e.data as { kind?: RopeKind } | undefined)?.kind
+  return { id: e.id, source: e.source, target: e.target, ...(kind ? { kind } : {}) }
+}
 
 /** The one edge renderer — every family routes between nearest borders (see FloatingEdge). */
 const edgeTypes = { floating: FloatingEdge }
@@ -2495,10 +2505,10 @@ export function Canvas() {
     // A wait with no rope is a wait nothing on screen explains. Ropes for `--after` are written by
     // the verbs that arm a node, so an arming that predates them (persisted `pendingLaunch`, no
     // persisted rope) — or any future path that forgets one — is healed here on the next load.
-    const restoredRopes = (project.ropes ?? []).map((r) => ropeEdge(r.id, r.source, r.target))
+    const restoredRopes = (project.ropes ?? []).map((r) => ropeEdge(r.id, r.source, r.target, r.kind))
     setControlEdges([
       ...restoredRopes,
-      ...missingDepRopes(flow, restoredRopes).map((r) => ropeEdge(r.id, r.source, r.target))
+      ...missingDepRopes(flow, restoredRopes).map((r) => ropeEdge(r.id, r.source, r.target, r.kind))
     ])
     // Reset history for the newly loaded project.
     committedRef.current = flow
@@ -2684,7 +2694,7 @@ export function Canvas() {
           flowToNodeStates(nodesRef.current),
           viewportRef.current,
           linkEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target })),
-          controlEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target }))
+          controlEdgesRef.current.map(ropeLink)
         )
   }, [])
 
@@ -2890,11 +2900,7 @@ export function Canvas() {
         base: useProjects.getState().getProject(project.id),
         incoming: project,
         liveNodeIds: nodesRef.current.map((n) => n.id),
-        liveRopes: controlEdgesRef.current.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target
-        })),
+        liveRopes: controlEdgesRef.current.map(ropeLink),
         liveBridges: linkEdgesRef.current.map((e) => ({
           id: e.id,
           source: e.source,
@@ -2906,7 +2912,7 @@ export function Canvas() {
       // every edge on the canvas (displayEdges recomputes colour and the waiting look per edge)
       // for no change at all, and these arrive in bursts.
       if (plan.ropesChanged)
-        setControlEdges(plan.ropes.map((r) => ropeEdge(r.id, r.source, r.target)))
+        setControlEdges(plan.ropes.map((r) => ropeEdge(r.id, r.source, r.target, r.kind)))
       if (plan.bridgesChanged)
         setLinkEdges(plan.bridges.map((b) => ({ id: b.id, source: b.source, target: b.target })))
       // The store copy is our disk baseline, and the server has already written this file — so it
@@ -3300,7 +3306,7 @@ export function Canvas() {
     // nothing adds nothing, and a rope the step did not remove is never duplicated.
     setControlEdges((es) => {
       const add = missingDepRopes(prev, es)
-      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target))] : es
+      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target, r.kind))] : es
     })
     bumpDirty() // an undo is an edit: it must count toward the in-flight-save generation too
     bumpHist((v) => v + 1)
@@ -3320,7 +3326,7 @@ export function Canvas() {
     // nothing adds nothing, and a rope the step did not remove is never duplicated.
     setControlEdges((es) => {
       const add = missingDepRopes(next, es)
-      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target))] : es
+      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target, r.kind))] : es
     })
     bumpDirty() // a redo is an edit: same reasoning as undo
     bumpHist((v) => v + 1)
@@ -9061,7 +9067,7 @@ export function Canvas() {
       })
       const placed = src.parentId ? parentInto(node, src.parentId) : node
       setNodes((ns) => [...ns, placed])
-      setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id)])
+      setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id, 'opener')])
       markDirty()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -9804,7 +9810,8 @@ export function Canvas() {
             const coldRopes = coldIds.map((id) => ({
               id: `ctrl-${sourceNodeId}-${id}`,
               source: sourceNodeId,
-              target: id
+              target: id,
+              kind: 'opener' as const
             }))
             const coldEndpoint = (id: string): LinkEndpoint | null => {
               if (coldIds.includes(id)) {
@@ -9969,7 +9976,7 @@ export function Canvas() {
       const belowY = srcAbs.y + srcH + 80
       const placeBelow = (i = 0) => ({ x: srcAbs.x + srcW / 2 + i * 460, y: belowY + 210 })
       const connect = (newId: string) =>
-        setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${newId}`, sourceNodeId, newId)])
+        setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${newId}`, sourceNodeId, newId, 'opener')])
       // `--after` is a rope too: dep → armed node, drawn dashed while the node waits and solid once
       // it has launched (displayEdges derives that from pendingLaunch). The opener's own rope is
       // skipped here — it already exists, and ropeVisual renders it waiting when the node waits on
@@ -9978,7 +9985,7 @@ export function Canvas() {
       const ropeDeps = (ids: string[], after: string[] | undefined): void => {
         if (!after?.length) return
         const ropes = ids.flatMap((nid) =>
-          after.filter((dep) => dep !== sourceNodeId).map((dep) => ropeEdge(`ctrl-${dep}-${nid}`, dep, nid))
+          after.filter((dep) => dep !== sourceNodeId).map((dep) => ropeEdge(`ctrl-${dep}-${nid}`, dep, nid, 'dep'))
         )
         if (ropes.length) setControlEdges((es) => [...es, ...ropes])
       }
@@ -10031,7 +10038,7 @@ export function Canvas() {
             node: flowToNodeStates([placed])[0]
           })
           ocStore.appendCanvasLinks(offCanvas.project.id, {
-            ropes: [ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id)]
+            ropes: [ropeLink(ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id, 'opener'))]
           })
           void writeDisk()
           offCanvas.created.push(placed.id)

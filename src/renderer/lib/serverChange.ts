@@ -18,15 +18,17 @@
  *
  *  Pure — no React, no store — so the whole decision is unit-testable without a canvas.
  */
-import type { CanvasNodeState, Project } from '@shared/types'
+import type { CanvasNodeState, Project, RopeKind } from '@shared/types'
 
 /** The only part of a React Flow edge this merge reasons about. Ropes carry no stored colour or
  *  "waiting" flag (both are derived per render from the endpoints — see lib/edgeModel.ts), so an
- *  id and its two endpoints ARE the edge as far as persistence is concerned. */
+ *  id and its two endpoints ARE the edge as far as persistence is concerned — plus a rope's
+ *  `kind`, which the merge never reasons about but must carry through. */
 export interface EdgeRef {
   id: string
   source: string
   target: string
+  kind?: RopeKind
 }
 
 export interface ServerChangeInput {
@@ -56,7 +58,12 @@ export interface ServerChangePlan {
   bridgesChanged: boolean
 }
 
-const edgeRef = (e: EdgeRef): EdgeRef => ({ id: e.id, source: e.source, target: e.target })
+const edgeRef = (e: EdgeRef): EdgeRef => ({
+  id: e.id,
+  source: e.source,
+  target: e.target,
+  ...(e.kind ? { kind: e.kind } : {})
+})
 
 /** One merge, applied to ropes and to bridges alike — they are the same problem with two names,
  *  and a second copy of these five rules is a second place for them to drift. */

@@ -508,11 +508,17 @@ export interface Viewport {
   zoom: number
 }
 
+/** Lineage vs dependency on a ROPE (`project.ropes`): `opener` = the source opened the target,
+ *  `dep` = the target was armed `--after` the source. Absent on pre-2026-09 files and on bridges;
+ *  an absent kind reads as `opener`. */
+export type RopeKind = 'opener' | 'dep'
+
 /** A persistent "bridge" link between two Claude nodes (lets their sessions message each other). */
 export interface BridgeLink {
   id: string
   source: string
   target: string
+  kind?: RopeKind
 }
 
 /** One kanban board column. Column order = array order in ProjectKanban.columns. */

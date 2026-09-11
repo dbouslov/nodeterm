@@ -361,6 +361,24 @@ export function validKanban(k: unknown): k is ProjectKanban {
   )
 }
 
+/**
+ * Tolerant reader for `ropes` — the file is hostile input and `kind` reaches the restructure
+ * ranker. A bad `kind` is DROPPED and the rope KEPT (an untagged rope reads as `opener`); an entry
+ * that is not `{id, source, target}` strings is dropped; a non-array answers undefined. Applied on
+ * both load seams: `fileToProject` and the store's inline-project branch.
+ */
+export function sanitizeRopes(ropes: unknown): BridgeLink[] | undefined {
+  if (!Array.isArray(ropes)) return undefined
+  const out: BridgeLink[] = []
+  for (const r of ropes) {
+    if (!r || typeof r !== 'object') continue
+    const { id, source, target, kind } = r as Record<string, unknown>
+    if (typeof id !== 'string' || typeof source !== 'string' || typeof target !== 'string') continue
+    out.push(kind === 'opener' || kind === 'dep' ? { id, source, target, kind } : { id, source, target })
+  }
+  return out
+}
+
 /** A `{x, y}` point, checked at the boundary because the file is hostile input. */
 function validPoint(p: unknown): p is { x: number; y: number } {
   return (
@@ -488,7 +506,10 @@ export function fileToProject(
       )
     ),
     ...(f.bridges ? { bridges: f.bridges } : {}),
-    ...(f.ropes ? { ropes: f.ropes } : {}),
+    ...(() => {
+      const ropes = sanitizeRopes(f.ropes)
+      return ropes ? { ropes } : {}
+    })(),
     ...(defaultAccountId ? { defaultAccountId } : {}),
     ...(f.defaultPermissionMode ? { defaultPermissionMode: f.defaultPermissionMode } : {}),
     // The file is hostile input: only a literal `true` under a known key survives the read
