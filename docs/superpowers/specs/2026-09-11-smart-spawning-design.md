@@ -2,6 +2,8 @@
 
 Date: 2026-09-11 · Branch: `feat/smart-spawning` · Status: approved design, awaiting plan
 
+Amended 2026-09-11 (after review): hierarchy is opener-CENTERED (rows centered under the opener); radial fan added as an opt-in layout.
+
 ## 1. Problem
 
 New nodes have no logical placement. They land on top of each other, and there is no default
@@ -32,7 +34,11 @@ headless `placeRight`).
    spot. By agent: the node attaches to its opener in a fixed direction, never overlapping.
 2. **`--after` dependents go to the RIGHT of their dependency.** Dependency reads left-to-right.
 3. **No auto-grouping of agent-opened nodes.** Ropes only. `spawn-team` keeps its own frame.
-4. **"Hierarchical" = opener lineage top-down, dependency left-to-right within a row.**
+4. **"Hierarchical" = opener-CENTERED.** The opener (orchestrator) sits top-center; its children
+   fan out BELOW it in rows, each row centered under the row above; dependency order only decides
+   the order of siblings within a row (a dependent sits to the right of what it waits on). A
+   **radial fan** is an alternative layout option (rings around the opener), never the default.
+   (Amended 2026-09-11 from "left-to-right by dependency".)
 5. **Spawning moves only the new node. A separate, explicit Smart Restructure action re-lays out
    the whole project** by that hierarchy, frames kept intact, minimal movement, from the command
    palette and as an agent verb. Restructure REPLACES "Tidy canvas" (same chord, same row): on a
@@ -156,38 +162,66 @@ A unit with no ropes in or out is **loose** and excluded from ranking.
 Members of rank *r* are ordered by Kahn's algorithm over the dep ropes among them, with the ready
 set popped by the key `(openerIndex, currentX)`, where `openerIndex` is the position, in row
 *r−1*'s final order, of the member's opener (the leftmost one if several; `Infinity` for none).
-Children therefore cluster under their opener, deps precede dependents, and ties keep today's
-left-to-right — which is the "minimal movement" tie-break.
+Children therefore cluster under their opener, deps precede dependents (a dependent sits to the
+RIGHT of what it waits on), and ties keep today's left-to-right — the "minimal movement" tie-break.
 
-### 5.4 Packing
+### 5.4 Packing — `rows` (default): opener-centered
 
 ```
-left  = min root-space x over all units          // the cluster does not drift
+cx    = center x of the rank-0 row's bounding box, taken from the CURRENT positions of its units
+        (one orchestrator ⇒ the opener stays where it is horizontally)
 y     = min root-space y over all units
 for each rank row in order:
-  nodes = arrangeNodes(nodes, rowIds, { layout: 'row', origin: { x: left, y } })
+  nodes = arrangeNodes(nodes, rowIds, { layout: 'row', origin: { x: cx - rowWidth / 2, y } })
+          // rowWidth = Σ widths + (n−1)·PLACEMENT_GAP, so the row is CENTERED under the row above
   y += tallest(row) + ROW_GAP
-loose = arrangeNodes(nodes, looseIds sorted by current (y, x), { layout: 'grid', origin: { x: left, y } })
+loose = arrangeNodes(nodes, looseIds sorted by current (y, x), { layout: 'grid', origin: { x: cx - looseGridWidth / 2, y } })
 ```
 
-`arrangeNodes` is the existing packer (gap 40); nothing new is written for geometry. With no ropes
-at all every unit is loose and the result is byte-identical to today's `arrangeAllNodes` — the
-test that licenses replacing Tidy. Running restructure twice yields the same array (idempotence
-test = the "minimal movement" guarantee in a form that can be asserted).
+`arrangeNodes` is the existing packer (gap 40); the only new geometry is the centering offset.
+The picture this produces for one orchestrator is a symmetric tree: opener top-center, its
+stations in a centered row beneath, their children beneath those. With no ropes at all every unit
+is loose and the grid is centered on the cluster's current center — a translation of today's
+`arrangeAllNodes` output, which is the test that licenses replacing Tidy (same relative layout;
+`fitAll` follows, so the camera shows the same thing). Running restructure twice yields the same
+array (idempotence = the "minimal movement" guarantee in an assertable form).
+
+### 5.4b Packing — `radial` (opt-in alternative)
+
+Same ranks, same within-row order; rank *r* is laid on a ring around the rank-0 center instead of a
+row:
+
+```
+c      = center of the rank-0 unit (several roots ⇒ the centroid of their centers)
+R[0]   = 0
+R[r]   = max( R[r−1] + tallest(row r−1)/2 + ROW_GAP + tallest(row r)/2 ,
+              (Σ widths(row r) + n·PLACEMENT_GAP) / arc )     // the ring must be long enough
+arc    = π (a half-circle BELOW c) for one root, 2π for several
+angles = evenly spaced across the arc in row order (left → right = the same order as `rows`)
+unit center = c + R[r]·(cos θ, sin θ);  frames are placed by their center like any unit
+loose  = grid below the outermost ring, centered on c.x
+```
+
+Radial is chosen per call (`restructure --layout radial`, palette "Restructure canvas (radial)");
+the keybinding always runs `rows`. It is never the default: a ring of rigid frames spends far more
+canvas than a row for the same nodes, and the row layout is what agent-opened nodes already
+approximate when they spawn (below the opener, fanned right).
 
 ### 5.5 Wiring
 
-- `arrangeAllNodes` in `Canvas.tsx` calls `restructureNodes(nodes, ropes)` instead of
+- `arrangeAllNodes` in `Canvas.tsx` calls `restructureNodes(nodes, ropes, 'rows')` instead of
   `arrangeNodes(grid)`. Keeps its guards (kanban open → refuse; < 2 units → no-op so no phantom
   undo/dirty/write), then `markDirty()` + `fitAll()`. One undo entry, as today.
 - **Names**: registry command `canvas.tidy` keeps its ID (user overrides must not break) and its
   ⌘⇧A default; its `title` becomes "Restructure canvas". Palette entry `arrange-all` and the
   pane-menu row are relabelled the same; the palette hint keeps "tidy arrange grid" so the old
   words still find it. `ShortcutsPanel` is derived from the registry and follows.
-- **Agent verb `restructure`** (no flags in v1): added to `VERBS` in `core/canvas-control-core.ts`
-  with one line of skill text; dispatched in `Canvas.tsx` next to `arrange`; **travels** (it needs
-  live measured sizes, so it is not in `STORE_ANSWERED_VERBS`); replies
-  `restructured N unit(s) in R row(s)`. Not confirm-gated: it is undoable and `arrange` never was.
+- **Agent verb `restructure [--layout rows|radial]`** (default `rows`): added to `VERBS` in
+  `core/canvas-control-core.ts` with one line of skill text; dispatched in `Canvas.tsx` next to
+  `arrange`; **travels** (it needs live measured sizes, so it is not in `STORE_ANSWERED_VERBS`);
+  replies `restructured N unit(s) in R row(s)` / `… R ring(s)`. Not confirm-gated: it is undoable
+  and `arrange` never was. A second palette entry, "Restructure canvas (radial)", runs the radial
+  variant; it has no default chord.
 - The rank function is exported (`rankUnits(nodes, ropes)`) for the Network Overview node to reuse.
 
 ## 6. Consumers rewired (Section 3 callers)
@@ -246,8 +280,11 @@ test = the "minimal movement" guarantee in a form that can be asserted).
   numbers (converted to top-left).
 - `src/renderer/lib/restructure.test.ts`: rank by opener chain; a dep never ranks above its
   dependency's row; frames rigid (children's relative positions identical before/after);
-  cycle ignored; loose nodes below the rows; no ropes ⇒ output equals `arrangeNodes(grid)` over
-  the same ids (the Tidy-replacement pin); idempotence; nested frames untouched.
+  cycle ignored; every row centered under the row above (row center x = rank-0 center x); loose
+  nodes below the rows; no ropes ⇒ output is a pure translation of `arrangeNodes(grid)` over the
+  same ids (the Tidy-replacement pin); idempotence; nested frames untouched; radial: rank-r units
+  sit at distance `R[r]` from the root center, in the lower half-plane for one root, no overlap on a
+  ring that the width rule sizes.
 - `src/renderer/lib/placement-parity.test.ts`: live (`Canvas` helper), cold (`coldOpen`) and
   headless (`server/headless-node-factory`) resolve the same top-left for the same input — the
   test that stops the three copies from ever returning.
@@ -260,6 +297,5 @@ test = the "minimal movement" guarantee in a form that can be asserted).
 ## 10. Follow-ups (not in this spec)
 
 - Headless `restructure` over persisted sizes.
-- A `--layout` flag on `restructure` (today: one layout, by design).
 - Migrating legacy untagged dep ropes (self-heals on re-arm; a one-time sweep is not worth its
   own risk).
