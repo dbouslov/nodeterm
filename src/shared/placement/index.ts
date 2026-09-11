@@ -103,6 +103,25 @@ export function placeOpened(
   return deps.length ? placeDependent(existing, deps, size) : placeChild(existing, opener, size, index)
 }
 
+/**
+ * The frames node `id` sits inside, innermost first. What an agent opens FROM a framed node is
+ * filed into the innermost one, which grows to take it — so none of them is an obstacle for it;
+ * their other children are. Cycle-guarded.
+ */
+export function ancestorFrameIds(
+  nodes: readonly { id: string; parentId?: string }[],
+  id: string
+): Set<string> {
+  const ids = new Set<string>()
+  let p = nodes.find((n) => n.id === id)?.parentId
+  while (p && !ids.has(p)) {
+    ids.add(p)
+    const parentId = p
+    p = nodes.find((n) => n.id === parentId)?.parentId
+  }
+  return ids
+}
+
 /** No anchor at all (cold open into another project): below the lowest box, aligned with the leftmost. */
 export function placeLoose(existing: readonly Box[], size: Size): Point {
   if (!existing.length) return { x: 40, y: 40 }

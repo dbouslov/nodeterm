@@ -274,6 +274,7 @@ import {
   storedAgentIdOf,
   type ColdNode
 } from '../lib/coldOpen'
+import { liveBox, liveBoxesOf, livePlaceOpened, withOpenedNode } from '../lib/livePlacement'
 import { rankUnits, restructureNodes, type RestructureLayout } from '../lib/restructure'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
 import {
@@ -460,12 +461,12 @@ import { triggerEdges } from '../lib/triggerCard'
 import {
   GROUP_PAD_X,
   PLACEMENT_GAP,
+  ancestorFrameIds,
   centerOf,
   placeByHand,
   placeChild,
   placeDependent,
   placeInFrame,
-  placeOpened,
   type Box,
   type Size as BoxSize
 } from '@shared/placement'
@@ -865,28 +866,6 @@ const ropeLink = (e: Edge): BridgeLink => {
 const newNodeSize = (): BoxSize => {
   const s = terminalNodeSize()
   return { w: s.width, h: s.height }
-}
-
-/** A live node as the placement engine sees it: ROOT-space position (a frame child's stored
- *  position is frame-relative), then measured size, else stored size, else `dflt`. */
-const liveBox = (n: CanvasNode, all: CanvasNode[], dflt: BoxSize): Box => ({
-  ...absolutePosition(n as FocusableNode, all as FocusableNode[]),
-  w: (n.measured?.width as number | undefined) ?? (n.width as number | undefined) ?? dflt.w,
-  h: (n.measured?.height as number | undefined) ?? (n.height as number | undefined) ?? dflt.h
-})
-
-/** The frames a node sits inside, innermost first. A node spawned FROM it is filed into that frame
- *  (`addAndConnect` / `placeSpawned`), so those frames are not obstacles for it — their other
- *  children are. Cycle-guarded like every other parent walk. */
-const ancestorFrameIds = (n: CanvasNode, all: CanvasNode[]): Set<string> => {
-  const ids = new Set<string>()
-  let p = n.parentId
-  while (p && !ids.has(p)) {
-    ids.add(p)
-    const parentId = p
-    p = all.find((x) => x.id === parentId)?.parentId
-  }
-  return ids
 }
 
 /** The one edge renderer — every family routes between nearest borders (see FloatingEdge). */
@@ -3814,12 +3793,8 @@ export function Canvas() {
    * filed into (`ancestorFrameIds` of what it is spawned from).
    */
   const liveBoxes = useCallback((exclude?: ReadonlySet<string>): Box[] => {
-    const ephemeral = new Set(Object.keys(useAgentNodes.getState().byId))
-    const all = nodesRef.current
-    const dflt = newNodeSize()
-    return all
-      .filter((n) => !ephemeral.has(n.id) && !exclude?.has(n.id))
-      .map((n) => liveBox(n, all, dflt))
+    const skip = new Set([...Object.keys(useAgentNodes.getState().byId), ...(exclude ?? [])])
+    return liveBoxesOf(nodesRef.current, newNodeSize(), skip)
   }, [])
 
   /**
@@ -3961,7 +3936,7 @@ export function Canvas() {
       const src = liveBox(source, all, { w: 600, h: 400 })
       // The source's own frames are not obstacles: landing inside one files the node into it
       // (`placeSpawned` → `groupAtPoint`), as a duplicate of a framed node always did.
-      const existing = liveBoxes(ancestorFrameIds(source, all))
+      const existing = liveBoxes(ancestorFrameIds(all, source.id))
       return placeDependent(existing, [src], liveBox(placing, all, newNodeSize()))
     },
     [liveBoxes]
@@ -10097,23 +10072,20 @@ export function Canvas() {
       // centerpoint; `i` fans multiple nodes out horizontally so they don't stack.
       // Placement for the nodes this call opens — the shared engine, in ROOT space (a source inside
       // a frame is resolved through the whole parent chain). Opener → child goes BELOW the source,
-      // fanned right; a node armed `--after` goes RIGHT of its deps (`placeOpened`). The source's
-      // own frames are not obstacles: `addAndConnect` files the new node into that frame.
+      // fanned right; a node armed `--after` goes RIGHT of its deps (`livePlaceOpened`). The
+      // source's own frames are not obstacles: `addAndConnect` files the new node into that frame
+      // and grows it (`withOpenedNode`).
       // `reserved` holds the siblings this same call has placed — `setNodes` is async, so nodesRef
       // does not show them yet.
       const srcBox = liveBox(src, nodesRef.current, { w: 600, h: 400 })
-      const srcFrames = ancestorFrameIds(src, nodesRef.current)
+      const srcFrames = ancestorFrameIds(nodesRef.current, src.id)
       const reserved: Box[] = []
       const obstacles = (): Box[] => [...liveBoxes(srcFrames), ...reserved]
       /** CENTER for the i-th node of an `open-*` call, reserved so its siblings clear it. */
       const placeNext = (i: number, after?: string[]): { x: number; y: number } => {
         const size = newNodeSize()
-        const deps = (after ?? [])
-          .filter((d) => d !== sourceNodeId) // waiting on the opener itself is still lineage: below it
-          .map((d) => nodesRef.current.find((n) => n.id === d))
-          .filter((n): n is CanvasNode => !!n)
-          .map((n) => liveBox(n, nodesRef.current, size))
-        const topLeft = placeOpened(obstacles(), srcBox, deps, size, i)
+        const skip = new Set(Object.keys(useAgentNodes.getState().byId))
+        const topLeft = livePlaceOpened(nodesRef.current, src, after ?? [], size, i, { reserved, skip })
         reserved.push({ ...topLeft, ...size })
         return centerOf(topLeft, size)
       }
@@ -10192,7 +10164,10 @@ export function Canvas() {
           offCanvas.created.push(placed.id)
           return placed.id
         }
-        setNodes((ns) => [...ns, placed])
+        // Filed into the source's frame against the frame as it is when the update applies, and the
+        // frame chain grown in the SAME transform: `extent: 'parent'` clamps a child that lands past
+        // the frame's edge, which put it straight back onto its source.
+        setNodes((ns) => withOpenedNode(ns, node, src.parentId, snapGridNow()))
         connect(placed.id)
         markDirty()
         return placed.id
