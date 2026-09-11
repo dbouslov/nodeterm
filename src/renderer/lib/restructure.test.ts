@@ -141,6 +141,63 @@ describe('restructureNodes', () => {
     expect(pos(out, 'g')).toEqual({ x: 50 - 200, y: 50 + ROW_GAP })
   })
 
+  it('nested frames ride inside their unit untouched', () => {
+    // m sits in frame h, which sits in frame g: the rope to m ranks g, and only g moves.
+    const nodes = [
+      n('o', 0, 0),
+      n('g', 300, 900, 600, 400, undefined, 'group'),
+      n('h', 20, 60, 300, 200, 'g', 'group'),
+      n('m', 11, 13, 100, 50, 'h')
+    ]
+    const out = restructureNodes(nodes, [rope('o', 'm')])
+    expect(pos(out, 'h')).toEqual({ x: 20, y: 60 })
+    expect(pos(out, 'm')).toEqual({ x: 11, y: 13 })
+    // centered under o (center x 50): 50 - 600 / 2
+    expect(pos(out, 'g')).toEqual({ x: 50 - 300, y: 50 + ROW_GAP })
+  })
+
+  it('centers EVERY row on the rank-0 center, not only the first row under it', () => {
+    // Three ranks of different widths (every node a different width), so a row packed from the
+    // left or centered on the wrong row cannot pass by accident.
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    const nodes = ids.map((id, i) => n(id, i * 150, i * 60, 100 + i * 10, 50))
+    const out = restructureNodes(nodes, [
+      rope('a', 'b'),
+      rope('a', 'c'),
+      rope('b', 'd'),
+      rope('b', 'e'),
+      rope('b', 'f'),
+      rope('c', 'g')
+    ])
+    const width = (id: string) => 100 + ids.indexOf(id) * 10
+    const center = (row: string[]) =>
+      (Math.min(...row.map((id) => pos(out, id).x)) + Math.max(...row.map((id) => pos(out, id).x + width(id)))) / 2
+    const c0 = center(['a'])
+    expect(center(['b', 'c'])).toBeCloseTo(c0, 5)
+    expect(center(['d', 'e', 'f', 'g'])).toBeCloseTo(c0, 5)
+    expect(pos(out, 'd').y).toBe(pos(out, 'b').y + 50 + ROW_GAP)
+  })
+
+  it('radial with several roots: rank 1 goes round the FULL circle at one distance, never overlapping', () => {
+    const nodes = [n('a', 0, 0), n('b', 300, 0), n('a1', 0, 300), n('a2', 100, 300), n('b1', 300, 300)]
+    const out = restructureNodes(nodes, [rope('a', 'a1'), rope('a', 'a2'), rope('b', 'b1')], 'radial')
+    // The rank-0 row packs as one row; its center is the rings' center.
+    const c = { x: (pos(out, 'a').x + pos(out, 'b').x + 100) / 2, y: pos(out, 'a').y + 25 }
+    const dist = (id: string) => Math.hypot(pos(out, id).x + 50 - c.x, pos(out, id).y + 25 - c.y)
+    expect(dist('a2')).toBeCloseTo(dist('a1'), 5)
+    expect(dist('b1')).toBeCloseTo(dist('a1'), 5)
+    // Several roots are not held to the lower half-circle: a ring unit sits above the center.
+    expect(Math.min(...['a1', 'a2', 'b1'].map((id) => pos(out, id).y + 25))).toBeLessThan(c.y)
+    const all = ['a', 'b', 'a1', 'a2', 'b1']
+    for (const p of all)
+      for (const q of all)
+        if (p < q) {
+          const P = pos(out, p)
+          const Q = pos(out, q)
+          expect(P.x < Q.x + 100 && P.x + 100 > Q.x && P.y < Q.y + 50 && P.y + 50 > Q.y, `${p}/${q}`).toBe(false)
+        }
+  })
+
   it('loose nodes go below the rows as a grid', () => {
     const nodes = [n('a', 0, 0), n('b', 0, 200), n('z', 900, 900)]
     const out = restructureNodes(nodes, [rope('a', 'b')])
