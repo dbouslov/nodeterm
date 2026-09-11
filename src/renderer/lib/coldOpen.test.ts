@@ -158,8 +158,10 @@ describe('coldResolveAfter', () => {
 describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometry', () => {
   it('centers below the source and fans siblings right', () => {
     const src = N('src', { position: { x: 100, y: 200 }, size: { width: 600, height: 400 } })
-    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 400, y: 890 })
-    expect(coldPlaceBelow([src], src, 1)).toEqual({ x: 860, y: 890 })
+    // top-left (100, 200 + 400 + ROW_GAP 80), a 600×400 node → center (+300, +200); siblings step
+    // one node width + PLACEMENT_GAP (640) to the right.
+    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 400, y: 880 })
+    expect(coldPlaceBelow([src], src, 1)).toEqual({ x: 1040, y: 880 })
   })
 
   it('resolves a grouped source to ROOT space', () => {
@@ -171,12 +173,12 @@ describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometr
       position: { x: 10, y: 20 },
       size: { width: 600, height: 400 }
     })
-    expect(coldPlaceBelow([frame, src], src, 0)).toEqual({ x: 1310, y: 1710 })
+    expect(coldPlaceBelow([frame, src], src, 0)).toEqual({ x: 1310, y: 1700 })
   })
 
   it('falls back to the default node size when none is persisted', () => {
     const src = N('src', { position: { x: 0, y: 0 } })
-    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 300, y: 690 })
+    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 300, y: 680 })
   })
 })
 

@@ -20,6 +20,7 @@
 // the React component is not testable and these are.
 
 import { rootPositionIn, type PlacedNode } from './projectOpen'
+import { centerOf, placeChild, type Box } from '@shared/placement'
 
 /** A serialized node, as the projects store keeps them for non-active projects. Structural subset
  *  of `CanvasNodeState` — deliberately not the type itself, so tests can build one in a line. */
@@ -146,50 +147,33 @@ export function coldResolveAfter(
   return { ok: true, after: ids }
 }
 
+/** A stored node as a ROOT-space box for the placement engine. */
+export function coldBox(nodes: readonly ColdNode[], n: ColdNode): Box {
+  const at = rootPositionIn(nodes.map(asPlaced), asPlaced(n))
+  return { x: at.x, y: at.y, w: widthOf(n), h: heightOf(n) }
+}
+
 /**
- * Where the i-th opened node lands when the source IS in this project: the same geometry the live
- * path's `placeBelow` uses (below the source, fanned right), computed from the source's PERSISTED
- * size and resolved to ROOT space so a source sitting inside a frame still places correctly.
- * Returns a CENTER point — the factories' `center` parameter.
+ * Where the i-th opened node lands when the source IS in this project: the shared engine's
+ * opener→child rule (below the source, fanned right, never overlapping) over the stored nodes plus
+ * `reserved` — the siblings this same call already placed, which are not in `nodes` because the
+ * store has not been written yet. Resolved to ROOT space so a source inside a frame still places
+ * correctly. Returns a CENTER point — the factories' `center` parameter.
  */
 export function coldPlaceBelow(
   nodes: readonly ColdNode[],
   source: ColdNode,
-  i: number
+  i: number,
+  reserved: readonly Box[] = [],
+  size: { w: number; h: number } = { w: 600, h: 400 }
 ): { x: number; y: number } {
-  const abs = rootPositionIn(nodes.map(asPlaced), asPlaced(source))
-  return {
-    x: abs.x + widthOf(source) / 2 + i * 460,
-    y: abs.y + heightOf(source) + 80 + 210
-  }
+  const existing = [...nodes.map((n) => coldBox(nodes, n)), ...reserved]
+  return centerOf(placeChild(existing, coldBox(nodes, source), size, i), size)
 }
 
-// Grid geometry for nodes opened INTO a group frame. Exported so Canvas's LIVE path uses these
-// exact numbers too — the cold and live placements are the same layout, and two copies of a
-// magic-number grid drift into two layouts.
-export const GROUP_PAD_X = 24
-export const GROUP_PAD_TOP = 56
-export const GROUP_GAP = 24
-
-export function groupSlot(slot: number, w: number, h: number): { x: number; y: number } {
-  return {
-    x: GROUP_PAD_X + (slot % 2) * (w + GROUP_GAP),
-    y: GROUP_PAD_TOP + Math.floor(slot / 2) * (h + GROUP_GAP)
-  }
-}
-
-export function groupSizeFor(
-  children: number,
-  w: number,
-  h: number
-): { width: number; height: number } {
-  const cols = Math.min(2, Math.max(1, children))
-  const rows = Math.max(1, Math.ceil(children / 2))
-  return {
-    width: GROUP_PAD_X * 2 + cols * w + (cols - 1) * GROUP_GAP,
-    height: GROUP_PAD_TOP + rows * h + (rows - 1) * GROUP_GAP + GROUP_PAD_X
-  }
-}
+// Grid geometry for nodes opened INTO a group frame lives in the shared placement engine, so the
+// cold and live paths cannot drift into two layouts. Re-exported to keep this import path.
+export { GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP, groupSlot, groupSizeFor } from '@shared/placement'
 
 /** How many direct children a stored frame already holds — the `existing` offset for `groupSlot`. */
 export function coldGroupChildCount(nodes: readonly ColdNode[], groupId: string): number {
