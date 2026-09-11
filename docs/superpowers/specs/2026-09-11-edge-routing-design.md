@@ -1,6 +1,6 @@
 # Edge Rendering and Routing — circuit-board edges
 
-Date: 2026-09-11 · Branch: `feat/edge-routing` · Status: approved design (decisions 1 to 5), awaiting plan
+Date: 2026-09-11 · Branch: `feat/edge-routing` · Status: approved design (decisions 1 to 5); plan at docs/superpowers/plans/2026-09-11-edge-routing.md
 
 ## Problem
 
@@ -112,9 +112,9 @@ the head is always exactly the stroke's colour, including agent colours and them
 Canvas.tsx / NetworkOverviewView.tsx
   <ReactFlow edges={displayEdges} edgeTypes={circuitEdgeTypes}
              onEdgeMouseEnter onEdgeMouseLeave>
-    <EdgeRoutingProvider>        // routes ALL edges once per change, provides Map<id, Route>
+    <EdgeRouter edges/>          // routes ALL edges once per change, publishes to useEdgeRoutes
     <EdgeLegend/>                // <Panel position="bottom-left">, a chip that expands
-  edge type 'circuit' → <CircuitEdge/>   // reads its Route from the provider, paints it
+  edge type 'circuit' → <CircuitEdge/>   // reads its Route from useEdgeRoutes[rfId], paints it
 
 src/renderer/lib/edge-routing/   (pure; no React, no store imports)
   types.ts        Box, Port, Route, RouteRequest, RoutedGraph
@@ -127,20 +127,28 @@ src/renderer/lib/edge-routing/   (pure; no React, no store imports)
   index.ts        routeAll(request): RoutedGraph
 src/renderer/lib/edgeKinds.ts    kind → look table (Section 1)
 src/renderer/canvas/edges/
-  EdgeRoutingProvider.tsx, CircuitEdge.tsx, EdgeLegend.tsx, edgeFocus.ts, index.ts
+  EdgeRouter.tsx, edgeRoutes.ts (store), requestFromLookup.ts, CircuitEdge.tsx,
+  circuitEdgeModel.ts, EdgeLegend.tsx, index.ts
 ```
 
 `FloatingEdge.tsx` is deleted. `lib/floatingEdge.ts` stays: `borderExit` is the dominant-axis
 side rule `ports.ts` reuses.
 
-### 2.1 EdgeRoutingProvider
+### 2.1 EdgeRouter and the routes store
 
 Mounted as a child of `<ReactFlow>` (so `useStore` works). It subscribes to one primitive
-SIGNATURE, not to the node array: for every node, `id:x,y,w,h,parent,hidden,selected` from
-`internals.positionAbsolute` and `measured`, joined. React Flow re-runs the selector on every
-store change, but the provider re-renders only when the string changes. It receives `edges` as a
-prop from its host (the same array the host gave `<ReactFlow>`), so both instances feed it the
-same way.
+SIGNATURE, not to the node array: for every node, `id:x,y,w,h,parent,hidden,selected,dragging`
+from `internals.positionAbsolute` and `measured`, joined. React Flow re-runs the selector on
+every store change, but the router re-renders only when the string changes. It receives `edges`
+as a prop from its host (the same array the host gave `<ReactFlow>`), so both instances feed it
+the same way.
+
+Routes travel through a small zustand store (`useEdgeRoutes`), keyed by React Flow's instance id
+(`rfId`, read with `useStore`), not through React context: React Flow renders edge components in
+its own subtree, so a context provider mounted as a child of `<ReactFlow>` never reaches them.
+The canvas uses the default id; the overview passes `id="overview"` on its `<ReactFlow>`. The
+store also holds the hovered edge id per instance, written by the host's `onEdgeMouseEnter` /
+`onEdgeMouseLeave` through `getState()` so a hover never re-renders the host.
 
 ```ts
 interface RouteRequest {
@@ -153,13 +161,13 @@ export function routeAll(req: RouteRequest, previous?: RoutedGraph, moved?: Set<
 ```
 
 Full pass when the signature changes and no node is dragging. During a drag (any node with
-`dragging`), the provider passes `moved` (the dragged ids) and the previous graph; `routeAll` then
+`dragging`), the router passes `moved` (the dragged ids) and the previous graph; `routeAll` then
 re-routes only edges that touch a moved node or whose current route's bounding box intersects a
-moved node's old or new box, and keeps the rest. On drag stop the signature settles and the full
+moved node's new box, and keeps the rest; nudging is skipped for the re-routed set. On drag stop the signature settles and the full
 pass runs. This is what keeps a 100-edge canvas fluid under the mouse; Section 6 has the budget.
 
-The provider exposes `{ routes, litEdgeId, setLit }` through context. `litEdgeId` is fed by the
-host's `onEdgeMouseEnter` / `onEdgeMouseLeave`.
+Per instance the store publishes `{ routes, nodes, litSet, anyLit }`: `litSet` is the hovered
+edge, every selected edge, and every edge touching a selected node.
 
 ### 2.2 CircuitEdge
 
@@ -179,9 +187,10 @@ data.state)` plus the overlays; class names `edge-<kind>`, `edge-lit`, `edge-dim
 { id, source, target, type: 'circuit', data: { kind, state, ropeKind? }, selected? }
 ```
 
-No inline `style`, no `markerEnd`, no `animated`. The subagent/loop builder and `triggerEdges`
-emit the same shape with `kind: 'fanout'` and `kind: 'trigger'`. `data.anchor` goes away: the
-port rule is a function of the kind.
+No inline `style`, no `markerEnd`; `animated` is set from `edgeAnimated(kind, state)` because
+React Flow applies its dash animation class from that edge property, outside the component. The
+subagent/loop builder and `triggerEdges` emit the same shape with `kind: 'fanout'` and
+`kind: 'trigger'`. `data.anchor` goes away: the port rule is a function of the kind.
 
 ## 3. The router
 
@@ -256,9 +265,10 @@ corner list only.
 
 ### 3.5 Fallback
 
-`getSmoothStepPath` from React Flow with the same two ports, radius `CORNER_RADIUS`. Marked
-`fallback: true` so tests and the legend can tell. An edge is never left undrawn because the
-router gave up.
+A plain three-segment orthogonal path between the same two ports (out along the source normal,
+across the midline, in along the target normal), with no avoidance. Pure, so the routing module
+never imports React Flow. Marked `fallback: true` so tests can tell and the edge carries an
+`edge-fallback` class. An edge is never left undrawn because the router gave up.
 
 ### 3.6 Bundling (`nudge.ts`, decision 4)
 
@@ -309,15 +319,15 @@ the port.
   `ropeInfoOf`). The eye (`hideFanout`) filter is unchanged.
 - The subagent/loop card builder emits `kind: 'fanout'`, `state: { working, agentColor }`.
 - `triggerEdges(nodes)` drops its `accent` parameter and emits `kind: 'trigger'`.
-- `<EdgeRoutingProvider edges={displayEdges}>` and `<EdgeLegend/>` are rendered inside
+- `<EdgeRouter edges={displayEdges}/>` and `<EdgeLegend/>` are rendered inside
   `<ReactFlow>`, beside the minimap; `onEdgeMouseEnter` / `onEdgeMouseLeave` wire the focus.
 - `edge-model.source.test.ts` pins move with the change: `type: 'circuit'`, `edgeTypes=
   {circuitEdgeTypes}`, the `anchor: 'horizontal'` pin becomes "context and note edges carry
   `kind: 'context'` / `kind: 'note'`", label strings unchanged.
 
 **Network Overview** (`components/overview/NetworkOverviewView.tsx`, sibling branch): its
-`buildOverviewGraph` emits the same edge shape; it mounts the same provider, edge types and
-legend inside its own `<ReactFlowProvider>`. Its spec names "the existing `floating` edge type";
+`buildOverviewGraph` emits the same edge shape; it mounts the same router, edge types and
+legend inside its own `<ReactFlowProvider>` and passes `id="overview"` to `<ReactFlow>`. Its spec names "the existing `floating` edge type";
 that becomes `circuit`, one import. Whichever branch lands second makes that one-line change.
 
 **Smart Spawning** (sibling branch): `ropeEdge(id, source, target, kind)` puts `kind` in `data`;
@@ -346,14 +356,14 @@ expands a small fraction of a few hundred vertices; nudging is a bucket sort ove
 worker in v1. If the pin ever fails on a real canvas, the next step is a sweep-line obstacle
 index, not a library.
 
-The provider's memo is keyed on the node signature string and the `edges` array identity, the
+The router's memo is keyed on the node signature string and the `edges` array identity, the
 same discipline `displayEdges` uses (`edgeSig`), so a pan or zoom routes nothing.
 
 ## 7. Errors and degrades
 
 - Unmeasured node (first tick after mount): the edge draws nothing this frame, as today.
-- Router failure after widening: smoothstep fallback, never a missing edge. A count of fallback
-  routes is exposed on the provider for the test harness; the UI does not show it.
+- Router failure after widening: the three-segment fallback, never a missing edge. A count of
+  fallback routes is on the routed graph for the test harness; the UI does not show it.
 - An edge whose endpoint is gone is dropped by React Flow before the provider sees it.
 - Hostile input: none reaches this layer; `project.json` is validated upstream and the router
   only reads measured boxes. A NaN box (impossible from React Flow, guarded anyway) is skipped as
@@ -378,7 +388,7 @@ same discipline `displayEdges` uses (`edgeSig`), so a pan or zoom routes nothing
 
 | File | This spec | Smart Spawning | Network Overview |
 |---|---|---|---|
-| `canvas/Canvas.tsx` | `displayEdges`, `edgeTypes`, `ropeEdge` type string, `<ReactFlow>` props, provider + legend mount | `ropeEdge` gains `kind`, `arrangeAllNodes`, placement call sites | mounts the overlay beside `KanbanView`, `.minimap-expand` beside the minimap |
+| `canvas/Canvas.tsx` | `displayEdges`, `edgeTypes`, `ropeEdge` type string, `<ReactFlow>` props, router + legend mount | `ropeEdge` gains `kind`, `arrangeAllNodes`, placement call sites | mounts the overlay beside `KanbanView`, `.minimap-expand` beside the minimap |
 | `canvas/FloatingEdge.tsx` | deleted, replaced by `canvas/edges/CircuitEdge.tsx` | no | imports it by name (becomes `circuit`) |
 | `lib/floatingEdge.ts` | kept; `borderExit` reused | no | no |
 | `lib/edgeModel.ts` | unchanged (`ropeVisual` still answers `waiting`) | `missingDepRopes` writes `kind` | no |
@@ -420,11 +430,13 @@ above.
 - `lib/edge-routing/perf.test.ts`: the three pins in Section 6.
 - `lib/edgeKinds.test.ts`: every kind has a look; hue and dash unique per kind; overlays applied
   in order (driven < selected); neutral colour when no agent.
-- `canvas/edges/CircuitEdge.test.tsx`: renders nothing while unmeasured; lit edge renders two
-  outlines and the label; dimmed edge has the class; arrowheads present per kind.
+- `canvas/edges/circuitEdgeModel.test.ts`: lit edge yields two outlines and the label; dimmed
+  edge has the class; arrowheads per kind; `requestFromLookup` skips unmeasured nodes;
+  `litSetFor` lights hovered, selected, and node-selected edges.
 - `canvas/edges/EdgeLegend.test.tsx`: collapsed chip, expands to five kinds plus two states.
 - `canvas/edge-model.source.test.ts`: updated pins (Section 5).
-- `canvas-wiring.test.tsx`: `onEdgeMouseEnter` lights, leave dims, node selection lights its edges.
+- `canvas/edge-model.source.test.ts`: the router, legend and hover handlers are wired (source
+  pins; jsdom cannot lay out a React Flow instance, so there is no render test of hover).
 - Mutation checks before the PR: break the obstacle inflation and watch the property test fail;
   break the channel ordering and watch the nudge test fail.
 - `git diff --check`, `npm run typecheck`, `npm test`.
