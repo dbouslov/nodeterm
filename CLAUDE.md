@@ -3155,6 +3155,17 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   `sanitizeRopes` on both load seams; untagged = opener, and a restore never stamps a kind the
   file did not carry, so a legacy dep rope is not rewritten as lineage on the next save) so the
   ranker can tell the two apart after launch, when `pendingLaunch.after` is gone.
+- **Pin** (`data.pinned`, persisted as `pinned: true`; node menu "Pin" / "Unpin", frame menu "Pin
+  frame", hideable as `pin`; agent verb `pin --node <id> --set on|off`): automatic layout never
+  moves a pinned item or anything inside it. `isPinned(node, all)` walks the parent chain, and
+  only a literal `true` counts (`nodeStatesToFlow` drops anything else — project.json is
+  hand-editable). `arrangeNodes` skips pinned members; `alignNodes` aligns the rest TO them;
+  `fitGroupToChildren` grows a pinned frame in place (right / down) and never re-anchors or
+  shrinks it — the same rule in the Server Edition's copy. Restructure treats a pinned unit, or a
+  frame holding a pinned node, as FIXED: it still ranks, keeps its place, and `clearOfFixed`
+  moves anything laid out onto it (with no pins that pass changes nothing). Dragging by hand is
+  not blocked. The headless `pin` verb is refused (follow-up). A new automatic mover must skip
+  `isPinned` nodes.
 - **Add menu** = bottom dock (`Dock.tsx`) `+`, mirrored by the pane menu and command palette.
 - **Edges** are all one React Flow type, `floating` (`canvas/FloatingEdge.tsx` over the pure
   `lib/floatingEdge.ts`): every family — ropes, context bridges, note links, subagent/loop card

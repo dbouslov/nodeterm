@@ -112,8 +112,9 @@ lane unaffected.
   in `src/shared/placement/` — the eight independent rules it replaced are how nodes came to spawn
   on top of each other. When one call opens several nodes, reserve what you place (append its box
   to `existing`) before placing the next. Moving EXISTING nodes is `lib/restructure.ts`'s job and
-  happens only on the explicit Restructure action. Deep version: CLAUDE.md § Canvas interaction &
-  panels.
+  happens only on the explicit Restructure action — and anything that moves existing nodes
+  automatically must skip pinned ones (`isPinned`, `renderer/state/workspace.ts`): the user pinned
+  them so layout would leave them alone. Deep version: CLAUDE.md § Canvas interaction & panels.
 
 - **Every loosening of a security gate must be a SETTING the user can see and revoke.** A "don't
   ask again" that lives only in a dialog is a permission granted once and never findable again. The
