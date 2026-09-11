@@ -458,7 +458,7 @@ import {
 } from '../lib/pendingLaunch'
 import { WAIT_LABEL, dropAfterDep, edgeHidden, hiddenEdgeNodeIds, missingDepRopes, ropeInfoOf, ropeVisual } from '../lib/edgeModel'
 import { triggerEdges } from '../lib/triggerCard'
-import { freeSpot } from '../lib/placement'
+import { centerOf, placeByHand, placeDependent, type Box, type Size as BoxSize } from '@shared/placement'
 import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
@@ -590,6 +590,7 @@ import {
   refitMaximizedNode,
   restoreMaximizedNode,
   placeNodeInRect,
+  terminalNodeSize,
   type CanvasNode
 } from '../state/workspace'
 import { codexAccountSelectable, codexAccountSwitchStillEligible } from './codex-account-switch'
@@ -847,6 +848,21 @@ const ropeLink = (e: Edge): BridgeLink => {
   const kind = (e.data as { kind?: RopeKind } | undefined)?.kind
   return { id: e.id, source: e.source, target: e.target, ...(kind ? { kind } : {}) }
 }
+
+/** Default size of a new terminal/agent node — the factories' own `terminalNodeSize`, so the
+ *  placement engine clears the box the node will really occupy. */
+const newNodeSize = (): BoxSize => {
+  const s = terminalNodeSize()
+  return { w: s.width, h: s.height }
+}
+
+/** A live node as the placement engine sees it: ROOT-space position (a frame child's stored
+ *  position is frame-relative), then measured size, else stored size, else `dflt`. */
+const liveBox = (n: CanvasNode, all: CanvasNode[], dflt: BoxSize): Box => ({
+  ...absolutePosition(n as FocusableNode, all as FocusableNode[]),
+  w: (n.measured?.width as number | undefined) ?? (n.width as number | undefined) ?? dflt.w,
+  h: (n.measured?.height as number | undefined) ?? (n.height as number | undefined) ?? dflt.h
+})
 
 /** The one edge renderer — every family routes between nearest borders (see FloatingEdge). */
 const edgeTypes = { floating: FloatingEdge }
@@ -3767,29 +3783,30 @@ export function Canvas() {
   }, [screenToFlowPosition])
 
   /**
-   * A non-overlapping drop point for a NODE created without a cursor (dock / palette / kanban
-   * board) — otherwise every one lands on the view center and piles into a stack you only discover
-   * when you switch back to the canvas. Returns undefined only if the view isn't measured yet.
+   * Every persisted live node as a ROOT-space box — what the placement engine must not land on.
+   * Real, laid-out nodes only: ephemeral subagent/loop cards are skipped (not persisted, they
+   * vanish on their own — see useAgentNodes).
+   */
+  const liveBoxes = useCallback((): Box[] => {
+    const ephemeral = new Set(Object.keys(useAgentNodes.getState().byId))
+    const all = nodesRef.current
+    const dflt = newNodeSize()
+    return all.filter((n) => !ephemeral.has(n.id)).map((n) => liveBox(n, all, dflt))
+  }, [])
+
+  /**
+   * A CENTER point for a NODE created without a cursor (dock / palette / kanban board): the view
+   * center, nudged to the nearest clear spot — otherwise every one lands on the view center and
+   * piles into a stack you only discover when you switch back to the canvas. (The old version
+   * handed the CENTER to a top-left check, so it cleared a box half a node away from where the
+   * node landed.) Returns undefined only if the view isn't measured yet.
    */
   const emptyNodePos = useCallback((): { x: number; y: number } | undefined => {
     const preferred = viewCenter()
     if (!preferred) return undefined
-    const s = useSettings.getState().settings
-    const w = s.defaultNodeWidth || 640
-    const h = s.defaultNodeHeight || 440
-    // Real, laid-out nodes only (skip ephemeral subagent/loop cards, which aren't persisted and
-    // vanish on their own — see useAgentNodes).
-    const ephemeral = new Set(Object.keys(useAgentNodes.getState().byId))
-    const boxes = nodesRef.current
-      .filter((n) => !ephemeral.has(n.id))
-      .map((n) => ({
-        x: n.position.x,
-        y: n.position.y,
-        w: (n.measured?.width as number | undefined) ?? (n.width as number | undefined) ?? w,
-        h: (n.measured?.height as number | undefined) ?? (n.height as number | undefined) ?? h
-      }))
-    return freeSpot(boxes, preferred, { w, h })
-  }, [viewCenter])
+    const size = newNodeSize()
+    return centerOf(placeByHand(liveBoxes(), preferred, size), size)
+  }, [viewCenter, liveBoxes])
 
   /** The checkout a Source Control action refers to. The panel hands its ACTIVE SCOPE's cwd
    *  (main checkout or a bound worktree) with every relative path, so the diff/agent node it opens
@@ -3905,15 +3922,19 @@ export function Canvas() {
   }, [])
 
   /** Where a node spawned FROM another node (Duplicate / Branch / Transfer) goes when the action
-   *  carried no cursor position (⌘K, an agent CLI call): just right of its source.
-   *  Read in ABSOLUTE coordinates on purpose — a grouped node's `position` is relative to its
-   *  group frame, and using it raw threw the new node the group's own x/y away from the source. */
-  const besideNode = useCallback((source: CanvasNode): { x: number; y: number } => {
-    const p = absolutePosition(source as FocusableNode, nodesRef.current as FocusableNode[])
-    const width =
-      (source.measured?.width as number | undefined) ?? (source.width as number | undefined) ?? 600
-    return { x: p.x + width + 32, y: p.y }
-  }, [])
+   *  carried no cursor position (⌘K, an agent CLI call): right of its source, on the first clear
+   *  spot (the engine's dependent rule), sized as the node being placed. Returns an ABSOLUTE
+   *  top-left — what `placeSpawned` takes. Read in ABSOLUTE coordinates on purpose — a grouped
+   *  node's `position` is relative to its group frame, and using it raw threw the new node the
+   *  group's own x/y away from the source. */
+  const besideNode = useCallback(
+    (source: CanvasNode, placing: CanvasNode): { x: number; y: number } => {
+      const all = nodesRef.current
+      const src = liveBox(source, all, { w: 600, h: 400 })
+      return placeDependent(liveBoxes(), [src], liveBox(placing, all, newNodeSize()))
+    },
+    [liveBoxes]
+  )
 
   /** Put a spawned node at an ABSOLUTE canvas point — the point the user right-clicked, so the
    *  node appears where the menu was opened. Landing inside a group frame parents it into that
@@ -6601,7 +6622,7 @@ export function Canvas() {
       copy.selected = true
       // Where the user right-clicked when the action came from the node menu; beside the source
       // otherwise (the agent-CLI `branch` verb and the header action have no cursor).
-      const placed = placeSpawned(copy, opts?.at ?? besideNode(source))
+      const placed = placeSpawned(copy, opts?.at ?? besideNode(source, copy))
       setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), placed])
       markDirty()
       return { ok: true, newNodeId: placed.id }
@@ -6687,7 +6708,7 @@ export function Canvas() {
         model
       )
       node.selected = true
-      const placed = placeSpawned(node, at ?? besideNode(source))
+      const placed = placeSpawned(node, at ?? besideNode(source, node))
       setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), placed])
       markDirty()
     },
@@ -8494,7 +8515,10 @@ export function Canvas() {
   const onPaneContextMenu = useCallback(
     (e: MouseEvent | React.MouseEvent) => {
       e.preventDefault()
-      const at = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      // Centered on the cursor, nudged to the nearest clear spot: `at` is the CENTER every add
+      // entry hands its factory, so a right-click beside a node no longer drops one on top of it.
+      const cursor = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const at = centerOf(placeByHand(liveBoxes(), cursor, newNodeSize()), newNodeSize())
       const screenPos = { x: e.clientX, y: e.clientY }
       // Split the canonical content list around the agent block: the pane menu shows terminal,
       // THEN agents, THEN the rest (remote, browser, …, worktree). The spec is still the single
@@ -8542,6 +8566,7 @@ export function Canvas() {
     },
     [
       screenToFlowPosition,
+      liveBoxes,
       agentCreationItems,
       addHandlers,
       addCtx,

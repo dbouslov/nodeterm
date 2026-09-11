@@ -221,14 +221,13 @@ function nextId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${randomToken()}`
 }
 
-/** Stagger placement so new nodes don't overlap. */
-function staggeredPosition(index: number) {
-  return { x: 80 + (index % 4) * 360, y: 120 + Math.floor(index / 4) * 320 }
-}
-
-/** Top-left position so a node of the given size is centered on `center`. */
-function placeAt(center: { x: number; y: number } | undefined, index: number, w: number, h: number) {
-  return center ? { x: center.x - w / 2, y: center.y - h / 2 } : staggeredPosition(index)
+/** Top-left so a node of the given size is centered on `center`. With no point at all (the view is
+ *  not measured yet — every real caller passes one from the placement engine) it falls back to a
+ *  fixed origin: the old count-keyed stagger stepped 360×320 for 600×400 nodes, so it caused the
+ *  overlap it existed to avoid. */
+const NO_CURSOR_ORIGIN = { x: 80, y: 120 }
+function placeAt(center: { x: number; y: number } | undefined, w: number, h: number) {
+  return center ? { x: center.x - w / 2, y: center.y - h / 2 } : { ...NO_CURSOR_ORIGIN }
 }
 
 /**
@@ -247,7 +246,7 @@ function placeNode(
   h: number
 ): Pick<CanvasNode, 'position' | 'width' | 'height' | 'style'> {
   const { snapToGrid, gridSize } = useSettings.getState().settings
-  const at = placeAt(center, index, w, h)
+  const at = placeAt(center, w, h)
   const grid = snapToGrid ? gridSize || DEFAULT_SETTINGS.gridSize : 0
   const box = grid
     ? snapNodeToGrid(grid, kind, { x: at.x, y: at.y, width: w, height: h })
@@ -266,7 +265,7 @@ function placeNode(
  * to sane canvas bounds — settings.json is hand-editable, and a 0×0 or NaN node would be
  * unclickable/ungrabbable forever. Falls back to the historical 600×400.
  */
-function terminalNodeSize(): { width: number; height: number } {
+export function terminalNodeSize(): { width: number; height: number } {
   const s = useSettings.getState().settings
   const clamp = (v: unknown, lo: number, hi: number, dflt: number): number => {
     const n = typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : dflt
@@ -1099,7 +1098,7 @@ export function createTriggerNode(index: number, center?: { x: number; y: number
   return {
     id: nextId('trigger'),
     type: 'trigger',
-    position: placeAt(center, index, TRIGGER_SIZE.width, TRIGGER_SIZE.height),
+    position: placeAt(center, TRIGGER_SIZE.width, TRIGGER_SIZE.height),
     width: TRIGGER_SIZE.width,
     height: TRIGGER_SIZE.height,
     style: { width: TRIGGER_SIZE.width, height: TRIGGER_SIZE.height },
