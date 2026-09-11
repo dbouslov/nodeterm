@@ -88,6 +88,21 @@ export function placeDependent(existing: readonly Box[], deps: readonly Box[], s
   return freeSpotDirected(existing, { x: right + PLACEMENT_GAP, y: top }, size)
 }
 
+/**
+ * A node an agent OPENS: right of its `--after` deps when any are on this canvas (dependency
+ * outranks lineage), else below its opener as sibling `index`. The one rule the live dispatch, the
+ * cold open and the headless factory all call, so the three cannot drift into three layouts again.
+ */
+export function placeOpened(
+  existing: readonly Box[],
+  opener: Box,
+  deps: readonly Box[],
+  size: Size,
+  index: number
+): Point {
+  return deps.length ? placeDependent(existing, deps, size) : placeChild(existing, opener, size, index)
+}
+
 /** No anchor at all (cold open into another project): below the lowest box, aligned with the leftmost. */
 export function placeLoose(existing: readonly Box[], size: Size): Point {
   if (!existing.length) return { x: 40, y: 40 }

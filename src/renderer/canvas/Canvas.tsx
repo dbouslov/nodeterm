@@ -458,7 +458,16 @@ import {
 } from '../lib/pendingLaunch'
 import { WAIT_LABEL, dropAfterDep, edgeHidden, hiddenEdgeNodeIds, missingDepRopes, ropeInfoOf, ropeVisual } from '../lib/edgeModel'
 import { triggerEdges } from '../lib/triggerCard'
-import { centerOf, placeByHand, placeDependent, type Box, type Size as BoxSize } from '@shared/placement'
+import {
+  centerOf,
+  placeByHand,
+  placeChild,
+  placeDependent,
+  placeInFrame,
+  placeOpened,
+  type Box,
+  type Size as BoxSize
+} from '@shared/placement'
 import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
@@ -863,6 +872,20 @@ const liveBox = (n: CanvasNode, all: CanvasNode[], dflt: BoxSize): Box => ({
   w: (n.measured?.width as number | undefined) ?? (n.width as number | undefined) ?? dflt.w,
   h: (n.measured?.height as number | undefined) ?? (n.height as number | undefined) ?? dflt.h
 })
+
+/** The frames a node sits inside, innermost first. A node spawned FROM it is filed into that frame
+ *  (`addAndConnect` / `placeSpawned`), so those frames are not obstacles for it — their other
+ *  children are. Cycle-guarded like every other parent walk. */
+const ancestorFrameIds = (n: CanvasNode, all: CanvasNode[]): Set<string> => {
+  const ids = new Set<string>()
+  let p = n.parentId
+  while (p && !ids.has(p)) {
+    ids.add(p)
+    const parentId = p
+    p = all.find((x) => x.id === parentId)?.parentId
+  }
+  return ids
+}
 
 /** The one edge renderer — every family routes between nearest borders (see FloatingEdge). */
 const edgeTypes = { floating: FloatingEdge }
@@ -3785,13 +3808,16 @@ export function Canvas() {
   /**
    * Every persisted live node as a ROOT-space box — what the placement engine must not land on.
    * Real, laid-out nodes only: ephemeral subagent/loop cards are skipped (not persisted, they
-   * vanish on their own — see useAgentNodes).
+   * vanish on their own — see useAgentNodes). `exclude` leaves out the frames the new node will be
+   * filed into (`ancestorFrameIds` of what it is spawned from).
    */
-  const liveBoxes = useCallback((): Box[] => {
+  const liveBoxes = useCallback((exclude?: ReadonlySet<string>): Box[] => {
     const ephemeral = new Set(Object.keys(useAgentNodes.getState().byId))
     const all = nodesRef.current
     const dflt = newNodeSize()
-    return all.filter((n) => !ephemeral.has(n.id)).map((n) => liveBox(n, all, dflt))
+    return all
+      .filter((n) => !ephemeral.has(n.id) && !exclude?.has(n.id))
+      .map((n) => liveBox(n, all, dflt))
   }, [])
 
   /**
@@ -3931,7 +3957,10 @@ export function Canvas() {
     (source: CanvasNode, placing: CanvasNode): { x: number; y: number } => {
       const all = nodesRef.current
       const src = liveBox(source, all, { w: 600, h: 400 })
-      return placeDependent(liveBoxes(), [src], liveBox(placing, all, newNodeSize()))
+      // The source's own frames are not obstacles: landing inside one files the node into it
+      // (`placeSpawned` → `groupAtPoint`), as a duplicate of a framed node always did.
+      const existing = liveBoxes(ancestorFrameIds(source, all))
+      return placeDependent(existing, [src], liveBox(placing, all, newNodeSize()))
     },
     [liveBoxes]
   )
@@ -9989,17 +10018,34 @@ export function Canvas() {
       // flow-in), mirroring how subagent/loop nodes attach — so they read as "hanging off" the
       // conversation instead of landing on top of unrelated nodes. `placeBelow` returns a node
       // centerpoint; `i` fans multiple nodes out horizontally so they don't stack.
-      const srcW = src.measured?.width ?? (src.width as number) ?? 600
-      const srcH = src.measured?.height ?? (src.height as number) ?? 400
-      // src.position is group-relative when the agent sits inside a group frame — resolve the
-      // absolute position first so placements land below the agent regardless of grouping.
-      const srcGroup = src.parentId ? nodesRef.current.find((n) => n.id === src.parentId) : undefined
-      const srcAbs = {
-        x: src.position.x + (srcGroup?.position.x ?? 0),
-        y: src.position.y + (srcGroup?.position.y ?? 0)
+      // Placement for the nodes this call opens — the shared engine, in ROOT space (a source inside
+      // a frame is resolved through the whole parent chain). Opener → child goes BELOW the source,
+      // fanned right; a node armed `--after` goes RIGHT of its deps (`placeOpened`). The source's
+      // own frames are not obstacles: `addAndConnect` files the new node into that frame.
+      // `reserved` holds the siblings this same call has placed — `setNodes` is async, so nodesRef
+      // does not show them yet.
+      const srcBox = liveBox(src, nodesRef.current, { w: 600, h: 400 })
+      const srcFrames = ancestorFrameIds(src, nodesRef.current)
+      const reserved: Box[] = []
+      const obstacles = (): Box[] => [...liveBoxes(srcFrames), ...reserved]
+      /** CENTER for the i-th node of an `open-*` call, reserved so its siblings clear it. */
+      const placeNext = (i: number, after?: string[]): { x: number; y: number } => {
+        const size = newNodeSize()
+        const deps = (after ?? [])
+          .filter((d) => d !== sourceNodeId) // waiting on the opener itself is still lineage: below it
+          .map((d) => nodesRef.current.find((n) => n.id === d))
+          .filter((n): n is CanvasNode => !!n)
+          .map((n) => liveBox(n, nodesRef.current, size))
+        const topLeft = placeOpened(obstacles(), srcBox, deps, size, i)
+        reserved.push({ ...topLeft, ...size })
+        return centerOf(topLeft, size)
       }
-      const belowY = srcAbs.y + srcH + 80
-      const placeBelow = (i = 0) => ({ x: srcAbs.x + srcW / 2 + i * 460, y: belowY + 210 })
+      /** CENTER of the i-th clear child slot below the source, NOT reserved: single-node opens, and
+       *  the members of a panel/team grid that is re-packed right after. */
+      const placeBelow = (i = 0): { x: number; y: number } => {
+        const size = newNodeSize()
+        return centerOf(placeChild(obstacles(), srcBox, size, i), size)
+      }
       const connect = (newId: string) =>
         setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${newId}`, sourceNodeId, newId, 'opener')])
       // `--after` is a rope too: dep → armed node, drawn dashed while the node waits and solid once
@@ -10175,36 +10221,30 @@ export function Canvas() {
       // clamp children landing outside it), then drop each node into the next grid slot
       // after the existing children. Shared by the terminal and agent open verbs.
       const addGrouped = (groupId: string, count: number, make: (i: number) => CanvasNode): string[] => {
-        const existing = nodesRef.current.filter((nd) => nd.parentId === groupId).length
+        // The first grid slot no CURRENT child occupies (frame-relative boxes), so a child the user
+        // moved is never landed on — the old `groupSlot(count + i)` assumed every child sat in its slot.
+        const kids: Box[] = nodesRef.current
+          .filter((nd) => nd.parentId === groupId)
+          .map((nd) => ({
+            x: nd.position.x,
+            y: nd.position.y,
+            w: (nd.measured?.width as number | undefined) ?? (nd.width as number | undefined) ?? 600,
+            h: (nd.measured?.height as number | undefined) ?? (nd.height as number | undefined) ?? 400
+          }))
         const ids: string[] = []
         for (let i = 0; i < count; i++) {
           const node = make(i)
-          const w = (node.width as number) ?? 600
-          const h = (node.height as number) ?? 400
-          if (i === 0) {
-            const need = groupSizeFor(existing + count, w, h)
-            setNodes((ns) =>
-              ns.map((nd) =>
-                nd.id === groupId
-                  ? {
-                      ...nd,
-                      width: Math.max((nd.width as number) ?? 0, need.width),
-                      height: Math.max((nd.height as number) ?? 0, need.height),
-                      style: {
-                        ...nd.style,
-                        width: Math.max((nd.width as number) ?? 0, need.width),
-                        height: Math.max((nd.height as number) ?? 0, need.height)
-                      }
-                    }
-                  : nd
-              )
-            )
-          }
-          node.position = groupSlot(existing + i, w, h)
+          const size = { w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }
+          const slot = placeInFrame(kids, size)
+          kids.push({ ...slot, ...size })
+          node.position = slot
           node.parentId = groupId
           node.extent = 'parent'
           ids.push(addAndConnect(node))
         }
+        // Hug the frame around its children in the same batch the children land in (a count-based
+        // size was wrong whenever a child had been moved or resized). A missing frame is a no-op.
+        setNodes((ns) => fitGroupToChildren(ns, groupId, snapGridNow()))
         return ids
       }
 
@@ -10278,7 +10318,7 @@ export function Canvas() {
                 createTerminalNode(
                   nodesRef.current.length + i,
                   termCwd,
-                  placeBelow(i),
+                  placeNext(i, after),
                   args.cmd,
                   sshFor(termCwd)
                 ),
@@ -10413,7 +10453,7 @@ export function Canvas() {
                   agentId,
                   nodesRef.current.length + i,
                   agentCwd,
-                  placeBelow(i),
+                  placeNext(i, after),
                   promptLaunch.prompt,
                   sshFor(agentCwd),
                   account,
@@ -10857,7 +10897,12 @@ export function Canvas() {
               : null
             const panelIds = [...reviewerIds, ...(judge ? [judge.id] : [])]
             let next: CanvasNode[] = [...live, ...reviewers, ...(judge ? [judge] : [])]
-            next = arrangeNodes(next, panelIds, { layout: 'grid', origin: placeBelow(0) })
+            // `origin` is a TOP-LEFT: the first clear child slot below the source (the old call
+            // passed placeBelow's CENTER straight through, half a node off).
+            next = arrangeNodes(next, panelIds, {
+              layout: 'grid',
+              origin: placeChild(obstacles(), srcBox, newNodeSize(), 0)
+            })
             const vGroupCount = next.filter((nd) => nd.type === 'group').length
             const existingGroupIds = new Set(
               next.filter((node) => node.type === 'group').map((node) => node.id)
@@ -10998,7 +11043,11 @@ export function Canvas() {
             const memberIds = members.map((m) => m.id)
             // One computed array: append → arrange in a grid below the conductor → wrap in a group.
             let next: CanvasNode[] = [...live, ...members]
-            next = arrangeNodes(next, memberIds, { layout: 'grid', origin: placeBelow(0) })
+            // `origin` is a TOP-LEFT: the first clear child slot below the conductor.
+            next = arrangeNodes(next, memberIds, {
+              layout: 'grid',
+              origin: placeChild(obstacles(), srcBox, newNodeSize(), 0)
+            })
             const groupCount = next.filter((nd) => nd.type === 'group').length
             const existingGroupIds = new Set(
               next.filter((node) => node.type === 'group').map((node) => node.id)

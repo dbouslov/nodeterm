@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  freeSpot, freeSpotDirected, placeByHand, placeChild, placeDependent, placeLoose, placeInFrame,
+  freeSpot, freeSpotDirected, placeByHand, placeChild, placeDependent, placeLoose, placeInFrame, placeOpened,
   groupSlot, groupSizeFor, centerOf, overlaps, PLACEMENT_GAP, ROW_GAP, GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP,
   type Box
 } from './index'
@@ -88,6 +88,17 @@ describe('placeDependent', () => {
     const p = placeDependent([dep, taken], [dep], size)
     expect(p.x).toBeGreaterThan(taken.x)
     expect(hits(p, size, [dep, taken])).toBe(false)
+  })
+})
+
+describe('placeOpened — the one rule the live, cold and headless open paths all call', () => {
+  const opener = box(100, 100, 600, 400)
+  it('with no deps is the opener→child rule', () => {
+    expect(placeOpened([opener], opener, [], size, 1)).toEqual(placeChild([opener], opener, size, 1))
+  })
+  it('with deps is the dependent rule — dependency outranks lineage', () => {
+    const dep = box(800, 100, 200, 100)
+    expect(placeOpened([opener, dep], opener, [dep], size, 1)).toEqual({ x: 800 + 200 + PLACEMENT_GAP, y: 100 })
   })
 })
 
