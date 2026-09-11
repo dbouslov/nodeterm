@@ -45,7 +45,10 @@ headless `placeRight`).
    canvas with no ropes it produces exactly the tidy grid.
 6. Loose nodes (no ropes) are packed as a grid below the structured rows.
 7. Ropes carry a persisted `kind` (`opener` | `dep`) so dependency order survives launch.
-8. Approaches: one shared pure placement engine (A2) + a layered layout over the rope graph built
+8. Confirmed 2026-09-11 (after the summary review): radial is opt-in only (⌘⇧A always runs
+   rows); the opener does not move sideways on restructure (the tree centers under its current
+   position); the dock/palette gap widens from 28 px to 40 px (`PLACEMENT_GAP`).
+9. Approaches: one shared pure placement engine (A2) + a layered layout over the rope graph built
    on `arrangeNodes` (R1). Rejected: per-call-site patches (keeps eight rules), full re-layout on
    every spawn (moves the user's nodes), force-directed (nondeterministic), dagre (new dependency;
    this repo wrote `@shared/cron` to avoid one).
