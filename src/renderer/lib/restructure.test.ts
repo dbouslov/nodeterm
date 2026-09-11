@@ -150,3 +150,58 @@ describe('restructureNodes', () => {
     expect(restructureNodes(nodes, [])).toBe(nodes)
   })
 })
+
+describe('restructureNodes — pinned units are fixed obstacles', () => {
+  const pin = (node: CanvasNode): CanvasNode => ({ ...node, data: { ...node.data, pinned: true } }) as CanvasNode
+  const box = (out: CanvasNode[], id: string) => {
+    const nd = out.find((x) => x.id === id)!
+    return { ...nd.position, w: nd.width as number, h: nd.height as number }
+  }
+  const overlapping = (out: CanvasNode[], p: string, q: string) => {
+    const P = box(out, p)
+    const Q = box(out, q)
+    return P.x < Q.x + Q.w && P.x + P.w > Q.x && P.y < Q.y + Q.h && P.y + P.h > Q.y
+  }
+
+  it('a pinned node keeps its place and nothing is laid out onto it', () => {
+    // b would land exactly on p (the row under a starts at x 30, y 130)
+    const nodes = [n('a', 100, 0), n('b', 600, 20), n('c', 700, 20), pin(n('p', 30, 130))]
+    const out = restructureNodes(nodes, [rope('a', 'b'), rope('a', 'c')])
+    expect(pos(out, 'p')).toEqual({ x: 30, y: 130 })
+    for (const id of ['a', 'b', 'c']) expect(overlapping(out, id, 'p'), id).toBe(false)
+    expect(overlapping(out, 'b', 'c')).toBe(false)
+  })
+
+  it('a pinned frame stays with its children untouched, and the rest goes around it', () => {
+    const nodes = [
+      n('o', 0, 0),
+      pin(n('g', -20, 130, 300, 200, undefined, 'group')),
+      n('m', 10, 10, 100, 50, 'g'),
+      n('x', 500, 500)
+    ]
+    const out = restructureNodes(nodes, [rope('o', 'x')])
+    expect(pos(out, 'g')).toEqual({ x: -20, y: 130 })
+    expect(pos(out, 'm')).toEqual({ x: 10, y: 10 })
+    expect(overlapping(out, 'x', 'g')).toBe(false)
+  })
+
+  it('a pinned child fixes the frame it rides in', () => {
+    const nodes = [n('o', 0, 0), n('g', 300, 900, 400, 200, undefined, 'group'), pin(n('m', 37, 41, 100, 50, 'g'))]
+    const out = restructureNodes(nodes, [rope('o', 'm')])
+    expect(pos(out, 'g')).toEqual({ x: 300, y: 900 })
+    expect(pos(out, 'm')).toEqual({ x: 37, y: 41 })
+  })
+
+  it('a pinned root stays and its children still hang centered beneath it', () => {
+    const nodes = [pin(n('a', 100, 0)), n('b', 600, 20), n('c', 700, 20)]
+    const out = restructureNodes(nodes, [rope('a', 'b'), rope('a', 'c')])
+    expect(pos(out, 'a')).toEqual({ x: 100, y: 0 })
+    expect(pos(out, 'b')).toEqual({ x: 30, y: 50 + ROW_GAP })
+    expect(pos(out, 'c')).toEqual({ x: 30 + 100 + PLACEMENT_GAP, y: 50 + ROW_GAP })
+  })
+
+  it('returns the input array when every unit is pinned (nothing to move, nothing to write)', () => {
+    const nodes = [pin(n('a', 0, 0)), pin(n('b', 500, 0))]
+    expect(restructureNodes(nodes, [rope('a', 'b')])).toBe(nodes)
+  })
+})

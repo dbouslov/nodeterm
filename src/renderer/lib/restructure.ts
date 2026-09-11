@@ -5,7 +5,7 @@
 // which is why it replaced Tidy behind the same command.
 import { arrangeNodes, type CanvasNode } from '../state/workspace'
 import type { BridgeLink } from '@shared/types'
-import { PLACEMENT_GAP, ROW_GAP, type Point } from '@shared/placement'
+import { PLACEMENT_GAP, ROW_GAP, freeSpotDirected, overlaps, type Box, type Point } from '@shared/placement'
 
 export interface RankedUnits {
   /** Rank per UNIT id (a top-level node or top-level frame); loose units are absent. */
@@ -192,6 +192,11 @@ export function restructureNodes(
   const unitIds = [...rows.flat(), ...loose]
   if (unitIds.length < 2) return nodes
   const byId = new Map(nodes.map((n) => [n.id, n]))
+  // FIXED units never move: a pinned unit, or a frame holding a pinned node (moving the frame
+  // would carry it). They still rank — lineage is lineage — but only the others are laid out.
+  const fixed = new Set(nodes.filter((n) => n.data?.pinned === true).map((n) => unitOf(n.id, byId)))
+  const moves = (id: string): boolean => !fixed.has(id)
+  if (!unitIds.some(moves)) return nodes
   const at = (id: string): Point => byId.get(id)!.position
   // The horizontal anchor: the CURRENT center of the rank-0 row, so one orchestrator does not move
   // sideways. With no ropes at all (every unit loose), the cluster's current center.
@@ -209,7 +214,8 @@ export function restructureNodes(
     // their diagonal (the rank-0 row counts as one disc): ring r clears ring r−1 by ROW_GAP, and
     // neighbours on a ring sit a disc + PLACEMENT_GAP apart, so no two units can overlap.
     const root = rows[0]
-    next = packRow(next, root, { x: cx - rowWidth(root, byId) / 2, y: top }, byId)
+    const rootMovers = root.filter(moves)
+    next = packRow(next, rootMovers, { x: cx - rowWidth(rootMovers, byId) / 2, y: top }, byId)
     const c = { x: cx, y: top + tallest(root, byId) / 2 }
     const arc = root.length > 1 ? 2 * Math.PI : Math.PI
     let inner = Math.hypot(rowWidth(root, byId), tallest(root, byId)) / 2
@@ -223,6 +229,7 @@ export function restructureNodes(
       )
       const ring = new Map<string, Point>()
       row.forEach((id, i) => {
+        if (!moves(id)) return
         // One root: θ from near π (left) through π/2 (straight below) to near 0 (right).
         const theta = root.length > 1 ? i * step - Math.PI / 2 : Math.PI - step * (i + 0.5)
         const n = byId.get(id)!
@@ -237,15 +244,18 @@ export function restructureNodes(
     y = c.y + R + inner + ROW_GAP
   } else {
     for (const row of rows) {
-      next = packRow(next, row, { x: cx - rowWidth(row, byId) / 2, y }, byId)
+      // A fixed member keeps its place and leaves no hole; it still counts for the row's height,
+      // so a pinned opener's children hang beneath it.
+      const rowMovers = row.filter(moves)
+      next = packRow(next, rowMovers, { x: cx - rowWidth(rowMovers, byId) / 2, y }, byId)
       y += tallest(row, byId) + ROW_GAP
     }
   }
-  if (loose.length) {
+  const looseMovers = new Set(loose.filter(moves))
+  if (looseMovers.size) {
     // Loose units pack exactly as the old Tidy grid did (`arrangeNodes`, node-array order), centered
     // on the anchor — with no ropes at all, the result is a pure translation of Tidy's.
-    const looseSet = new Set(loose)
-    const inOrder = nodes.filter((n) => looseSet.has(n.id)).map((n) => n.id)
+    const inOrder = nodes.filter((n) => looseMovers.has(n.id)).map((n) => n.id)
     const cols = Math.max(1, Math.ceil(Math.sqrt(inOrder.length)))
     let gridW = 0
     for (let i = 0; i < inOrder.length; i += cols) {
@@ -253,5 +263,31 @@ export function restructureNodes(
     }
     next = arrangeNodes(next, inOrder, { layout: 'grid', origin: { x: cx - gridW / 2, y } })
   }
-  return next
+  return fixed.size ? clearOfFixed(next, [...rows.flat(), ...loose], fixed) : next
+}
+
+/**
+ * Nothing may land on a FIXED unit: walk the laid-out units in layout order and move any that
+ * overlaps a fixed unit (or a unit already settled) to the nearest clear cell right of / below its
+ * slot (`freeSpotDirected`). The layout keeps PLACEMENT_GAP between neighbours and ROW_GAP between
+ * rows, so a unit that touches nothing fixed never moves here.
+ */
+function clearOfFixed(nodes: CanvasNode[], order: readonly string[], fixed: ReadonlySet<string>): CanvasNode[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const boxOf = (id: string): Box => {
+    const n = byId.get(id)!
+    return { ...n.position, w: nodeW(n), h: nodeH(n) }
+  }
+  const settled: Box[] = [...fixed].map(boxOf)
+  const moved = new Map<string, Point>()
+  for (const id of order) {
+    if (fixed.has(id)) continue
+    const b = boxOf(id)
+    const p = settled.some((s) => overlaps(b, s, PLACEMENT_GAP))
+      ? freeSpotDirected(settled, b, b, PLACEMENT_GAP)
+      : { x: b.x, y: b.y }
+    if (p.x !== b.x || p.y !== b.y) moved.set(id, p)
+    settled.push({ ...p, w: b.w, h: b.h })
+  }
+  return moved.size ? moveTo(nodes, moved) : nodes
 }
