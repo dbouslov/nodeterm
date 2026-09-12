@@ -351,6 +351,9 @@ Budget, pinned by `edge-routing/perf.test.ts`. The wall-clock pins below run onl
 files running beside it, which is how `npm test` and CI run). CI holds the cause of a slow pass
 instead: on a spaced 120-node / 200-edge canvas every edge routes with no widened search and no
 fallback, on the full pass and on a drag pass (`RoutedGraph.widenings`, `RoutedGraph.fallbacks`).
+The counts do not bound what one search costs (raising `WINDOW_PAD` from 200 to 5000 keeps both
+at zero while the timed drag pin fails), so after changing the router run
+`PERF=1 npx vitest run src/renderer/lib/edge-routing` for the wall-clock pins as well.
 
 | Scenario | Target (laptop) | `PERF=1` pin |
 |---|---|---|

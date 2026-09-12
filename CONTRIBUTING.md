@@ -472,11 +472,10 @@ router in `renderer/lib/edge-routing/`; if you need an edge to avoid something n
 obstacle rule there, not a React change. Its CI perf pins are counts, not timings (no widened
 search, no fallback on a spaced canvas); after changing the router, also run
 `PERF=1 npx vitest run src/renderer/lib/edge-routing` for the wall-clock pins. And do not add a
-second edge family for a
-relation a rope already carries: `--after` is a **rope** whose dashed "⏳ waits for" look is DERIVED
-from the target's `pendingLaunch` (`renderer/lib/edgeModel.ts`), and the context bridge it also
-writes stays hidden underneath it. One `open-claude --after` used to land three edges on one node.
-`src/renderer/canvas/edge-model.source.test.ts` pins both halves.
+second edge family for a relation a rope already carries: `--after` is a **rope** whose dashed
+"⏳ waits for" look is DERIVED from the target's `pendingLaunch` (`renderer/lib/edgeModel.ts`),
+and the context bridge it also writes stays hidden underneath it. One `open-claude --after` used
+to land three edges on one node. `src/renderer/canvas/edge-model.source.test.ts` pins both halves.
 
 **React Flow's `fitView` is queued, not immediate — never use it to frame something automatically.**
 Calling it sets `fitViewQueued` and the fit runs from a later `setNodes` (only once every node is

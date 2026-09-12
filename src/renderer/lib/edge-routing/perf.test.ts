@@ -30,7 +30,9 @@ function spaced(nodes: number, edges: number): RouteRequest {
 
 // What makes a pass slow is a search that fails inside its window and re-runs over the whole
 // canvas (a widening), and one that then gives up too (a fallback). Those are counts, so these pins
-// read the same on every machine, which the wall-clock pins below do not.
+// read the same on every machine, which the wall-clock pins below do not. They do not bound what
+// one search costs, though: raising WINDOW_PAD from 200 to 5000 keeps both counts at zero while
+// the timed drag pin fails, so after changing the router run the `PERF=1` pins below as well.
 describe('routing cost pins (deterministic; spec Section 6)', () => {
   it('full pass on a spaced 120 / 200 canvas: every edge routed, no widened search, no fallback', () => {
     const req = spaced(120, 200)

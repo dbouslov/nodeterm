@@ -3192,14 +3192,14 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   seconds on a crowded canvas). CI pins the router's cost as counts, not time: `perf.test.ts`
   wants no widened search and no fallback on a spaced 120-node / 200-edge canvas
   (`RoutedGraph.widenings`, `.fallbacks`); its wall-clock pins run only with `PERF=1`, since one
-  timed sample flaked beside the rest of the suite. `EdgeRouter` (a child of `<ReactFlow>`) routes all edges once per
-  node-geometry change, incrementally during a drag, and publishes to `useEdgeRoutes` keyed by
-  React Flow's `rfId` (edge components are not descendants of anything the host renders, so
-  context cannot reach them). Hovering lights one edge and dims the rest; labels show only while
-  lit or selected; the legend is a bottom-left chip. A terminal node's **eye** (`hide-fanout`, "Hide cards &
-  connections") hides its subagent/loop cards AND every edge touching that node — display only:
-  the links still authorise reads and an `--after` still waits. See the `--after` bullet under
-  Canvas control for the rope model the eye hides.
+  timed sample flaked beside the rest of the suite. `EdgeRouter` (a child of `<ReactFlow>`)
+  routes all edges once per node-geometry change, incrementally during a drag, and publishes to
+  `useEdgeRoutes` keyed by React Flow's `rfId` (edge components are not descendants of anything
+  the host renders, so context cannot reach them). Hovering lights one edge and dims the rest;
+  labels show only while lit or selected; the legend is a bottom-left chip. A terminal node's
+  **eye** (`hide-fanout`, "Hide cards & connections") hides its subagent/loop cards AND every
+  edge touching that node — display only: the links still authorise reads and an `--after` still
+  waits. See the `--after` bullet under Canvas control for the rope model the eye hides.
   **Surfaces:** Desktop + Server Edition are identical (pure renderer + React Flow internals — no
   new IPC or bridge member); the kanban board is N/A (it shows cards, never edges); mobile is N/A
   (the transport protocol carries no edges).

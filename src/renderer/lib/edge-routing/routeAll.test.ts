@@ -22,11 +22,33 @@ describe('routeAll', () => {
   // and the whole-canvas search goes round its end.
   it('counts a search that had to widen past its window', () => {
     const wall: RouteNode = { id: 'w', x: 300, y: -1000, width: 100, height: 2100, isFrame: false }
-    const g = routeAll(mk([n('a', 0, 0), n('b', 600, 0), wall], [{ id: 'ab', source: 'a', target: 'b', kind: 'context' }]))
+    const req = mk([n('a', 0, 0), n('b', 600, 0), wall], [{ id: 'ab', source: 'a', target: 'b', kind: 'context' }])
+    const g = routeAll(req)
     const r = g.routes.get('ab')!
     expect(r.fallback).toBe(false)
     expect(r.widened).toBe(true)
     expect(g.widenings).toBe(1)
+    // The drag pass keeps its own count: moving `a` re-routes the edge, and the wall still
+    // spans the window, so that search widens too.
+    const d = routeAll(mk([n('a', 0, 10), n('b', 600, 0), wall], req.edges), g, new Set(['a']))
+    expect(d.routes.get('ab')).not.toBe(r)
+    expect(d.widenings).toBe(1)
+  })
+  // A port inside another node's margin goes to the fallback with no search, so it counts as a
+  // fallback and not as a widening. Here `x` sits 10 px right of `a`, and its 16 px margin covers
+  // `a`'s right-side port, before the drag and after it.
+  it('counts a fallback, on the full pass and on a drag pass', () => {
+    const x = n('x', 210, 0)
+    const req = mk([n('a', 0, 0), n('b', 600, 0), x], [{ id: 'ab', source: 'a', target: 'b', kind: 'context' }])
+    const g = routeAll(req)
+    expect(g.routes.get('ab')!.fallback).toBe(true)
+    expect(g.routes.get('ab')!.widened).toBe(false)
+    expect(g.fallbacks).toBe(1)
+    const d = routeAll(mk([n('a', 0, 10), n('b', 600, 0), x], req.edges), g, new Set(['a']))
+    expect(d.routes.get('ab')).not.toBe(g.routes.get('ab'))
+    expect(d.routes.get('ab')!.fallback).toBe(true)
+    expect(d.fallbacks).toBe(1)
+    expect(d.widenings).toBe(0)
   })
   // A routed edge may never pass through a node's body, and that includes the nodes its search
   // never saw: the obstacle list is filtered to the search window, so a route that leaves the
