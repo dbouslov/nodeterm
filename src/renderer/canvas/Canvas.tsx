@@ -586,6 +586,7 @@ import {
   parseCloseTargets,
   CLOSE_BULK_MAX
 } from '../lib/closeTargets'
+import { applyCompaction, compactNote, compactRequested, planCompaction } from '../lib/closeCompact'
 import { canvasSyncTarget } from './collab-sync'
 import { menuMinimizeRow, minimizeIds, minimizeReply, planMinimize } from '@shared/minimize'
 import {
@@ -11970,19 +11971,27 @@ export function Canvas() {
                 : bulkCloseMessage(srcTitle, targets.labels)
             const closeLabel = targets.kind === 'single' ? 'Close' : `Close ${closeIds.length}`
             const runClose = (): void => {
+              // `--compact` is planned off the canvas as the close finds it: each frame keeps the
+              // grid it HAD (lib/closeCompact.ts). Planned here, so a waived and a confirmed close
+              // both compact, and a denied or expired one never gets this far.
+              const compact = compactRequested(args) ? planCompaction(nodesRef.current as CanvasNode[], closeIds) : null
               // Canonical teardown: deleteNodes() destroys the local tmux session (remote-guarded),
               // drops persisted agentStatus, and reparents any group children. Don't hand-roll it.
               // ONE call for the whole list — its own paths are batched, and N calls would give N
               // undo entries and N writeDisk passes for one decision.
               deleteNodes(closeIds)
+              if (compact) {
+                setNodes((ns) => applyCompaction(ns, compact, snapGridNow()))
+                markDirty()
+              }
               const dead = new Set(closeIds)
               setControlEdges((es) => es.filter((e) => !dead.has(e.source) && !dead.has(e.target)))
               reply({
                 ok: true,
                 message:
-                  closeIds.length === 1
+                  (closeIds.length === 1
                     ? `closed ${closeIds[0]}`
-                    : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`
+                    : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) + (compact ? compactNote(compact) : '')
               })
             }
             // Waived? Same decision table as `write` (@shared/control-confirm).

@@ -349,6 +349,22 @@ describe('HeadlessNodeFactory', () => {
     expect(removed).toEqual([])
   })
 
+  it('refuses close --compact by name, before killing or removing anything', async () => {
+    // `--compact` is desktop-only. The unknown-flag refusal names it; this pins that it stays a
+    // refusal, never a plain close that silently skipped the tidy the caller asked for.
+    const opened = await factory.openTerminal('term-source', {}, true)
+    const id = (opened.result as { id: string }).id
+
+    await expect(factory.close('term-source', { node: id, compact: '' }, true)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('--compact')
+    })
+    expect(pty.destroys).toEqual([])
+    expect((await store.load({ sideline: false })).projects[0].nodes.some((node) => node.id === id))
+      .toBe(true)
+    expect(removed).toEqual([])
+  })
+
   it('closes a persisted owned node cleanly when its pane was already killed out of band', async () => {
     const opened = await factory.openTerminal('term-source', {}, true)
     const id = (opened.result as { id: string }).id
