@@ -39,6 +39,10 @@ let userDataDir = ''
 let sourceHome = ''
 let realHome: string | undefined
 let realProfile: string | undefined
+// These win over HOME where a config dir is resolved (grok-paths.ts, hooks/copilot.ts,
+// hooks/opencode.ts), so they are cleared with it for each test and restored after.
+const HOME_OVERRIDES = ['GROK_HOME', 'COPILOT_HOME', 'XDG_CONFIG_HOME'] as const
+let realOverrides: Record<string, string | undefined> = {}
 const remoteCodexImportThread = vi.fn(async () => ({ imported: true }))
 const sender = { id: 1, isDestroyed: () => false, once: () => {}, removeListener: () => {} }
 const call = (channel: string, ...args: any[]) => h.handlers[channel]({ sender }, ...args)
@@ -58,6 +62,11 @@ beforeEach(async () => {
   realProfile = process.env.USERPROFILE
   process.env.HOME = userDataDir
   process.env.USERPROFILE = userDataDir
+  realOverrides = {}
+  for (const k of HOME_OVERRIDES) {
+    realOverrides[k] = process.env[k]
+    delete process.env[k]
+  }
   sourceHome = codexAccountHome(userDataDir, SOURCE)
   mkdirSync(path.join(sourceHome, 'sessions', '2026'), { recursive: true })
   mkdirSync(codexAccountHome(userDataDir, TARGET), { recursive: true })
@@ -73,6 +82,10 @@ afterEach(async () => {
   else process.env.HOME = realHome
   if (realProfile === undefined) delete process.env.USERPROFILE
   else process.env.USERPROFILE = realProfile
+  for (const k of HOME_OVERRIDES) {
+    if (realOverrides[k] === undefined) delete process.env[k]
+    else process.env[k] = realOverrides[k]
+  }
   const { resetPlatformForTests } = await import('../core/platform')
   resetPlatformForTests()
   rmSync(userDataDir, { recursive: true, force: true })
