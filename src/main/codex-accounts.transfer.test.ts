@@ -10,7 +10,7 @@
  * below asserts the importer is NEVER called when the source escapes `sessions/`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
 
@@ -37,6 +37,12 @@ const PROJECT = 'proj-1'
 
 let userDataDir = ''
 let sourceHome = ''
+let realHome: string | undefined
+let realProfile: string | undefined
+// These win over HOME where a config dir is resolved (grok-paths.ts, hooks/copilot.ts,
+// hooks/opencode.ts), so they are cleared with it for each test and restored after.
+const HOME_OVERRIDES = ['GROK_HOME', 'COPILOT_HOME', 'XDG_CONFIG_HOME'] as const
+let realOverrides: Record<string, string | undefined> = {}
 const remoteCodexImportThread = vi.fn(async () => ({ imported: true }))
 const sender = { id: 1, isDestroyed: () => false, once: () => {}, removeListener: () => {} }
 const call = (channel: string, ...args: any[]) => h.handlers[channel]({ sender }, ...args)
@@ -45,7 +51,22 @@ beforeEach(async () => {
   h.handlers = {}
   readThread.mockReset()
   remoteCodexImportThread.mockClear()
-  userDataDir = mkdtempSync(path.join(os.tmpdir(), 'nodeterm-codex-xfer-'))
+  // Resolved: the leg under test realpaths the rollout it hands over, and macOS's tmpdir sits
+  // behind a symlink (/var → /private/var) that the real home never did.
+  userDataDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'nodeterm-codex-xfer-')))
+  // A managed Codex home lives under `$HOME/.nodeterm/cx` (`codexAccountHome`'s default root), not
+  // under userData — and userData is a fresh temp dir every run, so every run hashed to a NEW
+  // directory in the developer's real home and left this file's fixtures there (2026-09-11).
+  // Pointing HOME at the fixture keeps them inside it, where the rmSync below already cleans up.
+  realHome = process.env.HOME
+  realProfile = process.env.USERPROFILE
+  process.env.HOME = userDataDir
+  process.env.USERPROFILE = userDataDir
+  realOverrides = {}
+  for (const k of HOME_OVERRIDES) {
+    realOverrides[k] = process.env[k]
+    delete process.env[k]
+  }
   sourceHome = codexAccountHome(userDataDir, SOURCE)
   mkdirSync(path.join(sourceHome, 'sessions', '2026'), { recursive: true })
   mkdirSync(codexAccountHome(userDataDir, TARGET), { recursive: true })
@@ -57,6 +78,14 @@ beforeEach(async () => {
   initCodexAccounts(() => ({ remoteCodexImportThread }) as any)
 })
 afterEach(async () => {
+  if (realHome === undefined) delete process.env.HOME
+  else process.env.HOME = realHome
+  if (realProfile === undefined) delete process.env.USERPROFILE
+  else process.env.USERPROFILE = realProfile
+  for (const k of HOME_OVERRIDES) {
+    if (realOverrides[k] === undefined) delete process.env[k]
+    else process.env[k] = realOverrides[k]
+  }
   const { resetPlatformForTests } = await import('../core/platform')
   resetPlatformForTests()
   rmSync(userDataDir, { recursive: true, force: true })
