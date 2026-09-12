@@ -182,6 +182,7 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     rename: vi.fn(async () => ({ ok: true as const, result: { id: 'renamed' } })),
     color: vi.fn(async () => ({ ok: true as const, result: { colored: ['term-target'] } })),
     sticky: vi.fn(async () => ({ ok: true as const, result: { id: 'sticky-new' } })),
+    annotate: vi.fn(async () => ({ ok: true as const, result: { annotated: ['term-a'] } })),
     deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
   })
 
@@ -345,6 +346,26 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
       node: 'term-a,term-b',
       color: '#32d74b'
     })
+  })
+
+  it('dispatches annotate through the shared parser, refusing a bad flag before the action', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await expect(handler({
+      verb: 'annotate',
+      nodeId: 'term-source',
+      args: { node: 'term-a,term-b', role: 'lead' },
+      verified: true
+    })).resolves.toMatchObject({ ok: true })
+    expect(a.annotate).toHaveBeenCalledWith('term-source', { node: 'term-a,term-b', role: 'lead' })
+
+    await expect(handler({
+      verb: 'annotate',
+      nodeId: 'term-source',
+      args: { node: 'term-a', title: 'x' },
+      verified: true
+    })).resolves.toEqual({ ok: false, error: 'annotate: unknown flag --title' })
+    expect(a.annotate).toHaveBeenCalledTimes(1)
   })
 
   it('keeps every deferred or unknown verb a clean permanent edition refusal', async () => {

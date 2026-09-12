@@ -93,6 +93,7 @@ export interface ServerEditionControlActions {
   rename(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   color(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   sticky(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
+  annotate(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   deliver(input: {
     verb: 'send' | 'reply' | 'notify'
     sourceNodeId: string
@@ -113,7 +114,8 @@ const SERVER_V1_VERBS: ReadonlySet<string> = new Set([
   'send',
   'reply',
   'notify',
-  'sticky'
+  'sticky',
+  'annotate'
 ])
 
 /** A permanent, verb-specific refusal used only while canvas control itself is enabled. */
@@ -128,7 +130,7 @@ export function unsupportedServerVerbMessage(verb: string): string {
 /**
  * Build the real Server Edition handler. Authentication remains entirely in HookServer: this
  * callback receives only requests that passed the app bearer, per-node verdict and the
- * verified-only gate for messaging/sticky. Parsing is shared with desktop; dispatch is deliberately
+ * verified-only gate for messaging/sticky/annotate. Parsing is shared with desktop; dispatch is deliberately
  * small and exhaustive so every deferred verb receives a named permanent edition refusal.
  */
 export function createServerEditionControlHandler(actions: ServerEditionControlActions): (req: {
@@ -176,6 +178,8 @@ export function createServerEditionControlHandler(actions: ServerEditionControlA
         return actions.color(nodeId, command.args)
       case 'sticky':
         return actions.sticky(nodeId, command.args)
+      case 'annotate':
+        return actions.annotate(nodeId, command.args)
       case 'send':
       case 'reply':
       case 'notify':

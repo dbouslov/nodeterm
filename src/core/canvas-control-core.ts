@@ -958,7 +958,7 @@ Verbs:
   refuses the whole request and closes NOTHING, naming the ids it could not find. Desktop asks the
   user to confirm. Server Edition closes
   only nodes this caller opened during the current server run, without a dialog. Its other
-  node-mutating verbs (link/group/rename/color/sticky update) likewise accept only current-run
+  node-mutating verbs (link/group/rename/color/sticky update/annotate) likewise accept only current-run
   creations, and refuse the whole request before any partial mutation.
 - \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
   this server run, in this project only. No confirm dialog; instead it is verified-only, gated by the project's
