@@ -3146,7 +3146,9 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   dispatch (`renderer/lib/livePlacement.ts`), `coldPlaceBelow` and the headless `placeNode` all
   call `placeOpened` over the same obstacle set, and `test/acceptance/placement-parity.test.ts`
   fails the day they disagree (they did once: cold and headless kept the source's own frame as
-  an obstacle). Into a frame: the first grid slot no CURRENT child
+  an obstacle). A display verb answered OFF canvas places over its own project's stored nodes
+  (`placeBelowSource` → `coldPlaceBelow`), never over the active canvas. Into a frame: the first
+  grid slot no CURRENT child
   occupies (`placeInFrame`; the old `groupSlot(count)` collided whenever a child had been moved),
   then the frame hugs its children. Callers RESERVE each box they place before placing the next
   (`setNodes` is async). Boxes are root space; ephemeral cards are not obstacles; the frames a

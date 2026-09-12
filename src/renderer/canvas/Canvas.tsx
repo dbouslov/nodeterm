@@ -275,7 +275,7 @@ import {
   storedAgentIdOf,
   type ColdNode
 } from '../lib/coldOpen'
-import { liveBox, liveBoxesOf, livePlaceOpened, withOpenedNode } from '../lib/livePlacement'
+import { liveBox, liveBoxesOf, livePlaceOpened, placeBelowSource, withOpenedNode } from '../lib/livePlacement'
 import { rankUnits, restructureNodes, type RestructureLayout } from '../lib/restructure'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
 import {
@@ -9183,7 +9183,9 @@ export function Canvas() {
       // Set by the OFF-CANVAS branch below (`answersOffCanvas`): the verb runs against the owning
       // project's SERIALIZED nodes because that project is not on screen. It stays undefined on
       // every other path, which is what makes the on-screen behaviour byte-identical.
-      let offCanvas: { project: Project; closed: boolean; created: string[] } | undefined
+      let offCanvas:
+        | { project: Project; closed: boolean; created: string[]; source: CanvasNodeState }
+        | undefined
       const reply = (r: { ok: boolean; message?: string; result?: unknown; error?: string }) => {
         // Say WHERE it went, once, in both voices. The verb bodies already say WHAT they made, so
         // none of them has to know about routing: the clause is appended here and the human strip
@@ -10028,7 +10030,7 @@ export function Canvas() {
               reply({ ok: false, error: 'source node is not a control-capable agent' })
               return
             }
-            offCanvas = { project: owner, closed: route.kind === 'reopen', created: [] }
+            offCanvas = { project: owner, closed: route.kind === 'reopen', created: [], source: ocSrc }
             // The body below reads the source for its title, cwd and placement geometry. Hydrate
             // the ONE stored node rather than hand-rolling a partial: `nodeStatesToFlow` is what
             // the project load itself uses, so the shape cannot drift from a live node's. It has
@@ -10120,12 +10122,22 @@ export function Canvas() {
         reserved.push({ ...topLeft, ...size })
         return centerOf(topLeft, size)
       }
-      /** CENTER of the i-th clear child slot below the source, NOT reserved: single-node opens, and
-       *  the members of a panel/team grid that is re-packed right after. */
-      const placeBelow = (i = 0): { x: number; y: number } => {
-        const size = newNodeSize()
-        return centerOf(placeChild(obstacles(), srcBox, size, i), size)
-      }
+      /** CENTER of the i-th clear child slot below the source, NOT reserved: single-node opens, the
+       *  display verbs, and the members of a panel/team grid that is re-packed right after. Off
+       *  canvas it is placed over the source's OWN project (`placeBelowSource`), not this canvas. */
+      const placeBelow = (i = 0): { x: number; y: number } =>
+        placeBelowSource(nodesRef.current, src, newNodeSize(), i, {
+          reserved,
+          skip: new Set(Object.keys(useAgentNodes.getState().byId)),
+          ...(offCanvas
+            ? {
+                offCanvas: {
+                  nodes: offCanvas.project.nodes as unknown as ColdNode[],
+                  source: offCanvas.source as unknown as ColdNode
+                }
+              }
+            : {})
+        })
       const connect = (newId: string) =>
         setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${newId}`, sourceNodeId, newId, 'opener')])
       // `--after` is a rope too: dep → armed node, drawn dashed while the node waits and solid once
@@ -10170,20 +10182,39 @@ export function Canvas() {
       }
       // Append a freshly-created node, draw its connecting edge, and mark the canvas dirty so it
       // persists. Returns the new node id. A node opened by a grouped agent joins that group
-      // (parentInto converts back to group-relative coords), so the control fan-out stays inside
-      // the frame and moves with it.
+      // (`withOpenedNode` live, `coldFileIntoSourceFrame` off canvas), so the control fan-out stays
+      // inside the frame and moves with it. A node that arrives ALREADY parented (open-agent
+      // --group placed it into a frame with relative coords) passes through untouched — re-filing
+      // it would read its relative position as absolute and land it off-frame.
       const addAndConnect = (node: CanvasNode) => {
-        // A node that arrives ALREADY parented (open-agent --group placed it into a frame with
-        // relative coords) must pass through untouched — re-running parentInto would read its
-        // relative position as absolute and land it off-frame.
-        const placed = node.parentId ? node : src.parentId ? parentInto(node, src.parentId) : node
         if (offCanvas) {
           // The staged twin of the three lines below, and the whole of the off-canvas write. The
           // live setters all address the ACTIVE canvas, which is some other project's here — they
           // would put the node in front of the wrong person and dirty the wrong file.
           // `applyNodeMutation` + `appendCanvasLinks` are the store paths a peer mutation and the
           // cold open already take, and `writeDisk` is what persists them.
+          // A framed source's child goes into that frame by the COLD rule: the frame is in this
+          // project's store, not on screen. Grown frames are written before the child.
           const ocStore = useProjects.getState()
+          const filed = node.parentId
+            ? undefined
+            : coldFileIntoSourceFrame(
+                offCanvas.project.nodes as unknown as ColdNode[],
+                offCanvas.source as unknown as ColdNode,
+                [{ ...node.position, w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }]
+              )
+          const placed = filed?.frameId
+            ? { ...node, parentId: filed.frameId, extent: 'parent' as const, position: filed.positions[0] }
+            : node
+          for (const grown of filed?.frames ?? []) {
+            const frame = offCanvas.project.nodes.find((n) => n.id === grown.id)
+            if (frame) {
+              ocStore.applyNodeMutation(offCanvas.project.id, {
+                op: 'upsert',
+                node: { ...frame, size: grown.size }
+              })
+            }
+          }
           ocStore.applyNodeMutation(offCanvas.project.id, {
             op: 'upsert',
             node: flowToNodeStates([placed])[0]
@@ -10199,9 +10230,9 @@ export function Canvas() {
         // frame chain grown in the SAME transform: `extent: 'parent'` clamps a child that lands past
         // the frame's edge, which put it straight back onto its source.
         setNodes((ns) => withOpenedNode(ns, node, src.parentId, snapGridNow()))
-        connect(placed.id)
+        connect(node.id)
         markDirty()
-        return placed.id
+        return node.id
       }
       // The colour index every factory takes. Off canvas the live array holds another project's
       // nodes, so counting it would colour by a number that has nothing to do with where the node

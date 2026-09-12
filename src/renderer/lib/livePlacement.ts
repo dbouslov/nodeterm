@@ -6,8 +6,9 @@
 // `setNodes`.
 
 import { absolutePosition, type FocusableNode } from './nodeFocus'
+import { coldPlaceBelow, type ColdNode } from './coldOpen'
 import { addSelectionToGroup, type CanvasNode } from '../state/workspace'
-import { ancestorFrameIds, placeOpened, type Box, type Point, type Size } from '@shared/placement'
+import { ancestorFrameIds, centerOf, placeOpened, type Box, type Point, type Size } from '@shared/placement'
 
 /** A live node as the placement engine sees it: ROOT-space position (a frame child's stored
  *  position is frame-relative), then measured size, else stored size, else `dflt`. */
@@ -50,6 +51,28 @@ export function livePlaceOpened(
     size,
     index
   )
+}
+
+/**
+ * CENTER of the `index`-th node placed below the source, NOT reserved — the control dispatch's
+ * `placeBelow` (the display verbs, single-node opens, the members of a panel/team grid).
+ * `offCanvas` is the source's own project when that project is not on screen: the live array is
+ * then ANOTHER project's canvas, and measuring against it put the node wherever that canvas
+ * happened to be clear. Off canvas the node is placed over the stored project by the cold rule.
+ */
+export function placeBelowSource(
+  live: readonly CanvasNode[],
+  src: CanvasNode,
+  size: Size,
+  index: number,
+  opts: {
+    reserved?: readonly Box[]
+    skip?: ReadonlySet<string>
+    offCanvas?: { nodes: readonly ColdNode[]; source: ColdNode }
+  } = {}
+): Point {
+  if (opts.offCanvas) return coldPlaceBelow(opts.offCanvas.nodes, opts.offCanvas.source, index, { size })
+  return centerOf(livePlaceOpened(live, src, [], size, index, opts), size)
 }
 
 /**

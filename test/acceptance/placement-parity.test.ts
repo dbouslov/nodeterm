@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { livePlaceOpened } from '../../src/renderer/lib/livePlacement'
+import { livePlaceOpened, placeBelowSource } from '../../src/renderer/lib/livePlacement'
 import { coldPlaceBelow, type ColdNode } from '../../src/renderer/lib/coldOpen'
 import type { CanvasNode } from '../../src/renderer/state/workspace'
 import { placeNode } from '../../src/server/headless-node-factory'
@@ -132,6 +132,26 @@ describe('placement parity — live, cold and headless place an opened node iden
     expect(r.live).toEqual(at)
     expect(r.cold).toEqual(at)
     expect(r.headless).toEqual(at)
+  })
+
+  it('off canvas (a display verb into a project not on screen): placed over THAT project, not the active canvas', () => {
+    // The source's project is the framed scene above; the ACTIVE canvas belongs to another project,
+    // whose one node sits where a canvas without the source's frame would put the child.
+    const scene: Spec[] = [
+      { id: 'g', x: 1000, y: 1000, w: 1400, h: 1200, group: true },
+      { id: 'src', x: 24, y: 56, parentId: 'g' },
+      { id: 'sib', x: 24, y: 536, parentId: 'g' }
+    ]
+    const active = liveNodes([{ id: 'decoy', x: 24, y: 536 }])
+    const stored = coldNodes(scene)
+    // The source as Canvas hydrates it off canvas (`nodeStatesToFlow` of the stored node).
+    const src = liveNodes(scene).find((n) => n.id === 'src')!
+    const center = placeBelowSource(active, src, SIZE, 0, {
+      offCanvas: { nodes: stored, source: stored.find((n) => n.id === 'src')! }
+    })
+    const at = { x: center.x - SIZE.w / 2, y: center.y - SIZE.h / 2 }
+    expect(at).toEqual(allThree(scene, 'src').live)
+    expect(at).toEqual({ x: 1664, y: 1536 })
   })
 
   it('an --after dependent: right of its dep on all three paths, from a framed source too', () => {
