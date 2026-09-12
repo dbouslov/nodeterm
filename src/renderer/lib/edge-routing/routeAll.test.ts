@@ -62,11 +62,42 @@ describe('routeAll', () => {
     const g = routeAll(mk([p, q, box('r', 424, 0, 200, 300), box('t', -700, -800, 640, 440)], [{ id: 'rt', source: 'r', target: 't', kind: 'note' }]))
     const r = g.routes.get('rt')!
     expect(r.fallback).toBe(false)
+    expect(r.ports[0].side).toBe('top')
     const bad: string[] = []
     for (let i = 0; i + 1 < r.points.length; i++) {
       for (const b of [p, q]) if (segmentEnters(inflate(b, OBSTACLE_MARGIN), r.points[i], r.points[i + 1])) bad.push(`segment ${i} enters ${b.id}'s margin`)
     }
     expect(bad).toEqual([])
+  })
+  // Which side a boxed-in end takes: its own side's midpoint first, then the side facing the other
+  // end most, and only a side whose port and the end of its stub are clear of every neighbour's
+  // margin and of both endpoints. Each canvas below turns on one of those rules.
+  it('a boxed-in end tries its own side\'s midpoint first', () => {
+    // r has two note edges on its left side, 12 px apart around the midpoint (y 150); q's margin
+    // covers the lower exit (y 156) and not the midpoint.
+    const g = routeAll(mk([box('q', 212, 169, 200, 300), box('r', 424, 0, 200, 300), box('t', -700, -800, 640, 440), box('t2', -700, 600, 640, 440)], [
+      { id: 'rt', source: 'r', target: 't', kind: 'note' },
+      { id: 'rt2', source: 'r', target: 't2', kind: 'note' }
+    ]))
+    const r = g.routes.get('rt2')!
+    expect(r.fallback).toBe(false)
+    expect(r.ports[0]).toEqual({ x: 424, y: 150, side: 'left' })
+  })
+  it('a side whose stub would end inside a neighbour\'s margin is skipped', () => {
+    // The packed row with a lid 24 px above r: r's top port is clear of the lid's 16 px margin and
+    // the end of its 20 px stub is not, so r leaves by the bottom, the next side facing t.
+    const g = routeAll(mk([box('p', 0, 0, 200, 300), box('q', 212, 0, 200, 300), box('r', 424, 0, 200, 300), box('lid', 424, -124, 200, 100), box('t', -700, -800, 640, 440)], [{ id: 'rt', source: 'r', target: 't', kind: 'note' }]))
+    const r = g.routes.get('rt')!
+    expect(r.fallback).toBe(false)
+    expect(r.ports[0].side).toBe('bottom')
+  })
+  it('a side whose stub would end inside the other endpoint is skipped', () => {
+    // t sits 10 px above r, left of r's centre: r's top stub would end inside t, so r leaves by the
+    // right, the next side facing t.
+    const g = routeAll(mk([box('q', 212, 0, 200, 300), box('r', 424, 0, 200, 300), box('t', 300, -110, 300, 100)], [{ id: 'rt', source: 'r', target: 't', kind: 'note' }]))
+    const r = g.routes.get('rt')!
+    expect(r.fallback).toBe(false)
+    expect(r.ports[0].side).toBe('right')
   })
   // That move costs a search, which on a crowded canvas mostly fails and doubled the drag pass, so a
   // drag pass leaves a boxed-in port to the fallback and the full pass when the drag ends moves it.
