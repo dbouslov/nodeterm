@@ -216,6 +216,9 @@ export interface HookEventMeta {
  * `open-project`, and a grant recorded for an unverifiable caller would authorize whoever can
  * name that caller's node id. NEW verb, so fail-closed from day one strands nobody.
  *
+ * `annotate` (network overview) is here for sticky's reason exactly: the record's `by` names the
+ * node that wrote it, and a byline any bearer-holder could forge is worse than none. NEW verb too.
+ *
  * Consulted in the `/control/` route BEFORE `identityGate`'s decision is, so no future change to
  * the policy table can widen it; `messaging-verified-only.test.ts` drives the route on both sides
  * of every hatch and is the test that fails if either half of this comment stops being true.
@@ -225,6 +228,7 @@ export const requiresVerified: ReadonlySet<string> = new Set([
   'reply',
   'notify',
   'sticky',
+  'annotate',
   'open-project'
 ])
 
@@ -243,10 +247,14 @@ export const STICKY_CONTROL_REFUSAL = 'Sticky write refused.'
  *  diagnosis, no token or restart advice — a designed refusal, not a rollout accident. */
 export const OPEN_PROJECT_CONTROL_REFUSAL = 'Project open refused.'
 
+/** Same posture for the verified-only `annotate` verb (network overview). */
+export const ANNOTATE_CONTROL_REFUSAL = 'Annotation write refused.'
+
 /** The verified-only refusal, worded for the verb that was refused. */
 export function verifiedRefusalFor(verb: string): string {
   if (verb === 'sticky') return STICKY_CONTROL_REFUSAL
   if (verb === 'open-project') return OPEN_PROJECT_CONTROL_REFUSAL
+  if (verb === 'annotate') return ANNOTATE_CONTROL_REFUSAL
   return MESSAGING_CONTROL_REFUSAL
 }
 

@@ -137,7 +137,7 @@ describe('where the verbs sit in the routing tables', () => {
     }
   })
 
-  it('the verified-only set is exactly the messaging verbs plus sticky plus open-project', () => {
+  it('the verified-only set is exactly the messaging verbs plus sticky, open-project and annotate', () => {
     // Pins that nothing ELSE ever drifts in: adding a SHIPPED verb here would strand its legacy
     // population with no hatch, which is the one thing this set must never be casually grown by.
     // `notify` (folded in from #98, Task 5.2) is a messaging verb like the other two — it writes
@@ -147,8 +147,10 @@ describe('where the verbs sit in the routing tables', () => {
     // day one, so no legacy population is stranded. `open-project` (issue #338) is here because
     // the grant ledger binds targeting rights to the verified caller identity — a grant minted
     // for a forgeable caller would authorize whoever forged it; new verb, so fail-closed from
-    // day one strands nobody.
+    // day one strands nobody. `annotate` (network overview) carries a byline for sticky's reason —
+    // the record names the node that wrote it — and is new, so it strands nobody either.
     expect([...requiresVerified].sort()).toEqual([
+      'annotate',
       'notify',
       'open-project',
       'reply',
@@ -163,5 +165,9 @@ describe('where the verbs sit in the routing tables', () => {
     // token/restart advice.
     expect(verifiedRefusalFor('open-project')).toBe('Project open refused.')
     expect(verifiedRefusalFor('open-project')).not.toBe(MESSAGING_CONTROL_REFUSAL)
+  })
+
+  it('the annotate refusal names what it refused', () => {
+    expect(verifiedRefusalFor('annotate')).toBe('Annotation write refused.')
   })
 })

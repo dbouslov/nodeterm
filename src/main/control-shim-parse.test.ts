@@ -138,6 +138,17 @@ describe('the control shim translates flags', () => {
     expect(run(['reply', 'b1', '--text', 'done'])).toEqual(['arg.node=b1', 'arg.text=done'])
   })
 
+  // The network overview's `annotate`: same convenience, and `--clear` must arrive valueless even
+  // when another flag follows it (the verb reads presence, never a value).
+  it('annotate maps the bare positional onto arg.node too, with --clear valueless', () => {
+    expect(run(['annotate', 'b1,b2', '--role', 'tests'])).toEqual(['arg.node=b1,b2', 'arg.role=tests'])
+    expect(run(['annotate', 'b1', '--clear', '--role', 'lead'])).toEqual([
+      'arg.node=b1',
+      'arg.clear=',
+      'arg.role=lead'
+    ])
+  })
+
   it('a trailing flag with no value is still empty, as it always was', () => {
     expect(run(['rename', '--node', 'n1', '--title'])).toEqual(['arg.node=n1', 'arg.title='])
   })

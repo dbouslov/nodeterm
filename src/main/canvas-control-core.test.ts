@@ -285,7 +285,34 @@ describe('parseControlRequest', () => {
   it('the shim maps a bare positional onto arg.node for color/send/reply/sticky too', () => {
     // The positional list is a case pattern inside CONTROL_SHIM_SCRIPT; send/reply/sticky take the
     // same "first bare word is the node" convenience write/close/rename/color/branch already have.
-    expect(CONTROL_SHIM_SCRIPT).toContain('write|close|rename|color|branch|send|reply|sticky)')
+    expect(CONTROL_SHIM_SCRIPT).toContain('write|close|rename|color|branch|send|reply|sticky|annotate)')
+  })
+
+  it('annotate requires --node plus one of --role/--recommend/--clear, and is not destructive', () => {
+    expect(parseControlRequest('annotate', {})).toEqual({ error: 'annotate requires --node <id,id>' })
+    expect(parseControlRequest('annotate', { node: 'n1' })).toEqual({
+      error: 'annotate: nothing to write (pass --role, --recommend or --clear)'
+    })
+    expect(parseControlRequest('annotate', { node: 'n1,n2', role: 'lead' })).toEqual({
+      verb: 'annotate',
+      args: { node: 'n1,n2', role: 'lead' }
+    })
+    // `--clear` arrives valueless (the shim sends `arg.clear=`): presence, not truthiness.
+    expect(parseControlRequest('annotate', { node: 'n1', clear: '' })).toEqual({
+      verb: 'annotate',
+      args: { node: 'n1', clear: '' }
+    })
+    expect(parseControlRequest('annotate', { node: 'n1', role: 'r', title: 't' })).toEqual({
+      error: 'annotate: unknown flag --title'
+    })
+    expect(isDestructiveVerb('annotate')).toBe(false)
+  })
+
+  it('both agent-facing texts document the annotate verb and its bulk rule', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('`annotate --node <id,id> [--role "…"] [--recommend "…"] [--clear]`')
+      expect(body).toContain('one unknown id refuses the whole list')
+    }
   })
 
   it('sticky requires --node plus exactly one of --text/--append, and is not destructive', () => {

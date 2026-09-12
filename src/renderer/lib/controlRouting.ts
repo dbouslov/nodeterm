@@ -112,11 +112,18 @@ export function routeControlSource(
  * early-exit are the same decision stated once each (spec §2.3, P6), pinned by
  * `controlRouting.test.ts`.
  */
+/*
+ * `annotate` (network overview) is store-answered for sticky's reason: its headline caller is a Hub
+ * annotating every station during its Collect loop, and routing is by SOURCE — a live requirement
+ * would yank the human's view to the Hub's project on every call. The write lands in the owning
+ * project's serialized nodes (`applyNodeMutation`) when that project is not the active one.
+ */
 const STORE_ANSWERED_VERBS: ReadonlySet<string> = new Set([
   'list',
   'send',
   'reply',
   'sticky',
+  'annotate',
   'open-project'
 ])
 
@@ -136,8 +143,9 @@ export function needsLiveCanvas(verb: string): boolean {
  * (pinned in `controlRouting.test.ts`):
  *
  *   - `STORE_ANSWERED_VERBS` — "no canvas is needed at either end". `list` reads names, `send`/
- *     `reply` deliver into a tmux PANE, `sticky` rewrites a note, `open-project` acts on the
- *     projects store. `needsLiveCanvas` is false for them and they never route at all.
+ *     `reply` deliver into a tmux PANE, `sticky` rewrites a note, `annotate` records a node's
+ *     role, `open-project` acts on the projects store. `needsLiveCanvas` is false for them and
+ *     they never route at all.
  *   - `COLD_OPENABLE_VERBS` — "a canvas IS needed, but the serialized one will do". The node these
  *     verbs create is INERT until its project is next shown: the launch command moves into
  *     `pendingLaunch` (`armForColdOpen`), the node is upserted through `applyNodeMutation`, and the
