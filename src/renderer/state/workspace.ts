@@ -1478,9 +1478,10 @@ const collapseFallbackHeight = (type: string | undefined): number =>
  * expanded node would undo any resize made since its last restore. When nothing changes the SAME
  * array comes back, so `setNodes` skips the render.
  *
- * It resizes only the listed nodes — frames and neighbours are the caller's business.
+ * It resizes only the listed nodes — frames and neighbours are the caller's business. Generic
+ * because the node components' `useReactFlow()` hands over plain `Node[]`.
  */
-export function setCollapsed(nodes: CanvasNode[], ids: readonly string[], on: boolean): CanvasNode[] {
+export function setCollapsed<T extends Node>(nodes: T[], ids: readonly string[], on: boolean): T[] {
   const want = new Set(ids)
   let changed = false
   const next = nodes.map((n) => {
@@ -1497,7 +1498,7 @@ export function setCollapsed(nodes: CanvasNode[], ids: readonly string[], on: bo
       height,
       style: { ...n.style, height },
       data: { ...n.data, collapsed: on, expandedHeight }
-    }
+    } as T
   })
   return changed ? next : nodes
 }
