@@ -160,9 +160,11 @@ describe('the remote prologue, run through a real /bin/sh', () => {
 //
 // `stripClaudeSessionEnv` cleans the tmux CLIENT's env, but a pane's env starts from the SERVER's
 // global env — and a server started while nodeterm ran inside a Claude Code session keeps that
-// session there for as long as it lives (it outlives the app). A name the creating client LACKS is
-// removed from the new session only if `update-environment` lists it (measured on tmux 3.7b: a name
-// the client DOES carry reaches the session even unlisted). Listing the names is the #419 mechanism
+// session there for as long as it lives (it outlives the app). A name `update-environment` does not
+// list comes from that global env whatever the creating client carries (measured on tmux 3.7b). A
+// name the client carries reaches the session only because create() lists every client-env name
+// (`customEnvMerged`) in `update-environment`, so the names the strip removes are exactly the ones
+// only that list reached: they must be listed on their own. Listing them is the #419 mechanism
 // (account-env.realtmux.test.ts); it reaches a RUNNING server through init's `source-file` and
 // `ensureUpdateEnvKeys`.
 //
