@@ -15,7 +15,7 @@ export interface ArmedNode {
 /** The subset of the agentStatus store this module reads. */
 export type StatusById = Record<
   string,
-  { state?: AgentState; lastTurnError?: { at: number } } | undefined
+  { state?: AgentState; lastTurnError?: { at: number }; lastTurnClean?: boolean } | undefined
 >
 
 export interface LaunchToFire {
@@ -39,6 +39,12 @@ export interface LaunchToFire {
  * upstream stations have not emitted a hook event yet, and reading "no news" as "finished"
  * would fire every dependent immediately — the exact bug that makes a dependency edge useless.
  *
+ * …UNLESS the last turn this renderer recorded for it ended cleanly (`lastTurnClean`, persisted).
+ * "No news" after a RELAUNCH is not a fan-out's silence: `state` is empty after every restart and
+ * an idle station reports nothing, so a station that had finished before it read "unknown" forever
+ * and everything armed behind it sat as a bare shell (2026-09-11). A fresh fan-out has no such
+ * record, so it still holds; and any live state outranks the record — busy is busy.
+ *
  * A dep that is `done` **with a live `lastTurnError`** is refused (issue #521). An errored station
  * reaches idle IMMEDIATELY and looked healthy from every surface an orchestrator can read, so a
  * whole dependency chain launched against an upstream that had produced nothing. Firing with a
@@ -52,7 +58,9 @@ export interface LaunchToFire {
 function depSatisfied(depId: string, status: StatusById, live: ReadonlySet<string>): boolean {
   if (!live.has(depId)) return true
   const st = status[depId]
-  return st?.state === 'done' && !st.lastTurnError
+  if (st?.lastTurnError) return false
+  if (st?.state === 'done') return true
+  return st?.state === undefined && st?.lastTurnClean === true
 }
 
 /** Of the deps this node is still waiting on, which are held because they ERRORED rather than

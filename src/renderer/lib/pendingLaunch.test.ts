@@ -85,9 +85,10 @@ describe('launchesToFire', () => {
     ])
   })
 
-  it('after a restart (empty status map) a persisted arming holds — nothing will report, ▶ is the escape', () => {
-    // Agent state is transient; a live dep that reported `done` before the restart is unknown now,
-    // and unknown is NOT satisfied. The manual run-now on the badge exists for exactly this.
+  it('after a restart with no recorded clean end, a persisted arming holds — ▶ is the escape', () => {
+    // Agent state is transient; a dep with no persisted `lastTurnClean` (it errored, was mid-turn at
+    // quit, or was never seen) is unknown now, and unknown is NOT satisfied. The manual run-now on
+    // the badge exists for exactly this. A recorded clean end does release — see `lastTurnClean`.
     expect(launchesToFire([armed('c', ['a'])], {}, live)).toEqual([])
     expect(unmetDeps(armed('c', ['a']), {}, live)).toEqual(['a'])
   })
@@ -278,5 +279,41 @@ describe('storedLaunchesToFire — armed nodes in a project that is not on scree
     expect(
       storedLaunchesToFire([{ ...code, closed: true }], null, { builder: { state: 'done' } })
     ).toEqual([])
+  })
+})
+
+/**
+ * After a relaunch the live `state` is empty, and an idle station reports nothing, so a station
+ * that had finished before the restart read "unknown" forever and everything armed behind it — a
+ * `verify` panel, an `--after` chain — sat as a bare shell (2026-09-11: two panels stranded for half
+ * an hour behind targets that had finished before a relaunch). `lastTurnClean` is the persisted
+ * record of a clean end; any live signal outranks it.
+ */
+describe('after a restart — a persisted clean end (`lastTurnClean`)', () => {
+  const live = new Set(['a', 'c'])
+
+  it('fires on a persisted clean end when nothing newer is known', () => {
+    expect(launchesToFire([armed('c', ['a'])], { a: { lastTurnClean: true } }, live)).toEqual([
+      { id: 'c', command: 'echo c' }
+    ])
+  })
+
+  it('holds when the live status says the station is busy again', () => {
+    for (const state of ['working', 'blocked', 'waiting'] as const) {
+      expect(
+        launchesToFire([armed('c', ['a'])], { a: { state, lastTurnClean: true } }, live),
+        state
+      ).toEqual([])
+    }
+  })
+
+  it('holds when the last turn errored', () => {
+    const errored: StatusById = { a: { lastTurnClean: true, lastTurnError: { at: 1 } } }
+    expect(launchesToFire([armed('c', ['a'])], errored, live)).toEqual([])
+  })
+
+  it('holds when no clean end was persisted', () => {
+    expect(launchesToFire([armed('c', ['a'])], { a: {} }, live)).toEqual([])
+    expect(unmetDeps(armed('c', ['a']), { a: { lastTurnClean: false } }, live)).toEqual(['a'])
   })
 })

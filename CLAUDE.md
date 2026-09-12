@@ -1277,7 +1277,9 @@ shared 4-state model, and a **transient** zustand store `state/agentStatus.ts`
 **not** persisted — only `unread`/`session`/`sessionId`/`agentId`/`loop`/`hibernated` go to
 localStorage under `nodeterm.agentStatus`, migrated once from the legacy `nodeterm.claudeStatus`
 key. `agentId` is durable because a hand-launched `claude` in a plain terminal is known nowhere
-else, and its context links must keep classifying across restarts).
+else, and its context links must keep classifying across restarts. So is `lastTurnClean` — "the
+last turn ended cleanly, and nothing live has said otherwise" — which is how an `--after` wait
+still sees a station that finished before a relaunch; see Dependency edges, item (5)).
 
 - **Agent registry + capabilities** — `src/shared/agents/config.ts` holds `AGENT_CONFIG`
   (claude/codex/gemini/copilot/opencode/grok: id, label, spawn command, color, `promptInjectionMode`, …) keyed
@@ -2110,10 +2112,15 @@ else, and its context links must keep classifying across restarts).
   (4) Delivery is **exactly-once via `launchInFlight`** (an id stays in the set forever once
   `sendText` resolved true — clearing `pendingLaunch` is a state update that can lag a re-render),
   and a **refused** `sendText` retries (`launchRetryDelay`'s backoff) instead of vanishing.
-  (5) `pendingLaunch` **is persisted** (unlike `initialCommand`), but agent state is not — so after
-  a restart nothing will ever report `done` and the node carries a manual ▶ **run-now** escape in
-  its QUEUED badge (which disarms only on a delivery that LANDED — dropping it unconditionally
-  threw the command away in exactly the state the button exists to rescue). (6) Canvas subscribes
+  (5) `pendingLaunch` **is persisted** (unlike `initialCommand`), and so is the one turn fact a wait
+  needs: agent `state` is not, but a CLEAN end is recorded as the durable **`lastTurnClean`**
+  (agentStatus), and `depSatisfied` accepts it while `state` is unknown. Before 2026-09-11 a
+  station that finished before a relaunch read "unknown" forever — an idle station reports nothing
+  — so a `verify` panel armed after the relaunch behind an already-idle target never started. Any
+  live state outranks the record (busy is busy), and a station that errored or was mid-turn at quit
+  has none, so those still hold and the node carries a manual ▶ **run-now** escape in its QUEUED
+  badge (which disarms only on a delivery that LANDED — dropping it unconditionally threw the
+  command away in exactly the state the button exists to rescue). (6) Canvas subscribes
   to `armedDepSig`, NOT `useAgentStatus(s => s.byId)` —
   the same discipline as `loopSig`; the full map re-renders the canvas on every hook event.
   (7) The effect also covers the projects that are **not on screen** (`storedLaunchesToFire`, over

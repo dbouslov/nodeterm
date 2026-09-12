@@ -301,7 +301,7 @@ describe('loop persistence (cron/schedule survive an app restart)', () => {
     useAgentStatus.getState().setState('n5', 'done', 'claude')
     // The live entry carries the idle clock…
     expect(useAgentStatus.getState().byId['n5'].lastEventAt).toBeTypeOf('number')
-    // …but nothing durable happened yet, so nothing was written at all.
+    // …but only durable fields ever reach the file: the clock and `state` stay out of it.
     useAgentStatus.getState().setSessionId('n5', 'sess-1')
     const saved = JSON.parse(store.getItem('nodeterm.agentStatus')!)
     expect(saved.n5.sessionId).toBe('sess-1')
@@ -492,5 +492,52 @@ describe('observed Claude account persistence (a plain terminal knows it nowhere
     const before = useAgentStatus.getState().byId
     useAgentStatus.getState().setAccount('n6', { ...claude2 })
     expect(useAgentStatus.getState().byId).toBe(before)
+  })
+})
+
+describe('`lastTurnClean` — the one turn fact that survives a restart (for `--after` waits)', () => {
+  it('records a clean end, persists it, and restores it on the next launch', async () => {
+    const store = memStorage()
+    vi.stubGlobal('localStorage', store)
+    const { useAgentStatus } = await import('./agentStatus')
+    useAgentStatus.getState().setState('n40', 'working', 'claude', true)
+    useAgentStatus.getState().setState('n40', 'done', 'claude')
+    expect(JSON.parse(store.getItem('nodeterm.agentStatus')!).n40.lastTurnClean).toBe(true)
+
+    vi.resetModules()
+    vi.stubGlobal(
+      'localStorage',
+      memStorage({ 'nodeterm.agentStatus': store.getItem('nodeterm.agentStatus')! })
+    )
+    const reloaded = await import('./agentStatus')
+    const st = reloaded.useAgentStatus.getState().byId['n40']
+    expect(st.lastTurnClean).toBe(true)
+    // The live state itself is still not persisted — only the fact that the last turn ended well.
+    expect(st.state).toBeUndefined()
+  })
+
+  it('a new turn retracts it, on disk too — a station busy at quit must not read as finished', async () => {
+    const store = memStorage()
+    vi.stubGlobal('localStorage', store)
+    const { useAgentStatus } = await import('./agentStatus')
+    useAgentStatus.getState().setState('n41', 'done', 'claude')
+    useAgentStatus.getState().setState('n41', 'working', 'claude', true)
+    expect(useAgentStatus.getState().byId['n41'].lastTurnClean).toBeUndefined()
+    expect(JSON.parse(store.getItem('nodeterm.agentStatus')!).n41?.lastTurnClean).toBeUndefined()
+  })
+
+  it('an errored end never records it (issue #521 across a restart)', async () => {
+    vi.stubGlobal('localStorage', memStorage())
+    const { useAgentStatus } = await import('./agentStatus')
+    useAgentStatus.getState().setState('n42', 'done', 'claude', false, undefined, undefined, true)
+    expect(useAgentStatus.getState().byId['n42'].lastTurnClean).toBeUndefined()
+  })
+
+  it('a session starting or ending leaves it standing — neither is a newer turn', async () => {
+    vi.stubGlobal('localStorage', memStorage())
+    const { useAgentStatus } = await import('./agentStatus')
+    useAgentStatus.getState().setState('n43', 'done', 'claude')
+    useAgentStatus.getState().setState('n43', undefined, 'claude')
+    expect(useAgentStatus.getState().byId['n43'].lastTurnClean).toBe(true)
   })
 })
