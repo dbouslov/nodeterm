@@ -60,7 +60,13 @@ vi.mock('child_process', () => {
     if (file === 'ps') return out('  100   100 Ss   -zsh\n  200   200 S+   claude\n')
     if (tmux.unreachable) throw Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' })
     if (args.includes('has-session')) {
-      if (tmux.live.has(args[args.indexOf('-t') + 1])) return out('')
+      const t = args[args.indexOf('-t') + 1]
+      // tmux's own lookup, measured on the bundled tmux 3.7b: `=name` is that session and no other;
+      // a bare name that is no session falls back to the ONE live session whose name it begins.
+      const found = t.startsWith('=')
+        ? tmux.live.has(t.slice(1))
+        : tmux.live.has(t) || [...tmux.live].filter((s) => s.startsWith(t)).length === 1
+      if (found) return out('')
       // tmux's own exit 1: the only answer `probeSaysAbsent` reads as "gone".
       throw Object.assign(new Error("can't find session"), { code: 1 })
     }
@@ -140,6 +146,23 @@ vi.mock('./pty-devices', async (importOriginal) => ({
   readPtyDevices: () => ({ ceiling: 511, inUse: 8 })
 }))
 
+/**
+ * Pinned off the session-host backend, as in pty-single-user.test.ts: `sessionHostSupported()` only
+ * asks whether out/session-host/host.cjs is on disk, so a checkout that ran a build would otherwise
+ * reach a real session-host client from here. Two exports stay steerable, so one case can turn the
+ * bundle "on" and see whether anything asked the host.
+ */
+const host = vi.hoisted(() => ({ supported: false, asked: [] as string[] }))
+vi.mock('./session-host-backend', async () => ({
+  ...(await import('./__fixtures__/no-session-host')).noSessionHost(),
+  sessionHostSupported: () => host.supported,
+  // What the real client does when no host answers: reject, once its connect attempt gives up.
+  sessionHostHasSession: async (name: string) => {
+    host.asked.push(name)
+    throw new Error('session host unreachable')
+  }
+}))
+
 const idle: MirrorEntry = {
   state: 'done',
   updatedAt: 1,
@@ -165,6 +188,8 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
     tmux.calls.length = 0
     tmux.live.clear()
     tmux.unreachable = false
+    host.supported = false
+    host.asked.length = 0
     resetMessageFlow()
     resetAgentMessageTraceForTests()
     // Only the manager's two sweeps (snapshot, idle reap) are faked, so they never fire against a
@@ -284,6 +309,34 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
 
     // A failed read is never evidence of absence, and gate 1 stays fail-closed on what it cannot see.
     expect(outcome).toEqual({ kind: 'targetPaneUnreadable' })
+    expect(pastes()).toEqual([])
+  })
+
+  it('asks tmux alone: a gone session stays targetGone where a session-host bundle is installed', async () => {
+    const m = await parked()
+    tmux.live.delete(TARGET)
+    // out/session-host/host.cjs on disk: a Server Edition image, `npm run dev` after a build. Asking a
+    // host that is not running starts one and waits out its connect, and a failed ask reads "exists".
+    host.supported = true
+
+    const { outcome } = await deliverFromControl(req(), deps(m))
+
+    expect(outcome).toEqual({ kind: 'targetGone' })
+    expect(host.asked).toEqual([])
+    expect(pastes()).toEqual([])
+  })
+
+  it('answers targetGone when the only live session merely starts with its name', async () => {
+    const m = await parked()
+    tmux.live.delete(TARGET)
+    // Another node's session: `nt-b12` begins with `nt-b1`, so a bare `-t nt-b1` finds it, and the
+    // message would be typed into that node's pane.
+    tmux.live.add(sessionName('b12'))
+
+    const { outcome } = await deliverFromControl(req(), deps(m))
+
+    expect(outcome).toEqual({ kind: 'targetGone' })
+    expect(paneReads()).toEqual([])
     expect(pastes()).toEqual([])
   })
 

@@ -116,7 +116,9 @@ describe('PtyManager.paneOwner', () => {
     expect(calls).toHaveLength(2)
     expect(calls[0]).toEqual({
       file: '/usr/bin/tmux',
-      args: ['-L', TMUX_SOCKET, 'display-message', '-p', '-t', TARGET, PANE_OWNER_FMT]
+      // `=…:` is exactly this session's active pane. A bare `nt-<id>` whose session is gone resolves
+      // to the one session whose name it begins, and would read that node's pane instead.
+      args: ['-L', TMUX_SOCKET, 'display-message', '-p', '-t', `=${TARGET}:`, PANE_OWNER_FMT]
     })
     expect(calls[1]).toEqual({
       file: 'ps',
@@ -180,7 +182,7 @@ describe('PtyManager.paneOwner', () => {
     }
     const mgr = await manager()
     expect(await mgr.paneOwner('some-other-node')).toBeNull()
-    expect(calls[0].args).toContain(sessionName('some-other-node'))
+    expect(calls[0].args).toContain(`=${sessionName('some-other-node')}:`)
   })
 
   it('answers null — not a partial owner — when tmux is unavailable', async () => {
