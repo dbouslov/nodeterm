@@ -1,6 +1,6 @@
 # Edge Rendering and Routing — circuit-board edges
 
-Date: 2026-09-11 · Branch: `feat/edge-routing` · Status: approved design (decisions 1 to 5); plan at docs/superpowers/plans/2026-09-11-edge-routing.md
+Date: 2026-09-11 · Branch: `feat/edge-routing` · Status: approved design (decisions 1 to 5); implemented on `feat/edge-routing-impl`; plan at docs/superpowers/plans/2026-09-11-edge-routing.md
 
 ## Problem
 

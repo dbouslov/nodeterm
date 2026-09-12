@@ -2128,11 +2128,12 @@ else, and its context links must keep classifying across restarts).
   list fires. Only the `open-*`/`verify` verbs write the rope, so `missingDepRopes` heals an armed
   node that has none at **project load**: `pendingLaunch` is persisted and the rope is not, so a node
   armed by any other path — or by a build older than this one — would otherwise hold a launch with
-  no arrow saying what for. All edges route through the single `floating` edge type
-  (`canvas/FloatingEdge.tsx`, a bezier between the MIDPOINTS of the two nodes' facing sides — one
-  anchor per side, so a hub's arrows converge instead of fanning along its border; context and note
-  links are restricted to the left/right sides, where the bridge handles sit; an unmeasured node
-  draws nothing rather than a path to the origin) — no family sets a handle side;
+  no arrow saying what for. All edges route through the single `circuit` edge type
+  (`canvas/edges/CircuitEdge.tsx`): orthogonal paths from the pure router in `lib/edge-routing/`
+  (ports per kind → obstacles, with frames blocking foreign edges → visibility graph → A* → channel
+  nudging), looked up from a per-instance store the `EdgeRouter` fills; hue AND dash encode the
+  KIND (`lib/edgeKinds.ts`), a rope's waiting look is still derived from `pendingLaunch`; an
+  unmeasured node draws nothing rather than a path to the origin — no family sets a handle side;
   and a node whose eye is closed (`hideFanout`) hides every edge touching it as well as its cards
   (2026-09-02 edge model, spec in docs/superpowers/specs).
   **(7) Delivery waits for the node's PTY, and never fails silently** (issue #569 item 1, 2026-09).
@@ -3119,14 +3120,22 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   be hidden, whatever settings.json says. The group-frame menu's colors strip answers to the same
   `colors` id; builders run through `tidySeparators` so a hidden row leaves no dangling rule.
 - **Add menu** = bottom dock (`Dock.tsx`) `+`, mirrored by the pane menu and command palette.
-- **Edges** are all one React Flow type, `floating` (`canvas/FloatingEdge.tsx` over the pure
-  `lib/floatingEdge.ts`): every family — ropes, context bridges, note links, subagent/loop card
-  edges, trigger edges — is drawn between the midpoints of the two nodes' facing sides instead of
-  fixed handle sides, so an edge to a node placed left of or above its source takes the short way
-  round rather than looping across the canvas, and every edge using a side meets the node at ONE
-  point (2026-09-03: enes's first try showed a hub with entries fanned along its whole top edge).
-  Context and note links are the exception in one respect: they anchor only on the left/right
-  sides (`data.anchor: 'horizontal'`), where the `link-out`/`link-in` drag handles are drawn. A terminal node's **eye** (`hide-fanout`, "Hide cards &
+- **Edges** are all one React Flow type, `circuit` (`canvas/edges/`, spec
+  docs/superpowers/specs/2026-09-11-edge-routing-design.md). The look is a table lookup on the
+  edge's KIND and STATE (`lib/edgeKinds.ts`: context, note, rope, fanout, trigger; annotation and
+  handoff reserved) — never inline `style`/`markerEnd` on the edge object — and hue plus dash both
+  encode the kind so a colourblind reader tells them apart. Paths are orthogonal, routed by the
+  pure module `lib/edge-routing/` (no React, no store): ports are fixed per kind (context/note
+  left–right, opener ropes and fan-out bottom→top, dep ropes right→left, with a flip rule),
+  every route avoids nodes and any frame that holds neither endpoint (`OBSTACLE_MARGIN` 24 px),
+  parallel runs are nudged `CHANNEL_SPACING` apart in kind order, and a route the A* cannot find
+  falls back to a plain three-segment path — an edge is never left undrawn (a port inside another
+  node's margin falls back at once: no search can leave it, and letting A* prove that cost whole
+  seconds on a crowded canvas). `EdgeRouter` (a child of `<ReactFlow>`) routes all edges once per
+  node-geometry change, incrementally during a drag, and publishes to `useEdgeRoutes` keyed by
+  React Flow's `rfId` (edge components are not descendants of anything the host renders, so
+  context cannot reach them). Hovering lights one edge and dims the rest; labels show only while
+  lit or selected; the legend is a bottom-left chip. A terminal node's **eye** (`hide-fanout`, "Hide cards &
   connections") hides its subagent/loop cards AND every edge touching that node — display only:
   the links still authorise reads and an `--after` still waits. See the `--after` bullet under
   Canvas control for the rope model the eye hides.
