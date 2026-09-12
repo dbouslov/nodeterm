@@ -46,6 +46,17 @@ describe('portsFor — spread along a side', () => {
     expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(28)
     expect(new Set(xs).size).toBe(5) // still distinct
   })
+  it('a node id containing a colon still gets its ports', () => {
+    // The side buckets were keyed `${nodeId}:${side}` and read back with `split(':')`, which hands
+    // a colon-bearing id its own first segment: the node lookup missed, and reading `.width` off
+    // undefined threw out of the router — the whole canvas went blank. Ids are opaque strings
+    // (a tmux session name, a remote `host:port` label), so they are never parsed.
+    const a = node('ssh:host:22', 0, 0)
+    const b = node('b', 400, 0)
+    const ports = portsFor(req([a, b], [{ id: 'e', source: a.id, target: 'b', kind: 'context' }]))
+    expect(ports.get('e')![0]).toEqual({ x: 200, y: 50, side: 'right' })
+    expect(ports.get('e')![1]).toEqual({ x: 400, y: 50, side: 'left' })
+  })
   it('is deterministic', () => {
     const r = req([node('a', 0, 0), node('b', 400, 0)], [{ id: 'e', source: 'a', target: 'b', kind: 'context' }])
     expect(portsFor(r)).toEqual(portsFor(r))
