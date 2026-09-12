@@ -79,7 +79,7 @@ describe('armed-launch delivery (source pins)', () => {
     // Exactly-once: an id enters the in-flight set before the send and only LEAVES it on a
     // refusal (a successful delivery is irreversible and must never be re-attempted).
     expect(body).toContain('launchInFlight.current.add(f.id)')
-    expect(body).toMatch(/if \(ok\)[\s\S]{0,400}?pendingLaunch: undefined/)
+    expect(body).toMatch(/if \(ok\)[\s\S]{0,400}?disarm\(f\.id/)
     expect(body).toMatch(/launchInFlight\.current\.delete\(f\.id\)/)
     // Satisfaction is still `launchesToFire`'s call — the ready gate is an ADDITIONAL condition,
     // never a replacement for the dependency matrix.

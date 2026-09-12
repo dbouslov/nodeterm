@@ -449,6 +449,8 @@ import {
 } from '../session/relay-tab'
 import { buildBackgroundLinkMaps, buildContextLinkNote, buildLinkMap, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
 import {
+  canDeliverInBackground,
+  disarmDelivered,
   launchesToFire,
   launchRetryDelay,
   storedLaunchesToFire,
@@ -1828,6 +1830,29 @@ export function Canvas() {
   // sitting in a poll loop burning context.
   useEffect(() => {
     const live = new Set(nodes.map((n) => n.id))
+    // The project these `nodes` belong to: where an on-screen launch below is fired from.
+    const onScreenProjectId = nodesProjectIdRef.current
+    // Disarm a launch that LANDED on the copy of its node that will be saved (`disarmDelivered`) — the
+    // screen can move while a paste is out, on screen and off alike — and let the ordinary debounced
+    // save write it. Not `writeDisk`: that saves the store without committing the live canvas first,
+    // then clears `dirty` over whatever the on-screen project had not saved yet.
+    const disarm = (id: string, projectId: string | null) => {
+      const where = disarmDelivered(
+        useProjects.getState().projects,
+        { id, projectId },
+        {
+          nodesProjectId: nodesProjectIdRef.current,
+          activeProjectId: useProjects.getState().activeProjectId,
+          holds: nodesRef.current.some((n) => n.id === id)
+        }
+      )
+      if (where === 'live')
+        setNodes((ns) =>
+          ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, pendingLaunch: undefined } } : n))
+        )
+      else useProjects.setState({ projects: where })
+      markDirty()
+    }
     const ready = launchesToFire(
       nodes as unknown as ArmedNode[],
       useAgentStatus.getState().byId,
@@ -1883,11 +1908,8 @@ export function Canvas() {
       launchAttempts.current.set(f.id, attempt)
       void api.pty.sendText(f.id, f.command).then((ok) => {
         if (ok) {
-          setNodes((ns) =>
-            ns.map((n) => (n.id === f.id ? { ...n, data: { ...n.data, pendingLaunch: undefined } } : n))
-          )
+          disarm(f.id, onScreenProjectId)
           useLaunchDelivery.getState().clear(f.id)
-          markDirty()
           return
         }
         // Refused although the session reported ready — a narrow residual race now, not the
@@ -1918,8 +1940,8 @@ export function Canvas() {
       useAgentStatus.getState().byId,
       setupDoneForGroup
     )) {
-      if (launchInFlight.current.has(f.id) || backgroundRefused.current.has(f.id)) continue
-      if (!isSessionReady(f.id)) continue
+      if (!canDeliverInBackground(f.id, launchInFlight.current, backgroundRefused.current, isSessionReady))
+        continue
       launchInFlight.current.add(f.id)
       void api.pty.sendText(f.id, f.command).then((ok) => {
         if (!ok) {
@@ -1927,24 +1949,7 @@ export function Canvas() {
           backgroundRefused.current.add(f.id)
           return
         }
-        // Disarm the node where it lives NOW — the live canvas if its project came on screen while
-        // the paste was in flight, else the stored project — and let the ordinary debounced save
-        // write it. Not `writeDisk`: that saves the store without committing the live canvas first,
-        // then clears `dirty` over whatever the on-screen project had not saved yet.
-        if (nodesRef.current.some((n) => n.id === f.id)) {
-          setNodes((ns) =>
-            ns.map((n) => (n.id === f.id ? { ...n, data: { ...n.data, pendingLaunch: undefined } } : n))
-          )
-        } else {
-          useProjects.setState((s) => ({
-            projects: s.projects.map((p) =>
-              p.id === f.projectId
-                ? { ...p, nodes: p.nodes.map((n) => (n.id === f.id ? { ...n, pendingLaunch: undefined } : n)) }
-                : p
-            )
-          }))
-        }
-        markDirty()
+        disarm(f.id, f.projectId)
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchNudge are the triggers

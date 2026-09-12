@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  canDeliverInBackground,
+  disarmDelivered,
   launchesToFire,
   launchRetryDelay,
   launchTooltip,
@@ -279,6 +281,117 @@ describe('storedLaunchesToFire — armed nodes in a project that is not on scree
     expect(
       storedLaunchesToFire([{ ...code, closed: true }], null, { builder: { state: 'done' } })
     ).toEqual([])
+  })
+
+  it('reads each project as its own canvas — a dep that lives only in ANOTHER project counts as gone', () => {
+    // `--after` ids are project-local, exactly as on screen, where a dep missing from the canvas is
+    // satisfied (it can never report there). One `live` set shared across projects would let a busy
+    // node elsewhere hold this one: `builder` is working here, but only in `research`.
+    const reviewing = { id: 'code', nodes: [stored('reviewer', ['builder'])] }
+    const building = { id: 'research', nodes: [stored('builder')] }
+    expect(storedLaunchesToFire([reviewing, building], null, { builder: { state: 'working' } })).toEqual([
+      { projectId: 'code', id: 'reviewer', command: 'echo reviewer' }
+    ])
+  })
+})
+
+/**
+ * The background pass's per-node gate. `storedLaunchesToFire` says a launch MAY fire; off screen
+ * there is no badge to report a stall or a refusal on, so the pass pastes only where nothing can go
+ * quietly wrong, and leaves everything else to the on-screen loop.
+ */
+describe('canDeliverInBackground — which off-screen launches are pasted now', () => {
+  const none = new Set<string>()
+  const ready = () => true
+
+  it('pastes a launch that is not in flight, was never refused, and has a session up', () => {
+    expect(canDeliverInBackground('reviewer', none, none, ready)).toBe(true)
+  })
+
+  it('never pastes one already in flight or delivered — the exactly-once set the on-screen loop keeps', () => {
+    expect(canDeliverInBackground('reviewer', new Set(['reviewer']), none, ready)).toBe(false)
+  })
+
+  it('never re-pastes one refused before — that is left to the on-screen loop and its badge', () => {
+    // A refusal takes the id back OUT of flight; only the refused set stops the effect, which re-runs
+    // on every drag frame, from pasting at a dead session again and again.
+    expect(canDeliverInBackground('reviewer', none, new Set(['reviewer']), ready)).toBe(false)
+  })
+
+  it('waits while THIS node has no session up — a cold open that never mounted waits to be viewed', () => {
+    const asked: string[] = []
+    const notReady = (id: string) => {
+      asked.push(id)
+      return false
+    }
+    expect(canDeliverInBackground('reviewer', none, none, notReady)).toBe(false)
+    expect(asked).toEqual(['reviewer'])
+  })
+})
+
+/**
+ * Where a launch that LANDED is disarmed. The paste is async and the screen can move while it is
+ * out; the copy cleared has to be the one that will be SAVED, or the launch stays armed on disk,
+ * outlives this run's in-flight set and fires AGAIN after a relaunch — now that a clean end survives
+ * one (`lastTurnClean`).
+ */
+describe('disarmDelivered — a landed launch is cleared on the copy that will be saved', () => {
+  type Stored = { id: string; nodes: { id: string; pendingLaunch?: { after: string[]; command: string } }[] }
+  const node = (id: string, armed = true): Stored['nodes'][number] =>
+    armed ? { id, pendingLaunch: { after: ['builder'], command: `echo ${id}` } } : { id }
+  const projects: Stored[] = [
+    { id: 'code', nodes: [node('builder', false), node('reviewer'), node('judge')] },
+    { id: 'research', nodes: [node('station')] }
+  ]
+  /** What it decided, as one comparable value: 'live', or every launch still armed on disk. */
+  const outcome = (r: 'live' | readonly Stored[]) =>
+    r === 'live'
+      ? 'live'
+      : r.flatMap((p) => p.nodes.filter((n) => n.pendingLaunch).map((n) => `${p.id}/${n.id}`))
+
+  it('clears the LIVE node while the canvas holds it for the active project — the next commit saves it', () => {
+    // Also the background launch whose project came on screen while its paste was out.
+    const canvas = { nodesProjectId: 'code', activeProjectId: 'code', holds: true }
+    expect(outcome(disarmDelivered(projects, { id: 'reviewer', projectId: 'code' }, canvas))).toBe('live')
+  })
+
+  it('clears the STORED copy of a background launch whose project is still off screen', () => {
+    const canvas = { nodesProjectId: 'code', activeProjectId: 'code', holds: false }
+    expect(outcome(disarmDelivered(projects, { id: 'station', projectId: 'research' }, canvas))).toEqual([
+      'code/reviewer',
+      'code/judge'
+    ])
+  })
+
+  it('clears the STORED copy of an on-screen launch whose project was switched away mid-paste', () => {
+    // A switch commits the live canvas — this node still armed — BEFORE it swaps it out, so clearing
+    // the live copy (all the on-screen path used to do) found nothing and left the stored one armed.
+    const canvas = { nodesProjectId: 'research', activeProjectId: 'research', holds: false }
+    expect(outcome(disarmDelivered(projects, { id: 'reviewer', projectId: 'code' }, canvas))).toEqual([
+      'code/judge',
+      'research/station'
+    ])
+    // Pure: the store's own array is untouched — the caller hands the new one to setState.
+    expect(outcome(projects)).toEqual(['code/reviewer', 'code/judge', 'research/station'])
+  })
+
+  it('clears the STORED copy mid-switch — the store names the next project while the canvas holds this one', () => {
+    // The live copy is about to be replaced unsaved (`canCommitCanvas` refuses it), so a clear there
+    // would be thrown away with it; the switch already committed the armed copy to the store.
+    const canvas = { nodesProjectId: 'code', activeProjectId: 'research', holds: true }
+    expect(outcome(disarmDelivered(projects, { id: 'reviewer', projectId: 'code' }, canvas))).toEqual([
+      'code/judge',
+      'research/station'
+    ])
+  })
+
+  it('touches nothing when the project it was fired from is gone', () => {
+    const canvas = { nodesProjectId: 'research', activeProjectId: 'research', holds: false }
+    expect(outcome(disarmDelivered(projects, { id: 'reviewer', projectId: 'gone' }, canvas))).toEqual([
+      'code/reviewer',
+      'code/judge',
+      'research/station'
+    ])
   })
 })
 

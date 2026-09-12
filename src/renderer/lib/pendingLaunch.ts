@@ -5,6 +5,7 @@
 // matrix is unit-testable — Canvas.tsx only wraps these in an effect and a setState.
 import type { AgentState } from '@shared/agents/normalize'
 import type { PendingLaunch } from '@shared/types'
+import { canCommitCanvas } from '../state/persistGuards'
 
 /** The subset of a canvas node this module reads. */
 export interface ArmedNode {
@@ -21,6 +22,13 @@ export type StatusById = Record<
 export interface LaunchToFire {
   id: string
   command: string
+}
+
+/** A project as the store serializes it — the subset the off-screen pass reads and disarms. */
+export interface StoredProject {
+  id: string
+  closed?: boolean
+  nodes: readonly { id: string; pendingLaunch?: PendingLaunch }[]
 }
 
 /**
@@ -122,11 +130,7 @@ export function launchesToFire(
  * Whether there is a session to deliver into is the caller's question, exactly as on screen.
  */
 export function storedLaunchesToFire(
-  projects: readonly {
-    id: string
-    closed?: boolean
-    nodes: readonly { id: string; pendingLaunch?: PendingLaunch }[]
-  }[],
+  projects: readonly StoredProject[],
   activeProjectId: string | null,
   status: StatusById,
   setupDone?: (groupId: string) => boolean
@@ -139,6 +143,55 @@ export function storedLaunchesToFire(
     for (const f of launchesToFire(armed, status, live, setupDone)) out.push({ ...f, projectId: p.id })
   }
   return out
+}
+
+/**
+ * May the off-screen pass paste this launch NOW? `storedLaunchesToFire` says it may fire; off screen
+ * there is no badge to report a stall or a refusal on, so the pass pastes only where nothing can go
+ * quietly wrong:
+ * - not in flight (`inFlight`, Canvas's `launchInFlight`): a paste is out, or has LANDED — the same
+ *   exactly-once set the on-screen loop keeps;
+ * - never refused here (`refused`): the effect re-runs on every `nodes` change, so a retry would paste
+ *   at a dead session on each drag frame — the on-screen loop, with its backoff and badge, takes it
+ *   when that project is next viewed;
+ * - a session is up (`isReady`, i.e. `isSessionReady`): a node mounted this run and then parked or
+ *   released stays typeable by name, while a cold open that never mounted waits to be viewed.
+ */
+export function canDeliverInBackground(
+  id: string,
+  inFlight: ReadonlySet<string>,
+  refused: ReadonlySet<string>,
+  isReady: (id: string) => boolean
+): boolean {
+  return !inFlight.has(id) && !refused.has(id) && isReady(id)
+}
+
+/**
+ * Where a launch that LANDED is disarmed: on the copy of its node that will be SAVED, decided when
+ * the paste resolves, because the screen can move while it is out. `launch.projectId` is the project
+ * it was fired from; `canvas` is what React Flow holds by then — the project its nodes belong to (the
+ * epoch tag), the store's active id, and whether this node is among them.
+ *
+ * `'live'` while the canvas holds the node and may be committed (`canCommitCanvas`): the caller
+ * clears React Flow's copy, and the next commit overwrites the stored one. Otherwise the projects
+ * come back with the STORED copy cleared. That covers a launch that was never on screen (the
+ * off-screen pass), and one whose project LEFT the screen mid-paste: a switch commits the live
+ * canvas, this node still armed, before it swaps it out — and until the swap lands the store already
+ * names the next project while React Flow still holds this one, so a clear on the live copy would be
+ * thrown away with it. Left armed on disk, the launch outlives this run's `launchInFlight` and fires
+ * a second time after a relaunch, now that a clean end survives one (`lastTurnClean`).
+ */
+export function disarmDelivered<P extends StoredProject>(
+  projects: readonly P[],
+  launch: { id: string; projectId: string | null },
+  canvas: { nodesProjectId: string | null; activeProjectId: string; holds: boolean }
+): 'live' | P[] {
+  if (canvas.holds && canCommitCanvas(canvas.nodesProjectId, canvas.activeProjectId)) return 'live'
+  return projects.map((p) =>
+    p.id === launch.projectId
+      ? { ...p, nodes: p.nodes.map((n) => (n.id === launch.id ? { ...n, pendingLaunch: undefined } : n)) }
+      : p
+  )
 }
 
 /** The deps an armed node is still waiting on — what the node badge and tooltip report. */

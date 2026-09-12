@@ -2123,18 +2123,26 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   command away in exactly the state the button exists to rescue). (6) Canvas subscribes
   to `armedDepSig`, NOT `useAgentStatus(s => s.byId)` —
   the same discipline as `loopSig`; the full map re-renders the canvas on every hook event.
-  (7) The effect also covers the projects that are **not on screen** (`storedLaunchesToFire`, over
-  each background project's serialized nodes; `armedDepSig` includes them). React Flow holds only
-  the active project, so an armed node anywhere else used to fire only once its project was brought
-  back on screen — with two orchestrated projects travelling the screen to their own, a review panel
-  sat as bare shells for fourteen minutes after its target finished (2026-09-11). It delivers only
-  into a session that is already up (`isSessionReady`: a parked or released tmux session stays
-  typeable by name), then clears `pendingLaunch` where the node lives by then (the stored project,
-  or the live node if its project came on screen mid-paste) and marks the canvas dirty — never a
-  bare `writeDisk`, which saves without committing the live canvas and then clears `dirty`. It
-  never warns and never retries: a
-  cold-opened node that has never mounted still waits for its project to be viewed, a refused paste
-  is left to the on-screen loop and its badge, and a closed project waits for its reopen.
+  (7) The effect also fires armed nodes in the projects that are **not on screen**
+  (`storedLaunchesToFire`, over each background project's serialized nodes; `armedDepSig` includes
+  them) — **but only into a session already up this run** (`canDeliverInBackground`:
+  `isSessionReady` — a node mounted since launch, then parked or released, stays typeable by name).
+  React Flow holds only the active project, so such a node used to fire only once its project was
+  brought back on screen — with two orchestrated projects travelling the screen to their own, a
+  review panel sat as bare shells for fourteen minutes after its target finished (2026-09-11).
+  **Not covered — these still wait to be viewed:** a cold-opened armed node (`--project`, or any
+  node never mounted this run; after a relaunch that is every node off screen) waits until its
+  project is viewed, then fires as any on-screen node does — a dep that finished before a relaunch
+  releases it through its persisted clean end (item 5); a closed-but-kept project waits for its
+  reopen; a refused background paste is never retried from the background, only by the on-screen
+  loop and its badge once the project is viewed; and the background pass never warns.
+  A delivery that LANDED, on screen or off, is disarmed on the copy that will be SAVED
+  (`disarmDelivered`): the live node while React Flow holds it under the active id
+  (`canCommitCanvas`), else the stored copy in the project it was fired from. A switch commits the
+  live canvas, still armed, before it swaps it out, so clearing only the live node left an on-screen
+  launch whose project left mid-paste armed on disk, to fire again after the next relaunch. Then it
+  marks the canvas dirty — never a bare `writeDisk`, which saves without committing the live canvas
+  and then clears `dirty`.
   Pure logic + refusal matrix in `renderer/lib/pendingLaunch.ts` (unit-tested);
   the dep→node edge is a **rope** (`ctrl-<dep>-<node>`, persisted in `project.ropes` like the
   opener's) whose LOOK is derived: dashed + ⏳ while the node's `pendingLaunch.after` still lists the
