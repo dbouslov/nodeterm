@@ -226,6 +226,14 @@ import { buildHandoff, type HandoffRemote } from './handoff'
 import { initContextLink, setNodeTranscript } from '../core/context-link'
 import { transcriptPathOf } from '../core/context-link-core'
 import { initCanvasControl, installCanvasSkillInto } from './canvas-control'
+import {
+  captureCanvasSnapshot,
+  prepareSnapshot,
+  realSnapshotIO,
+  SNAPSHOT_NO_TICKET,
+  SNAPSHOT_NO_WINDOW,
+  type SnapshotTicket
+} from './canvas-snapshot'
 import { DRY_RUN_VERBS, dryRunRequested, dryRunRefusal } from '../shared/control-verbs'
 import { CONTROL_REQUEST_TIMEOUT_MS } from '../shared/control-confirm'
 import { initTranscriptIndex, searchTranscripts } from '../core/transcript-index'
@@ -3391,6 +3399,31 @@ app.whenReady().then(async () => {
   // node inside the save debounce, or an id main never saved): the project gates fail closed.
   const projectIdOfNode = (id: string): string | undefined =>
     workspaceStore.persistedCanvases().find((c) => c.nodes.some((n) => n.id === id))?.id
+  // `snapshot` tickets, keyed by the forwarded request id (the gate is in the handler below). The
+  // renderer's capture call carries only that id and the rect it measured; the file is main's.
+  const pendingSnapshots = new Map<string, SnapshotTicket>()
+  ipcMain.handle(
+    IPC.canvasSnapshotCapture,
+    async (e, payload: { requestId?: unknown; rect?: unknown } | undefined) => {
+      const id = typeof payload?.requestId === 'string' ? payload.requestId : ''
+      const ticket = pendingSnapshots.get(id)
+      if (!ticket) return { ok: false, error: SNAPSHOT_NO_TICKET }
+      pendingSnapshots.delete(id) // single use
+      const win = BrowserWindow.fromWebContents(e.sender)
+      if (!win) return { ok: false, error: SNAPSHOT_NO_WINDOW }
+      return captureCanvasSnapshot(
+        ticket,
+        payload?.rect,
+        {
+          isVisible: () => win.isVisible(),
+          isMinimized: () => win.isMinimized(),
+          zoomFactor: () => e.sender.getZoomFactor(),
+          capturePng: async (rect) => (await e.sender.capturePage(rect)).toPNG()
+        },
+        realSnapshotIO(app.getPath('userData'))
+      )
+    }
+  )
   hookServer.setControlHandler(async ({ verb, nodeId, args, verified }) => {
     // `--dry-run` (issue #532) is honoured by the spawn verbs only, and this gate runs FIRST —
     // before the browser intercept, the open-project gates and the renderer forward — because a
@@ -3445,9 +3478,29 @@ app.whenReady().then(async () => {
       })
       if (gate !== 'allow') return { ok: false, error: gate.refuse, message: gate.refuse }
     }
+    // `snapshot` (canvas-snapshot.ts): refuse a closed/minimized/hidden window and jail `--out`
+    // HERE, before forwarding — a refusal must never borrow the user's view — and keep the ticket
+    // the renderer's capture call is redeemed against.
+    let snapshotTicket: SnapshotTicket | undefined
+    if (verb === 'snapshot') {
+      const callerProjectId = projectIdOfNode(nodeId)
+      const prep = await prepareSnapshot(
+        {
+          // getMainWindow's structural type omits isVisible; the live object is the BrowserWindow.
+          window: getMainWindow() as BrowserWindow | null,
+          projectId: callerProjectId,
+          projectCwd: callerProjectId ? workspaceStore.localCwdForProject(callerProjectId) : undefined,
+          out: args.out
+        },
+        { realpath: (p) => fsRealpath(p), lstat: (p) => fsLstat(p) }
+      )
+      if (!prep.ok) return { ok: false, error: prep.error, message: prep.error }
+      snapshotTicket = prep.ticket
+    }
     const target = getMainWindow()
     if (!target) return { ok: false, error: 'window unavailable' }
     const requestId = randomUUID()
+    if (snapshotTicket) pendingSnapshots.set(requestId, snapshotTicket)
     const result = await new Promise<{ ok: boolean; message?: string; result?: unknown; error?: string }>((resolve) => {
       const timer = setTimeout(() => {
         pendingControl.delete(requestId)
@@ -3466,6 +3519,8 @@ app.whenReady().then(async () => {
       pendingControl.set(requestId, { resolve, timer })
       target.webContents.send(IPC.agentControl, { requestId, sourceNodeId: nodeId, verb, args })
     })
+    // Redeemed or not, a snapshot ticket never outlives its request (reply and timeout both land here).
+    pendingSnapshots.delete(requestId)
     // Record browser ownership the moment an open-browser succeeds — and ONLY when the caller's
     // identity verdict for THIS request was `verified` (main's own verdict, not anything off the
     // wire or project.json). A `legacy`/warned caller may open a browser but owns nothing, so it

@@ -1,13 +1,16 @@
 import { describe, it, expect } from 'vitest'
+import type { Viewport } from '@xyflow/system'
 import {
   snapshotTarget,
   snapshotViewport,
   capturedCanvasRect,
   snapshotViewRefusal,
   snapshotReplyMessage,
+  runSnapshot,
   SNAPSHOT_EMPTY_CANVAS,
   SNAPSHOT_NOT_ON_SCREEN,
-  type SnapshotNode
+  type SnapshotNode,
+  type SnapshotRunDeps
 } from './canvasSnapshot'
 
 const FIT = { margin: 20, minZoom: 0.01, maxZoom: 2 }
@@ -156,5 +159,78 @@ describe('refusals and the reply', () => {
         frame: 'g1'
       })
     ).toContain('snapshot of frame g1: /p/a.png (10×10 px) — canvas area x=0 y=0 w=10 h=10 at zoom 1.235')
+  })
+})
+
+describe('runSnapshot — frame, paint, capture, then hand the view back', () => {
+  const USER_VIEW: Viewport = { x: 7, y: 9, zoom: 0.5 }
+  const setup = (capture: SnapshotRunDeps['capture']) => {
+    const calls: string[] = []
+    let current: Viewport = USER_VIEW
+    const deps: SnapshotRunDeps = {
+      nodes: [frame('outer', 100, 100, 1000, 800), frame('inner', 50, 60, 300, 200, 'outer')],
+      frame: 'inner',
+      pane: { left: 300, top: 40, width: 1000, height: 800 },
+      fit: FIT,
+      getViewport: () => current,
+      setViewport: async (v) => {
+        calls.push(`set ${v.x},${v.y},${v.zoom}`)
+        current = v
+      },
+      paint: async () => {
+        calls.push('paint')
+      },
+      capture: async (rect) => {
+        calls.push(`capture ${rect.x},${rect.y},${rect.width},${rect.height}`)
+        return capture(rect)
+      }
+    }
+    return { deps, calls, view: () => current }
+  }
+
+  it('sets the computed viewport, waits for paint, captures the pane, then restores the exact previous view', async () => {
+    const { deps, calls, view } = setup(async () => ({ ok: true, path: '/u/s.png', width: 2000, height: 1600 }))
+    const r = await runSnapshot(deps)
+    expect(calls).toEqual(['set -100,-120,2', 'paint', 'capture 300,40,1000,800', 'set 7,9,0.5'])
+    expect(view()).toEqual(USER_VIEW)
+    expect(r).toEqual({
+      ok: true,
+      message: 'snapshot of frame inner: /u/s.png (2000×1600 px) — canvas area x=50 y=60 w=500 h=400 at zoom 2',
+      result: {
+        path: '/u/s.png',
+        width: 2000,
+        height: 1600,
+        canvas: { x: 50, y: 60, width: 500, height: 400 },
+        zoom: 2,
+        frame: 'inner'
+      }
+    })
+  })
+
+  it('restores the previous view when main refuses the capture', async () => {
+    const refusal = 'snapshot refused: the nodeterm window is minimized — ask the user to restore it, then retry'
+    const { deps, calls, view } = setup(async () => ({ ok: false, error: refusal }))
+    expect(await runSnapshot(deps)).toEqual({ ok: false, error: refusal })
+    expect(calls.at(-1)).toBe('set 7,9,0.5')
+    expect(view()).toEqual(USER_VIEW)
+  })
+
+  it('restores the previous view when the capture throws', async () => {
+    const { deps, view } = setup(async () => {
+      throw new Error('ipc gone')
+    })
+    await expect(runSnapshot(deps)).rejects.toThrow('ipc gone')
+    expect(view()).toEqual(USER_VIEW)
+  })
+
+  it('refuses before touching the view: unknown frame, empty canvas, no pane', async () => {
+    const overrides: Partial<SnapshotRunDeps>[] = [{ frame: 'nope' }, { nodes: [], frame: undefined }, { pane: null }]
+    for (const over of overrides) {
+      const { deps, calls, view } = setup(async () => ({ ok: true, path: '/x.png', width: 1, height: 1 }))
+      const r = await runSnapshot({ ...deps, ...over })
+      expect(r.ok).toBe(false)
+      expect(calls).toEqual([])
+      expect(view()).toEqual(USER_VIEW)
+    }
   })
 })

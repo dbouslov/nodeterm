@@ -200,6 +200,9 @@ export const IPC = {
   hudDismiss: 'hud:dismiss',
   agentControl: 'agent:control',
   agentControlResult: 'agent:control-result',
+  /** The `snapshot` verb's capture call (renderer → main, invoke): capture the canvas rect for a
+   *  forwarded request. Main redeems it against its own ticket; the renderer never names a file. */
+  canvasSnapshotCapture: 'canvas:snapshot-capture',
   agentMessageDeliver: 'agent:message-deliver',
   /** Canvas sync: a client casts its local node mutations here; the core reflector
    *  (src/core/canvas-sync.ts) stamps each with the total order (`seq`) and sends it back out on the

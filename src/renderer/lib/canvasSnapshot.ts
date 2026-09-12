@@ -1,4 +1,5 @@
 import type { Rect, Viewport } from '@xyflow/system'
+import type { CanvasSnapshotCaptureResult } from '@shared/types'
 import { nodeFitRect, type FocusableNode } from './nodeFocus'
 
 /**
@@ -26,6 +27,8 @@ export const SNAPSHOT_EMPTY_CANVAS =
 
 export const SNAPSHOT_NOT_ON_SCREEN =
   "snapshot refused: your project is not the one on screen, and a snapshot never switches the user's view — ask the user to bring it up, then retry"
+
+export const SNAPSHOT_NO_PANE = 'snapshot failed: the canvas has no size on screen'
 
 export type SnapshotTarget =
   | { ok: true; bounds: Rect; frame?: string }
@@ -123,4 +126,59 @@ export function snapshotReplyMessage(r: {
     `snapshot of ${what}: ${r.path} (${r.width}×${r.height} px) — ` +
     `canvas area x=${n(c.x)} y=${n(c.y)} w=${n(c.width)} h=${n(c.height)} at zoom ${Number(r.zoom.toFixed(3))}`
   )
+}
+
+export interface SnapshotRunDeps {
+  nodes: readonly SnapshotNode[]
+  frame?: string
+  /** The canvas element's box in window CSS pixels (its bounding rect); null when not mounted. */
+  pane: { left: number; top: number; width: number; height: number } | null
+  fit: SnapshotFit
+  getViewport(): Viewport
+  setViewport(v: Viewport): Promise<unknown>
+  /** Resolves once the viewport just set has been painted. */
+  paint(): Promise<void>
+  /** Main's capture of `rect` (the pane), written where main's ticket says. */
+  capture(rect: { x: number; y: number; width: number; height: number }): Promise<CanvasSnapshotCaptureResult>
+}
+
+export type SnapshotRunResult =
+  | {
+      ok: true
+      message: string
+      result: { path: string; width: number; height: number; canvas: Rect; zoom: number; frame?: string }
+    }
+  | { ok: false; error: string }
+
+/**
+ * Frame → paint → capture → restore. Every refusal this module can make comes BEFORE the view is
+ * touched; once it is, the user's exact previous viewport is put back in `finally`, whatever the
+ * capture answered or threw.
+ */
+export async function runSnapshot(d: SnapshotRunDeps): Promise<SnapshotRunResult> {
+  const target = snapshotTarget(d.nodes, d.frame)
+  if (!target.ok) return target
+  const pane = d.pane
+  const view = pane && snapshotViewport(target.bounds, pane.width, pane.height, d.fit)
+  if (!pane || !view) return { ok: false, error: SNAPSHOT_NO_PANE }
+  const previous = d.getViewport()
+  let used: Viewport
+  let shot: CanvasSnapshotCaptureResult
+  try {
+    await d.setViewport(view)
+    await d.paint()
+    // Read back rather than assume: the reply states the view that was actually captured.
+    used = d.getViewport()
+    shot = await d.capture({ x: pane.left, y: pane.top, width: pane.width, height: pane.height })
+  } finally {
+    await d.setViewport(previous)
+  }
+  if (!shot.ok) return { ok: false, error: shot.error }
+  const canvas = capturedCanvasRect(used, pane.width, pane.height)
+  const frame = target.frame
+  return {
+    ok: true,
+    message: snapshotReplyMessage({ path: shot.path, width: shot.width, height: shot.height, canvas, zoom: used.zoom, frame }),
+    result: { path: shot.path, width: shot.width, height: shot.height, canvas, zoom: used.zoom, ...(frame ? { frame } : {}) }
+  }
 }

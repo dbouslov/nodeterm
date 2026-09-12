@@ -803,6 +803,7 @@ const api: NodeTerminalApi = {
     return () => ipcRenderer.removeListener(IPC.agentControl, handler)
   },
   sendAgentControlResult: (payload) => ipcRenderer.send(IPC.agentControlResult, payload),
+  captureCanvasSnapshot: (payload) => ipcRenderer.invoke(IPC.canvasSnapshotCapture, payload),
   // The `browser` verb resolve round-trip (S8 PR 7): main asks the renderer which project owns the
   // source, whether it is control-capable, and whether the capability is on right now — the renderer
   // NEVER runs a CDP command.
