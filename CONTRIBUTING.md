@@ -469,7 +469,10 @@ edge.** Never set `sourceHandle`/`targetHandle`, and never put `style` or `marke
 object — the look comes from `renderer/lib/edgeKinds.ts` at render time, so a new kind is one row
 in that table (and one legend row), not a new colour at a call site. The path comes from the pure
 router in `renderer/lib/edge-routing/`; if you need an edge to avoid something new, it is an
-obstacle rule there, not a React change. And do not add a second edge family for a
+obstacle rule there, not a React change. Its CI perf pins are counts, not timings (no widened
+search, no fallback on a spaced canvas); after changing the router, also run
+`PERF=1 npx vitest run src/renderer/lib/edge-routing` for the wall-clock pins. And do not add a
+second edge family for a
 relation a rope already carries: `--after` is a **rope** whose dashed "⏳ waits for" look is DERIVED
 from the target's `pendingLaunch` (`renderer/lib/edgeModel.ts`), and the context bridge it also
 writes stays hidden underneath it. One `open-claude --after` used to land three edges on one node.

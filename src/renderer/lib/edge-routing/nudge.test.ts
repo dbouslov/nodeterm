@@ -6,6 +6,7 @@ const route = (points: { x: number; y: number }[]): Route => ({
   points,
   ports: [{ ...points[0], side: 'right' }, { ...points[points.length - 1], side: 'left' }],
   fallback: false,
+  widened: false,
   labelAt: points[1],
   bbox: { x: 0, y: 0, width: 0, height: 0 }
 })

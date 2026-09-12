@@ -16,7 +16,51 @@ function canvas(nodes: number, edges: number, frames: number): RouteRequest {
   return { nodes: new Map(ns.map((v) => [v.id, v])), edges: es.filter((e) => e.source !== e.target) }
 }
 
-describe('routing performance pins (spec Section 6; CI bounds are generous)', () => {
+// The node sizes and edge pattern of `canvas`, laid on a 12-column grid with at least 80 px between
+// neighbours: what a tidy or spawned layout leaves, where `canvas` scatters nodes over each other.
+function spaced(nodes: number, edges: number): RouteRequest {
+  let seed = 42
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+  const ns: RouteNode[] = []
+  for (let i = 0; i < nodes; i++) ns.push({ id: `n${i}`, x: (i % 12) * 520, y: Math.floor(i / 12) * 400, width: 240 + Math.floor(rnd() * 200), height: 120 + Math.floor(rnd() * 200), isFrame: false })
+  const es: RouteEdge[] = []
+  for (let i = 0; i < edges; i++) es.push({ id: `e${i}`, source: `n${i % nodes}`, target: `n${(i * 7 + 1) % nodes}`, kind: i % 3 === 0 ? 'context' : 'rope', ropeKind: i % 2 ? 'opener' : 'dep' })
+  return { nodes: new Map(ns.map((v) => [v.id, v])), edges: es.filter((e) => e.source !== e.target) }
+}
+
+// What makes a pass slow is a search that fails inside its window and re-runs over the whole
+// canvas (a widening), and one that then gives up too (a fallback). Those are counts, so these pins
+// read the same on every machine, which the wall-clock pins below do not.
+describe('routing cost pins (deterministic; spec Section 6)', () => {
+  it('full pass on a spaced 120 / 200 canvas: every edge routed, no widened search, no fallback', () => {
+    const req = spaced(120, 200)
+    const g = routeAll(req)
+    expect(g.routes.size).toBe(req.edges.length)
+    expect(g.widenings).toBe(0)
+    expect(g.fallbacks).toBe(0)
+  })
+  it('drag pass (one node moved) on the same canvas: no widened search, no fallback', () => {
+    const req = spaced(120, 200)
+    const g = routeAll(req)
+    const moved = { nodes: new Map(req.nodes), edges: req.edges }
+    const n5 = moved.nodes.get('n5')!
+    moved.nodes.set('n5', { ...n5, y: n5.y + 30 })
+    const d = routeAll(moved, g, new Set(['n5']))
+    // The moved node's own edges must really be searched again, or the zeros below prove nothing.
+    const touching = req.edges.filter((e) => e.source === 'n5' || e.target === 'n5')
+    expect(touching.length).toBeGreaterThan(0)
+    for (const e of touching) expect(d.routes.get(e.id)).not.toBe(g.routes.get(e.id))
+    expect(d.routes.size).toBe(req.edges.length)
+    expect(d.widenings).toBe(0)
+    expect(d.fallbacks).toBe(0)
+  })
+})
+
+// Wall-clock pins. One timed sample is at the mercy of the machine: the drag pin passed alone but
+// read 53 ms against its 50 ms bound with the other test files running beside it, which is how
+// `npm test` and CI run it. So they run only when asked:
+// `PERF=1 npx vitest run src/renderer/lib/edge-routing`.
+describe.skipIf(!process.env.PERF)('routing timing pins (spec Section 6; PERF=1 only)', () => {
   it('full pass, 40 nodes / 60 edges / 6 frames under 100 ms', () => {
     const req = canvas(40, 60, 6)
     routeAll(req) // warm

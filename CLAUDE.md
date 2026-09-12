@@ -3189,7 +3189,10 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   parallel runs are nudged `CHANNEL_SPACING` apart in kind order, and a route the A* cannot find
   falls back to a plain three-segment path — an edge is never left undrawn (a port inside another
   node's margin falls back at once: no search can leave it, and letting A* prove that cost whole
-  seconds on a crowded canvas). `EdgeRouter` (a child of `<ReactFlow>`) routes all edges once per
+  seconds on a crowded canvas). CI pins the router's cost as counts, not time: `perf.test.ts`
+  wants no widened search and no fallback on a spaced 120-node / 200-edge canvas
+  (`RoutedGraph.widenings`, `.fallbacks`); its wall-clock pins run only with `PERF=1`, since one
+  timed sample flaked beside the rest of the suite. `EdgeRouter` (a child of `<ReactFlow>`) routes all edges once per
   node-geometry change, incrementally during a drag, and publishes to `useEdgeRoutes` keyed by
   React Flow's `rfId` (edge components are not descendants of anything the host renders, so
   context cannot reach them). Hovering lights one edge and dims the rest; labels show only while
