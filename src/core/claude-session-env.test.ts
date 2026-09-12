@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { CLAUDE_SESSION_ENV, CLAUDE_TOOL_SHELL_ENV, stripClaudeSessionEnv } from './claude-session-env'
 
 /** What a Claude Code 2.1.268 tool shell carries on top of its claude process's own environment
- *  (measured: the names in a Bash-tool subprocess minus the names `claude` was started with). */
+ *  (measured: the names in a Bash-tool subprocess minus the names `claude` was started with), plus
+ *  CLAUDE_CODE_SESSION_ATTENDED, which 2.1.269 added. */
 const TOOL_SHELL: Record<string, string> = {
   CLAUDECODE: '1',
   CLAUDE_CODE_CHILD_SESSION: '1',
@@ -13,6 +14,7 @@ const TOOL_SHELL: Record<string, string> = {
   CLAUDE_CODE_ENTRYPOINT: 'cli',
   CLAUDE_CODE_EXECPATH: '/Users/u/.local/share/claude/versions/2.1.268',
   CLAUDE_PID: '19105',
+  CLAUDE_CODE_SESSION_ATTENDED: '1',
   CLAUDE_EFFORT: 'xhigh',
   AI_AGENT: 'claude-code',
   GIT_EDITOR: 'true',

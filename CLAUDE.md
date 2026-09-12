@@ -770,7 +770,10 @@ and the pane env is built from `process.env`, so every agent spawned afterwards 
 dropped; generic tool-shell settings (`GIT_EDITOR=true`, `AI_AGENT`, …) only when `CLAUDECODE` is
 set, since a user may set those on purpose. The list is MEASURED (tool-shell env minus the `claude`
 process's own), never a `CLAUDE_*` prefix: that would also strip `CLAUDE_CONFIG_DIR` and
-`CLAUDE_CODE_USE_BEDROCK`.
+`CLAUDE_CODE_USE_BEDROCK`. Both groups are also listed in `update-environment`
+(`ACCOUNT_SCOPE_UPDATE_ENV`): a tmux server started while the app ran inside a Claude Code session
+keeps that session in its global env and outlives the app, and tmux removes a name the creating
+client lacks only when the name is listed (#419's mechanism; `session-env.realtmux.test.ts`).
 
 ### Cold restore (machine reboot)
 

@@ -9,7 +9,8 @@
 // pane held the launcher's messaging socket and token.
 //
 // Measured on Claude Code 2.1.268: these are exactly the names a Bash-tool subprocess has that its
-// `claude` process was not started with. Two groups, because they are not the same kind of fact.
+// `claude` process was not started with (2.1.269 added CLAUDE_CODE_SESSION_ATTENDED). Two groups,
+// because they are not the same kind of fact.
 
 /** One session's identity. Never valid in a new session, so always dropped. */
 export const CLAUDE_SESSION_ENV = [
@@ -21,7 +22,8 @@ export const CLAUDE_SESSION_ENV = [
   'CLAUDE_CODE_MESSAGING_TOKEN',
   'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CODE_EXECPATH',
-  'CLAUDE_PID'
+  'CLAUDE_PID',
+  'CLAUDE_CODE_SESSION_ATTENDED'
 ] as const
 
 /** Settings Claude Code applies to its non-interactive tool shells (`GIT_EDITOR=true` makes a
