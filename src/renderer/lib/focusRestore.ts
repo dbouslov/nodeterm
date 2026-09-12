@@ -22,9 +22,10 @@ export interface FocusRestoreState {
   /** How many modals are open (`openDialogCount()`). */
   openDialogs: number
   /**
-   * The kanban board is up for the active project (`isKanbanOpen`).
+   * A full-page overlay covers the active project's canvas: the kanban board (per-project or
+   * global) or the network overview (`isOverlayViewOpen`).
    *
-   * The board is NOT in the dialog stack, so `openDialogs` cannot see it. A full-page surface
+   * Neither is in the dialog stack, so `openDialogs` cannot see them. A full-page surface
    * that covers the canvas without registering there owes a field of its own here.
    */
   boardOpen: boolean

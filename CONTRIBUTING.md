@@ -139,6 +139,16 @@ lane unaffected.
   because reading an unset setting as a deliberate choice is reading consent into silence. Anything
   machine-local goes in `settings.json`; nothing that grants a capability goes in `project.json`.
 
+- **`data.tags` is retired; never write node metadata there.** The kanban label migration
+  (`migrateProjectTags`, `renderer/lib/kanban.ts`) strips it from every node on every canvas load,
+  so anything stored there is gone at the next hydrate. Structured node facts get their own
+  validated field, normalized at both serializer seams (see `annotation`,
+  `shared/node-annotation.ts`).
+
+- **A canvas-only guard asks `isOverlayViewOpen`, never `isKanbanOpen`.** The board (per-project or
+  Omni) and the network overview each cover a still-mounted canvas; a shortcut that checks only the
+  board fires undo, Delete or a camera move on a canvas hidden under the overview.
+
 - **A dialog raised on someone else's behalf must know that request's lifetime.** Main abandons a
   canvas-control request after 120 s and tells the renderer nothing, so an unanswered dialog sat
   there forever AND held the one-confirm-at-a-time guard, which refused every later destructive

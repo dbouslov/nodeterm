@@ -11,6 +11,7 @@ import {
   type NodeColor
 } from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
+import { applyAnnotation, parseAnnotateArgs } from '../shared/node-annotation'
 import { containerJoinedBy, framesJoinedBy, placeOpened, type Box } from '../shared/placement'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
@@ -1029,6 +1030,54 @@ export class HeadlessNodeFactory {
       // Metadata only. In particular, Server Edition never mirrors `/rename` into the pane.
       this.publish(source.project, [renamed])
       return { ok: true, message: `renamed ${id} to "${title}"` }
+    })
+  }
+
+  /** The network overview's role + recommendation (spec 2026-09-11 §2), modeled on `rename`. */
+  annotate(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      // The desktop's own parser: unknown flags, the bulk cap and "nothing to write" refuse here
+      // exactly as they do there.
+      const parsed = parseAnnotateArgs(args)
+      if ('error' in parsed) return { ok: false, error: parsed.error }
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+      // The whole list is validated before any write: one unknown, foreign or unowned id refuses
+      // everything, and names the id.
+      for (const id of parsed.ids) {
+        const projects = nodeProjects(workspace, id)
+        if (!projects.length) return { ok: false, error: `annotate: no node with id ${id}` }
+        if (projects.length !== 1 || projects[0].id !== source.project.id) {
+          return {
+            ok: false,
+            error: `annotate-project-refused: ${id} is not exclusively in the caller's project`
+          }
+        }
+      }
+      const unowned = this.unownedMutation(sourceNodeId, parsed.ids)
+      if (unowned) return this.ownershipRefusal('annotate', sourceNodeId, unowned)
+
+      const now = Date.now()
+      const next = new Map(
+        parsed.ids.map((id) => {
+          const node = source.project.nodes.find((candidate) => candidate.id === id)!
+          const annotation = applyAnnotation(node.annotation, parsed, sourceNodeId, now)
+          return [id, { ...node, annotation }] as const
+        })
+      )
+      source.project.nodes = source.project.nodes.map((node) => next.get(node.id) ?? node)
+      await this.deps.workspaceStore.save(workspace)
+      // Metadata only: nothing reaches a pane.
+      this.publish(source.project, [...next.values()])
+      return {
+        ok: true,
+        result: { annotated: parsed.ids },
+        message: `annotated ${parsed.ids.length}: ${parsed.ids.join(', ')}`
+      }
     })
   }
 

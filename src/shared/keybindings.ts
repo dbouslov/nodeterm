@@ -44,6 +44,7 @@ export type CommandId =
   | 'app.shortcutsPanel'
   | 'view.kanbanToggle'
   | 'view.globalKanbanToggle'
+  | 'view.overviewToggle'
   | 'view.focusMode'
   | 'panel.explorer'
   | 'panel.sourceControl'
@@ -107,6 +108,8 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
   { id: 'view.kanbanToggle', title: 'Toggle kanban board', group: 'General', scope: 'app',
     defaultBindings: both('Cmd+Shift+B'), allowInTerminal: true },
   { id: 'view.globalKanbanToggle', title: 'Toggle global kanban (Omni)', group: 'General', scope: 'app',
+    defaultBindings: both(), allowInTerminal: true },
+  { id: 'view.overviewToggle', title: 'Toggle network overview', group: 'General', scope: 'app',
     defaultBindings: both(), allowInTerminal: true },
   // Focus mode fills the window with one node — most naturally invoked from INSIDE the terminal
   // being enlarged, hence allowInTerminal. Scope stays 'canvas': over the kanban board or while

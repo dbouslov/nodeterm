@@ -31,6 +31,7 @@ import { codexSharedIdentity } from './codexIdentity'
 import { folderTitle } from '../lib/explorerCreate'
 import { sshHostKey } from '@shared/ssh'
 import { normalizeNodeIcon } from '@shared/node-icon'
+import { normalizeNodeAnnotation } from '@shared/node-annotation'
 import { useSettings } from './settings'
 
 // Re-exported so Canvas (and anything else in the renderer) keeps importing it from here, while the
@@ -1953,6 +1954,8 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         // node data — so every surface that renders an icon gets a value this module vouched for
         // rather than each one re-deciding. An unrecognized icon becomes no icon.
         icon: normalizeNodeIcon(n.icon),
+        // Same seam, same reason: an agent-written annotation is git-shared content.
+        annotation: normalizeNodeAnnotation(n.annotation),
         expandedHeight: n.size.height,
         premaxRect: n.premaxRect,
         shell: n.shell,
@@ -2035,6 +2038,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         // peer canvas mutation or a future caller put on live node data cannot be written to the
         // shared file unchecked — the file is only ever as trustworthy as its last writer.
         icon: normalizeNodeIcon(n.data.icon),
+        annotation: normalizeNodeAnnotation(n.data.annotation),
         parentId: n.parentId,
         shell: n.data.shell,
         cwd: n.data.cwd,

@@ -1921,6 +1921,15 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   `open-agent` are verified-only at the Server handler boundary. A plain terminal keeps generic
   node hook wiring but receives neither `NODETERM_AGENT_ID` nor `NODETERM_CANVAS_CONTROL`; missing
   identity never defaults to Claude.
+  **`annotate --node <id,id> [--role "…"] [--recommend "…"] [--clear]`** (2026-09-11, the Network
+  overview's data) writes `CanvasNodeState.annotation` ({role ≤ 80, recommend ≤ 500, by, at}) —
+  NOT `data.tags`, which `migrateProjectTags` strips on every load. Verified-only in the hook
+  server, and the byline `by` is the verified caller's node id, never a body field (the
+  accountability story, as for `sticky`); store-answered (`STORE_ANSWERED_VERBS`: never a project
+  switch or camera move); a bulk list (≤ 50) is refused whole on the first unknown id, naming it;
+  `list` rows print `· role:`. Pure helpers in `shared/node-annotation.ts`, validated at both
+  serializer seams like `icon`. Server Edition: `HeadlessNodeFactory.annotate`, creator-owned like
+  `rename`.
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim
@@ -1963,7 +1972,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   say-so. THREE membership lists now decide, and their differences are the whole design:
   - `STORE_ANSWERED_VERBS` (`needsLiveCanvas` false) = **no canvas is needed at either end** —
     `list` reads names, `send`/`reply` deliver into a tmux PANE, `sticky` rewrites a note,
-    `open-project` acts on the projects store.
+    `annotate` writes a node's role/recommendation, `open-project` acts on the projects store.
   - `COLD_OPENABLE_VERBS` (`canColdOpen` — `open-terminal`/`open-claude`/`open-agent`) = **a canvas
     IS needed, but the serialized one will do.** `needsLiveCanvas` stays TRUE for them; they take
     the `--project` cold-open path (issue #338 §2.2) applied to their own project: the composed
@@ -3517,7 +3526,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   edited inline via the Notion-style `LabelPicker`: create/assign/rename/recolor/delete through the
   pure `lib/kanban.ts` transforms) plus each GitHub issue's own labels, both filterable. The canvas stays MOUNTED under the opaque overlay (agent-status
   listeners live in Canvas.tsx; `display:none` would 0×0-resize every terminal into a tmux
-  SIGWINCH), and canvas-only shortcuts (undo, ⌘T/⌘⇧C, Delete) early-return via `isKanbanOpen`.
+  SIGWINCH), and canvas-only shortcuts (undo, ⌘T/⌘⇧C, Delete) early-return via `isOverlayViewOpen`
+  (board, Omni or the network overview).
   Board data is `project.kanban` ({columns, assignments: [{nodeId, columnId}]}, order = array
   order) in `.nodeterm/project.json` — git-shared, rides rev/mirror/watcher; absent until the
   first edit (`defaultKanban` seeds To Do / In Progress / Done). The virtual **Ungrouped**
@@ -3608,6 +3618,27 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   and that is not optional**: the renderer holds its own board and the next whole-workspace save
   serializes THAT, so a change the renderer never heard about is one the next autosave reverts.
 - **Omni Kanban (global swimlanes)** (`components/kanban/GlobalKanbanView.tsx`; one swimlane per open project; `state/viewMode.ts` `globalKanban` (localStorage `nodeterm.globalKanban`, machine-local, like `viewByProject`) + `settings.omniKanbanEnabled` (feature gate, default OFF, `settings.json`) / `omniKanbanAsDefault` (when true, `view.kanbanToggle` — Cmd+Shift+B — opens Omni; otherwise per-project; `view.globalKanbanToggle` registry command — unbound, remappable — always opens Omni when enabled); `TabBar` and the menu IPC `onToggleKanban` share one `performKanbanToggle` decision, and `isGlobalKanbanOpen()` is the single gate (fail-closed, static import of `useSettings` — the earlier `require` failed open in the packaged renderer). The active project's lane is derived from serialized `p.nodes` via `toKanbanSessionState` — the persisted-state counterpart to `toKanbanSession` — and is committed (`commitActiveToStore`) before the overlay mounts so live React Flow edits are not stale; `pendingLaunch` never becomes `initialCommand` in the modal (the DAG launch must fire only when dependencies report done, and the canvas `TerminalNode` already delivers `initialCommand` via `writeWhenShellReady` after the `nodeterm:create-node` project switch). Active-project edits (rename / sticky / browser nav) route through Canvas live nodes (`setNodes` + `markDirty`), non-active through the store + `writeDisk`; delete uses `ConfirmDialog` (not `confirm`) and SSH-aware teardown (`transport.destroy` locally vs `sshProject.killSessions` with `everySocket` for a remote owner, plus `agentStatus` / `agentNodes` / `webviewKeepAlive` cleanup). The top bar's project pills and Cmd/Ctrl+1..9 (`nodeterm:swimlane-jump`) jump to the lane; header hint shows the correct mod (`Cmd` on Mac, `Ctrl` elsewhere). Server Edition works as-is, Mobile N/A.
+- **Network overview** (`components/overview/NetworkOverviewView.tsx`, spec
+  docs/superpowers/specs/2026-09-11-network-overview-design.md; ⤢ on the minimap's top-left corner
+  with a findings-count badge / ⌘K "Network overview" / `view.overviewToggle`, unbound): the third
+  `ProjectView` (`'overview'`), a full-page overlay with its OWN read-only React Flow instance
+  (`id="network-overview"`, so its `EdgeRouter` routes never overwrite the canvas's) over the
+  SERIALIZED active project — `performOverviewToggle` commits the live canvas first, like the
+  global board. Its input comes from `useActiveOverview`, which subscribes through `overviewSig`
+  inside the two small consumers (overlay, minimap badge) so Canvas never re-renders on a hook
+  event, and ticks once a minute so idle fires on a quiet canvas. Every canvas-only guard asks
+  `isOverlayViewOpen` (board, Omni or overview), never a bare kanban check — the zoom chords, the
+  terminal chord gate (`terminalChordBubbles`) and the window-activation focus restore included.
+  "Go to node" is `goToNodeAction`: on a board it opens the card, under the overview it LEAVES the
+  overview and frames; the board is asked first, because Omni can sit over a project whose own view
+  still reads `'overview'` (render and `toggleOverviewView` handle that case too). The overlay takes
+  keyboard focus on open so Escape reaches it and not a terminal left focused underneath (xterm
+  would send ESC to the agent and cancel the event). The engine is the pure `lib/networkOverview.ts`
+  (`buildFindings` / `buildOverviewGraph`): agent recommendations first, then idle (Eco's clock
+  `lastEventAt` and threshold `agentHibernationIdleMinutes`; no clock, or a threshold that is not
+  > 0, ⇒ no flag), isolated (agent with no edge), group-no-lead (≥ 2 agent children, none with a
+  lead/orchestrator/hub role), then carried verdicts. `hideFanout` is ignored here on purpose.
+  Desktop + Server Edition identical (pure renderer); mobile N/A.
 - **Settings** (`SettingsPage.tsx`, ⚙ / ⌘,): font/cursor (live to xterm + Monaco), default
   shell, grid + snap, **default node size** (`defaultNodeWidth`/`defaultNodeHeight` — new
   terminal/agent nodes only, clamped in `terminalNodeSize()` in `state/workspace.ts`),

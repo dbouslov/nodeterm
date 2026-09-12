@@ -96,6 +96,15 @@ describe('recreateNodeFromSnapshot', () => {
     expect(node!.height).toBe(500)
   })
 
+  it('keeps the agent-written annotation on reopen', () => {
+    const annotation = { role: 'lead', by: 'hub', at: 1 }
+    const node = recreateNodeFromSnapshot(
+      snap({ data: { title: 'Note', color: '#ffd60a', group: null, text: 'hi', annotation } }),
+      baseCtx()
+    )
+    expect(node!.data.annotation).toEqual(annotation)
+  })
+
   it('recreates an editor node from filePath, carrying the custom title', () => {
     const node = recreateNodeFromSnapshot(
       snap({

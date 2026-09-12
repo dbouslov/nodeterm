@@ -286,6 +286,8 @@ import {
 } from '../lib/livePlacement'
 import { rankUnits, restructureNodes, type RestructureLayout } from '../lib/restructure'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
+import { applyAnnotation, normalizeNodeAnnotation, parseAnnotateArgs } from '@shared/node-annotation'
+import { annotateNodes, annotateReply } from '../lib/annotateNodes'
 import {
   unavailableRecovery,
   planOpenProject,
@@ -535,7 +537,21 @@ import { canClearDirty, canCommitCanvas, canCreateOnCanvas } from '../state/pers
 import { isHidden } from '../lib/ui-visibility'
 import { boardLogEvents } from '../lib/boardLogDiff'
 import { useBoardLog } from '../state/boardLog'
-import { isGlobalKanbanOpen, isKanbanOpen, isOmniKanbanEnabled, useViewMode, viewFor } from '../state/viewMode'
+import {
+  goToNodeAction,
+  isGlobalKanbanOpen,
+  isKanbanOpen,
+  isOmniKanbanEnabled,
+  isOverlayViewOpen,
+  isOverviewOpen,
+  toggleOverviewView,
+  useViewMode,
+  viewFor
+} from '../state/viewMode'
+import { NetworkOverviewView } from '../components/overview/NetworkOverviewView'
+import { OverviewExpandButton } from '../components/overview/OverviewExpandButton'
+import { useActiveOverview } from '../components/overview/useActiveOverview'
+import { buildFindings } from '../lib/networkOverview'
 import { GlobalKanbanView } from '../components/kanban/GlobalKanbanView'
 import { useFocusNode, FOCUS_SURFACE_ID } from '../state/focusNode'
 import { focusTargetId } from '../lib/focusTarget'
@@ -992,6 +1008,19 @@ function StatusAwareMiniMap({ onNodeDoubleClick }: { onNodeDoubleClick: (node: N
       nodeClassName={nodeClassName}
     />
   )
+}
+
+// The Network overview's two consumers own their status subscriptions (useActiveOverview), for the
+// same reason as the minimap above: Canvas must not re-render on every hook event.
+function OverviewMinimapButton({ onOpen }: { onOpen: () => void }) {
+  const active = useActiveOverview()
+  const count = useMemo(() => (active ? buildFindings(active.input).length : 0), [active])
+  return <OverviewExpandButton count={count} onOpen={onOpen} />
+}
+
+function ActiveNetworkOverview({ onClose, onGoToNode }: { onClose: () => void; onGoToNode: (id: string) => void }) {
+  const active = useActiveOverview()
+  return active && <NetworkOverviewView {...active} onClose={onClose} onGoToNode={onGoToNode} />
 }
 
 /**
@@ -2615,7 +2644,7 @@ export function Canvas() {
       // so flipping the switch on later still shows the card on the next activation. "Once" is
       // only spent on a card that could actually render: a project whose breadcrumbs ALL point
       // at nodes deleted since must not burn its one-shot slot on an empty card the user never
-      // saw — and neither must a project that activates ON the kanban board, where the card
+      // saw — and neither must a project that activates ON the board or the overview, where the card
       // (z 11) sits invisible under the opaque overlay (z 25). Same failure mode, same rule.
       const liveIds = new Set(flow.map((n) => n.id))
       const hasLiveStop = (project.breadcrumbs ?? []).some((b) => liveIds.has(b.nodeId))
@@ -2624,7 +2653,7 @@ export function Canvas() {
         resumeCardEnabled &&
         !resumeCardShown.has(project.id) &&
         hasLiveStop &&
-        !isKanbanOpen(project.id)
+        !isOverlayViewOpen(project.id)
       ) {
         resumeCardShown.add(project.id)
         setResumeProject(project)
@@ -2638,10 +2667,14 @@ export function Canvas() {
         const node = nodesRef.current.find((n) => n.id === pending)
         if (node) {
           // Same rule as focusNodeById: if the project we just landed on shows the BOARD, the
-          // node lives on a card, not on the canvas hidden under it.
-          if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) {
+          // node lives on a card, not on the canvas hidden under it; if it shows the OVERVIEW,
+          // leave it first, or the node is framed under the overlay.
+          const landed = useProjects.getState().activeProjectId
+          const action = goToNodeAction(landed)
+          if (action === 'card') {
             useViewMode.getState().requestCard(pending)
           } else {
+            if (action === 'leave-overview') useViewMode.getState().toggleOverview(landed)
             setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === pending })))
             goToNode(node)
             // Same as focusNodeById: after the cross-project switch lands, hand the keyboard to the
@@ -2694,6 +2727,10 @@ export function Canvas() {
   const omniEnabled = useSettings((s) => isOmniKanbanEnabled(s.settings))
   const globalKanbanOpen = rawGlobalKanban && omniEnabled
   const kanbanOpen = globalKanbanOpen || perProjectKanbanOpen
+  // The third view. Never while a board is up: the global board can sit over a project whose own
+  // view still reads 'overview', and the two overlays must not stack.
+  const overviewOpen =
+    useViewMode((s) => !!activeProjectId && viewFor(s, activeProjectId) === 'overview') && !kanbanOpen
   const projectKanban = useProjects((s) => s.projects.find((p) => p.id === s.activeProjectId)?.kanban)
   // Fresh default per project — ids must not be shared across projects; NOT persisted
   // until the first edit writes it (spec lazy-default rule).
@@ -2830,6 +2867,16 @@ export function Canvas() {
     if (!isOmniKanbanEnabled(useSettings.getState().settings)) return false
     if (!isGlobalKanbanOpen()) commitActiveToStore()
     useViewMode.getState().toggleGlobalKanban()
+    return true
+  }, [commitActiveToStore])
+
+  // The network overview (registry command, ⌘K, the minimap ⤢). It reads SERIALIZED nodes, so the
+  // live canvas is committed first, as for the global board.
+  const performOverviewToggle = useCallback(() => {
+    const id = useProjects.getState().activeProjectId
+    if (!id) return false
+    commitActiveToStore()
+    toggleOverviewView(id)
     return true
   }, [commitActiveToStore])
 
@@ -4296,7 +4343,7 @@ export function Canvas() {
       if (projectId) void placeCanvasImages(images, center, projectId)
     }
     const onPaste = (event: ClipboardEvent) => {
-      if (!canvasImagePasteArmedRef.current || !hasProjects || welcomeOpen || kanbanOpen) return
+      if (!canvasImagePasteArmedRef.current || !hasProjects || welcomeOpen || kanbanOpen || overviewOpen) return
       if (document.querySelector('[role="dialog"], .usage-popover')) return
       if (editableTarget(event.target)) return
       const projectId = useProjects.getState().activeProjectId
@@ -4329,7 +4376,7 @@ export function Canvas() {
       window.removeEventListener('drop', onDrop)
       window.removeEventListener('paste', onPaste)
     }
-  }, [hasProjects, kanbanOpen, placeCanvasImages, screenToFlowPosition, viewCenter, welcomeOpen])
+  }, [hasProjects, kanbanOpen, overviewOpen, placeCanvasImages, screenToFlowPosition, viewCenter, welcomeOpen])
 
   // Load the quick-open file index when the palette opens. An SSH project indexes its remoteCwd
   // over the ControlMaster (sshFs.quickOpen); the browser client's sshFs is a stub, so the catch
@@ -4767,6 +4814,7 @@ export function Canvas() {
       if (pid) {
         if (isGlobalKanbanOpen()) useViewMode.getState().toggleGlobalKanban()
         else if (isKanbanOpen(pid)) useViewMode.getState().toggle(pid)
+        else if (isOverviewOpen(pid)) useViewMode.getState().toggleOverview(pid)
       }
     }
     window.addEventListener('nodeterm:switch-system-account', onSwitchSystemAccount)
@@ -4975,7 +5023,7 @@ export function Canvas() {
     }
 
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
+      if (isOverlayViewOpen(useProjects.getState().activeProjectId)) return
       const combo = dictationBinding()
       if (combo === '' || !isHoldChord(combo)) return
 
@@ -6887,7 +6935,7 @@ export function Canvas() {
   }, [])
   const arrangeAllNodes = useCallback(
     (layout: RestructureLayout = 'rows') => {
-      if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
+      if (isOverlayViewOpen(useProjects.getState().activeProjectId)) return
       // Under 2 units there is nothing to lay out: restructureNodes hands back the SAME array, and
       // setting it would still cost an undo entry + markDirty + a project.json write for a canvas
       // that visibly didn't change.
@@ -7034,7 +7082,7 @@ export function Canvas() {
   const stepAndFrame = useCallback(
     (direction: 'back' | 'forward') => {
       const activeId = useProjects.getState().activeProjectId
-      if (!activeId || isGlobalKanbanOpen() || isKanbanOpen(activeId)) return
+      if (!activeId || isOverlayViewOpen(activeId)) return
       const next = stepBreadcrumb(navRef.current, direction, (nodeId) =>
         nodesRef.current.some((n) => n.id === nodeId)
       )
@@ -7102,7 +7150,7 @@ export function Canvas() {
     }
     // The kanban board is an opaque overlay and its card modal already IS a focused view of a
     // session — engaging under it would just hide the canvas twice.
-    if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
+    if (isOverlayViewOpen(useProjects.getState().activeProjectId)) return
     const target = focusTargetId(nodesRef.current)
     if (!target) {
       setNotice({ kind: 'error', text: FOCUS_NO_TARGET_NOTICE })
@@ -7369,7 +7417,7 @@ export function Canvas() {
     // copy on a Linux box. The board is an opaque overlay over the canvas, so a copy there
     // would act on a selection the user cannot see (the canvas-only-shortcut discipline).
     const projects = useProjects.getState()
-    if (!isMac || isGlobalKanbanOpen() || isKanbanOpen(projects.activeProjectId)) return false
+    if (!isMac || isOverlayViewOpen(projects.activeProjectId)) return false
     const paths = selectedLocalFilePaths(nodesRef.current, {
       projectIsRelay: !!projects.getProject(projects.activeProjectId ?? '')?.remote
     })
@@ -7584,7 +7632,7 @@ export function Canvas() {
   const globalKeyDeps = useRef<GlobalKeydownDeps | null>(null)
   globalKeyDeps.current = {
     activeElement: () => document.activeElement as unknown as ContextElement | null,
-    kanbanOpen: () => isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId),
+    kanbanOpen: () => isOverlayViewOpen(useProjects.getState().activeProjectId),
     overrides: activeKeybindingOverrides,
     isMac,
     // Read per keystroke (the deps object is rebuilt each render anyway, but the thunk is what
@@ -7600,6 +7648,7 @@ export function Canvas() {
       'app.shortcutsPanel': () => { setShortcutsOpen((v) => !v); return true },
       'view.kanbanToggle': () => performKanbanToggle(),
       'view.globalKanbanToggle': () => performGlobalKanbanToggle(),
+      'view.overviewToggle': () => performOverviewToggle(),
       'view.focusMode': () => { toggleFocusMode(); return true },
       'panel.explorer': () => { showExplorer('toggle'); return true },
       'panel.sourceControl': () => { setScOpen((v) => !v); return true },
@@ -7746,7 +7795,7 @@ export function Canvas() {
           lastNodeId: useTerminalFocus.getState().lastNodeId,
           activeElement: document.activeElement as unknown as ContextElement | null,
           openDialogs: openDialogCount(),
-          boardOpen: isKanbanOpen(activeProjectId),
+          boardOpen: isOverlayViewOpen(activeProjectId),
           settingsOpen: settingsOpenRef.current,
           liveIds
         })
@@ -8876,13 +8925,17 @@ export function Canvas() {
         setWelcomeOpen(false)
         // The board is a full-page overlay: framing the node on the canvas underneath it is
         // invisible, which is why the notch's Go (and every other "go to node" path) read as
-        // broken there. On the board, "go to" means OPEN THE CARD.
-        if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) {
+        // broken there. On the board, "go to" means OPEN THE CARD; under the overview (an overlay
+        // too) it means LEAVE the overview, then frame.
+        const pid = useProjects.getState().activeProjectId
+        const action = goToNodeAction(pid)
+        if (action === 'card') {
           useViewMode.getState().requestCard(nodeId)
           useAgentStatus.getState().setActive(nodeId, true)
           useAgentStatus.getState().clearUnread(nodeId)
           return
         }
+        if (action === 'leave-overview') useViewMode.getState().toggleOverview(pid)
         setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === nodeId })))
         goToNode(node)
         // Hand the keyboard to the node's terminal so the user can type immediately — the zoom
@@ -9719,12 +9772,41 @@ export function Canvas() {
             reply({ ok: true, message: `created note "${node.data.title}" (${node.id})` })
             return
           }
+          // `annotate` (network overview) is store-answered for sticky's reason: a Hub annotating
+          // its stations must never travel the human's view. Same serialized write path as sticky.
+          if (verb === 'annotate') {
+            const project = projects.find((p) => p.id === route.projectId)
+            const storedSrc = project?.nodes.find((n) => n.id === sourceNodeId)
+            if (!project || !storedSrc || !sourceIsControlCapable(storedSrc.agentId)) {
+              reply({ ok: false, error: 'source node is not a control-capable agent' })
+              return
+            }
+            const parsed = parseAnnotateArgs(args)
+            if ('error' in parsed) {
+              reply({ ok: false, error: parsed.error })
+              return
+            }
+            const res = annotateNodes(project.nodes, parsed, sourceNodeId, Date.now())
+            if ('error' in res) {
+              reply({ ok: false, error: res.error })
+              return
+            }
+            for (const u of res.updates) {
+              const target = project.nodes.find((n) => n.id === u.id)!
+              useProjects
+                .getState()
+                .applyNodeMutation(route.projectId, { op: 'upsert', node: { ...target, annotation: u.annotation } })
+            }
+            void writeDisk()
+            reply({ ok: true, result: { annotated: res.updates.map((u) => u.id) }, message: annotateReply(res.updates) })
+            return
+          }
           if (!needsLiveCanvas(verb)) {
             const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
             reply({
               ok: true,
               result: rows,
-              message: rows.map((n) => `${n.id} [${n.kind}] ${n.title}`).join('\n')
+              message: rows.map((n) => `${n.id} [${n.kind}] ${n.title}` + (n.role ? ` · role: ${n.role}` : '')).join('\n')
             })
             return
           }
@@ -10427,12 +10509,18 @@ export function Canvas() {
             // separately would be seven round trips to learn the one thing that changes what it
             // does next.
             const st = useAgentStatus.getState().byId
-            const list = nodesRef.current.map((n) => ({
-              id: n.id,
-              kind: n.type,
-              title: n.data.title as string,
-              ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {})
-            }))
+            const list = nodesRef.current.map((n) => {
+              // Re-validated here: live node data is reachable by a peer canvas mutation, and a
+              // role carrying a newline would print a forged row into this text reply.
+              const role = normalizeNodeAnnotation(n.data.annotation)?.role
+              return {
+                id: n.id,
+                kind: n.type,
+                title: n.data.title as string,
+                ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {}),
+                ...(role ? { role } : {})
+              }
+            })
             reply({
               ok: true,
               result: list,
@@ -10440,6 +10528,7 @@ export function Canvas() {
                 .map(
                   (n) =>
                     `${n.id} [${n.kind}] ${n.title}` +
+                    (n.role ? ` · role: ${n.role}` : '') +
                     (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
                 )
                 .join('\n')
@@ -11667,6 +11756,47 @@ export function Canvas() {
             node.data.textUpdatedBy = srcTitle
             const newId = addAndConnect(node)
             reply({ ok: true, message: `created note "${node.data.title}" (${newId})` })
+            return
+          }
+          case 'annotate': {
+            // The network overview's role + recommendation (spec 2026-09-11 §2). Not
+            // confirm-gated: nothing reaches a PTY and the record names its writer. The hook server
+            // admits the verb for VERIFIED callers only, so `by` (the caller's node id) is not
+            // forgeable. Validate the whole id list against the snapshot for the reply, then
+            // re-apply inside the updater against the freshest data, as `sticky` does, so two
+            // near-simultaneous annotates of one node compose instead of the second overwriting.
+            const parsed = parseAnnotateArgs(args)
+            if ('error' in parsed) {
+              reply({ ok: false, error: parsed.error })
+              return
+            }
+            const now = Date.now()
+            const res = annotateNodes(
+              nodesRef.current.map((nd) => ({ id: nd.id, annotation: normalizeNodeAnnotation(nd.data.annotation) })),
+              parsed,
+              sourceNodeId,
+              now
+            )
+            if ('error' in res) {
+              reply({ ok: false, error: res.error })
+              return
+            }
+            const ids = new Set(parsed.ids)
+            setNodes((ns) =>
+              ns.map((nd) =>
+                ids.has(nd.id)
+                  ? {
+                      ...nd,
+                      data: {
+                        ...nd.data,
+                        annotation: applyAnnotation(normalizeNodeAnnotation(nd.data.annotation), parsed, sourceNodeId, now)
+                      }
+                    }
+                  : nd
+              )
+            )
+            markDirty()
+            reply({ ok: true, result: { annotated: res.updates.map((u) => u.id) }, message: annotateReply(res.updates) })
             return
           }
           case 'write': {
@@ -13733,6 +13863,15 @@ export function Canvas() {
         icon: kb ? <IconCanvasView /> : <IconKanban />,
         run: () => useViewMode.getState().toggle(kanbanId)
       })
+      const ov = isOverviewOpen(kanbanId)
+      cmds.push({
+        id: 'toggle-overview',
+        label: ov ? 'Canvas view' : 'Network overview',
+        hint: chipFor('view.overviewToggle') || undefined,
+        section: 'View',
+        icon: ov ? <IconCanvasView /> : undefined,
+        run: () => performOverviewToggle()
+      })
     }
     cmds.push({
       id: 'setup-tour',
@@ -14008,6 +14147,7 @@ export function Canvas() {
           onSetIcon={setNodeIcon}
         />
       )}
+      {overviewOpen && <ActiveNetworkOverview onClose={performOverviewToggle} onGoToNode={focusNodeById} />}
       <UpdateCard />
 
       <div
@@ -14237,6 +14377,7 @@ export function Canvas() {
               useReactFlow, which throw outside the provider — and cursors are flow coordinates. */}
           <PresenceLayer />
           <StatusAwareMiniMap onNodeDoubleClick={goToNode} />
+          {!kanbanOpen && !overviewOpen && <OverviewMinimapButton onOpen={performOverviewToggle} />}
           {/* Routes every edge once per geometry change into the store CircuitEdge paints from;
               the legend explains the kinds (spec 2026-09-11 edge routing). */}
           <EdgeRouter edges={displayEdges} />
@@ -14260,7 +14401,7 @@ export function Canvas() {
               too (their tmux sessions keep running), and reaching one means reopening its tab
               first — the same path a notification click and a peer jump take. */}
           <SystemResourcePill
-            overBoard={kanbanOpen}
+            overBoard={kanbanOpen || overviewOpen}
             onGoToNode={travelToNode}
             onKillSession={killSessionById}
             pauseOfferFor={sessionPauseOfferFor}
@@ -14269,7 +14410,7 @@ export function Canvas() {
         
           {/* Same write path as the TabBar caret menu (project.defaultAccountId + persist) — the
               popover row is a second, better-placed entrance to the same action (issue #142). */}
-          <UsageIndicator overBoard={kanbanOpen} onSetDefaultAccount={setProjectDefaultAccount} />
+          <UsageIndicator overBoard={kanbanOpen || overviewOpen} onSetDefaultAccount={setProjectDefaultAccount} />
 </div>
 
         {/* Canvas-mounted, deliberately NOT in the .top-banners column: this is about THIS canvas,
@@ -14319,7 +14460,7 @@ export function Canvas() {
             onReopen={reopenProject}
             onDeleteClosed={requestDeleteClosed}
             onClose={hasProjects ? () => setWelcomeOpen(false) : undefined}
-            overBoard={kanbanOpen}
+            overBoard={kanbanOpen || overviewOpen}
           />
         )}
 

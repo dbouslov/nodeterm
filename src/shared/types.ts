@@ -352,6 +352,12 @@ export interface CanvasNodeState {
    * from a git-shared, hand-editable project file. See @shared/node-icon.
    */
   icon?: import('./node-icon').NodeIcon
+  /**
+   * An agent-written role + recommendation (the `annotate` verb; spec 2026-09-11-network-overview).
+   * CONTENT like `text`: git-shared, validated with `normalizeNodeAnnotation` at both serializer
+   * seams. Absent = the pre-feature node. See @shared/node-annotation.
+   */
+  annotation?: import('./node-annotation').NodeAnnotation
   /** Parent group node id, if this node belongs to a group frame. */
   parentId?: string
   // terminal-only

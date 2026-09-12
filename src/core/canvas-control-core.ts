@@ -13,6 +13,12 @@ import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from './browser-outcomes'
 import { BROWSER_KEYS, BROWSER_TIMEOUT_DEFAULT_MS, BROWSER_TIMEOUT_MAX_MS } from './browser-verb'
 import { nodeColorChoices } from '@shared/node-colors'
 import { codexThreadIdentityResolverSh } from './codex-thread-identity-sh'
+import {
+  ANNOTATE_BULK_MAX,
+  ANNOTATION_RECOMMEND_MAX,
+  ANNOTATION_ROLE_MAX,
+  parseAnnotateArgs
+} from '@shared/node-annotation'
 
 /**
  * The messaging verbs' retry guidance, RENDERED from `RETRYABLE` — the table is the source, and
@@ -128,6 +134,7 @@ export type ControlVerb =
   | 'reply'
   | 'notify'
   | 'sticky'
+  | 'annotate'
   | 'browser'
   | 'open-project'
 
@@ -168,6 +175,7 @@ const VERBS: ControlVerb[] = [
   'reply',
   'notify',
   'sticky',
+  'annotate',
   'browser',
   // Issue #338 PR 1: registered in the model (parse + gates + the grant ledger run in main), but
   // INERT until PR 2 adds the renderer dispatch case — today the renderer's `default:` answers
@@ -261,6 +269,12 @@ export function parseControlRequest(
   }
   if (v === 'sticky' && args.text !== undefined && args.append !== undefined) {
     return { error: 'sticky: pass either --text or --append, not both' }
+  }
+  // `annotate` (network overview): the whole flag table is the shared pure parser, so this gate,
+  // the renderer dispatch and the Server Edition factory refuse exactly the same requests.
+  if (v === 'annotate') {
+    const parsed = parseAnnotateArgs(args)
+    if ('error' in parsed) return { error: parsed.error }
   }
   // `browser` requires `--node`; the full flag table (exactly one action, timeout clamp, per-flag
   // value rules) is decided by the pure `parseBrowserArgs` (`src/core/browser-verb.ts`), which main's
@@ -471,6 +485,13 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  nothing matches. A body that STARTS with `--` must use the `=` form: `--text=<body>`. No',
     '  confirm dialog — the note shows who wrote it and when. Use it to keep an external source',
     '  (tickets, status) live on the canvas: rewrite one titled note each run.',
+    '- `annotate --node <id,id> [--role "…"] [--recommend "…"] [--clear]` — record what a node is',
+    '  FOR and what should change about it (shown in the Network overview, and on `list` rows as',
+    `  \`role:\`). \`--role\` is one line, at most ${ANNOTATION_ROLE_MAX} chars; \`--recommend\` at most ${ANNOTATION_RECOMMEND_MAX}.`,
+    '  Without `--clear` an absent flag is left as it was; `--clear` alone removes the annotation,',
+    `  \`--clear --role "x"\` keeps only the role. Up to ${ANNOTATE_BULK_MAX} ids per call, and`,
+    '  one unknown id refuses the whole list. Verified callers only; the record shows which node',
+    '  wrote it and when. Annotate every station you run.',
     '- `board` — the project\'s kanban board: every column (id + title) and the session cards in each,',
     '  plus the virtual Ungrouped column. Start here when you need a column id or want the board state.',
     '- `assign --node <id> [--column <id|title>] [--before <nodeId>]` — move a session card to a column',
@@ -592,7 +613,7 @@ if [ "$nt_verb" = "help" ] || [ "$nt_verb" = "--help" ] || [ "$nt_verb" = "-h" ]
 fi
 
 # Translate \`--flag value\` pairs — plus the one bare positional the show-image/show-video and
-# write/close/rename/color/branch/send/reply/sticky forms accept — into curl --data-urlencode arguments. The positional
+# write/close/rename/color/branch/send/reply/sticky/annotate forms accept — into curl --data-urlencode arguments. The positional
 # list doubles as the accumulator: originals are consumed from the front, translated pairs
 # appended at the back, so "$@" holds exactly the curl args once the loop drains.
 nt_seen_pos=0
@@ -636,7 +657,7 @@ while [ "$nt_i" -lt "$nt_count" ]; do
         nt_seen_pos=1
         case "$nt_verb" in
           show-image|show-video) set -- "$@" --data-urlencode "arg.path=$nt_a" ;;
-          write|close|rename|color|branch|send|reply|sticky) set -- "$@" --data-urlencode "arg.node=$nt_a" ;;
+          write|close|rename|color|branch|send|reply|sticky|annotate) set -- "$@" --data-urlencode "arg.node=$nt_a" ;;
         esac
       fi
       ;;
@@ -968,7 +989,7 @@ Verbs:
   refuses the whole request and closes NOTHING, naming the ids it could not find. Desktop asks the
   user to confirm. Server Edition closes
   only nodes this caller opened during the current server run, without a dialog. Its other
-  node-mutating verbs (link/group/rename/color/sticky update) likewise accept only current-run
+  node-mutating verbs (link/group/rename/color/sticky update/annotate) likewise accept only current-run
   creations, and refuse the whole request before any partial mutation.
 - \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
   this server run, in this project only. No confirm dialog; instead it is verified-only, gated by the project's
@@ -996,6 +1017,15 @@ Verbs:
   which agent last wrote it and when. This is the door for syncing an external source
   (Linear/Jira/GitHub tickets, build status…) onto the canvas: keep ONE titled note per source
   and rewrite it each run — e.g. \`sticky --node "Linear: my tickets" --create yes --text "…"\`.
+- \`annotate --node <id,id> [--role "…"] [--recommend "…"] [--clear]\` — record what a node is FOR
+  (\`--role\`, one line, at most ${ANNOTATION_ROLE_MAX} chars) and what should change about it (\`--recommend\`,
+  at most ${ANNOTATION_RECOMMEND_MAX} chars: "close — task done", "pause until PR #12 merges", "needs a lead").
+  The Network overview renders both beside live status and edges, and \`list\` rows print
+  \`role:\`. Without \`--clear\` an absent flag is left as it was, so a role written earlier survives
+  a new recommendation; \`--clear\` alone removes the annotation, \`--clear --role "x"\` keeps only
+  the role. Up to ${ANNOTATE_BULK_MAX} ids per call; one unknown id refuses the whole list and names it.
+  Verified callers only — the record shows which node wrote it and when. As a Hub, annotate every
+  station during Collect.
 - \`board\` — read the project's kanban board: every column (id + title) and the session cards
   filed in each, plus the virtual Ungrouped column (unfiled sessions). Start here when you need
   a column id, or to see how the work is currently laid out.

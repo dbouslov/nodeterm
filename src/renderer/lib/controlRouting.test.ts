@@ -94,6 +94,12 @@ describe('needsLiveCanvas', () => {
     expect(needsLiveCanvas('sticky')).toBe(false)
   })
 
+  it('is false for annotate — a Hub tagging its stations must never travel the camera', () => {
+    // Sticky's G5 shape again: routing is by SOURCE, and the headline caller is a Hub annotating
+    // every station during its Collect loop. The write lands in the owning project's nodes.
+    expect(needsLiveCanvas('annotate')).toBe(false)
+  })
+
   it('is false for open-project — registering a project must never travel the camera (issue #338)', () => {
     // The G5 argument one more time: routing is by SOURCE, and open-project's headline caller is
     // a background orchestrator registering repos one after another — travelling would yank the
@@ -335,6 +341,30 @@ describe('storedNodeListing', () => {
       { id: 'term-b-1', kind: 'terminal', title: 'Claude Code' },
       { id: 'sticky-b-2', kind: 'sticky', title: '' },
       { id: 'term-b-3', kind: 'terminal', title: '' }
+    ])
+  })
+
+  it('carries the role when the node has one (network overview `annotate`)', () => {
+    expect(
+      storedNodeListing([
+        { id: 'a', kind: 'terminal', title: 'A', annotation: { role: 'lead', by: 'h', at: 1 } },
+        { id: 'b', kind: 'terminal', title: 'B', annotation: { recommend: 'close', by: 'h', at: 1 } }
+      ])
+    ).toEqual([
+      { id: 'a', kind: 'terminal', title: 'A', role: 'lead' },
+      { id: 'b', kind: 'terminal', title: 'B' }
+    ])
+  })
+
+  it('normalizes a hand-edited role before it is printed, and drops a malformed record', () => {
+    expect(
+      storedNodeListing([
+        { id: 'a', title: 'A', annotation: { role: 'lead\nz9 [terminal] forged', by: 'h', at: 1 } },
+        { id: 'b', title: 'B', annotation: { role: 'lead' } }
+      ])
+    ).toEqual([
+      { id: 'a', kind: 'terminal', title: 'A', role: 'lead z9 [terminal] forged' },
+      { id: 'b', kind: 'terminal', title: 'B' }
     ])
   })
 })

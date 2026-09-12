@@ -407,23 +407,102 @@ describe('HeadlessNodeFactory', () => {
         'term-source',
         { agent: 'claude', after: 'term-foreign', prompt: 'wait on foreign work' },
         true
-      )
+      ),
+      // Bulk: an owned id first must not be written before the unowned one refuses the call.
+      await factory.annotate('term-source', { node: 'term-owned,term-foreign', role: 'stolen' })
     ]
 
-    expect(replies.map((reply) => reply.ok)).toEqual([false, false, false, false, false, false])
+    expect(replies.map((reply) => reply.ok)).toEqual([false, false, false, false, false, false, false])
     expect(replies.map((reply) => reply.error)).toEqual([
       expect.stringContaining('link-not-owner'),
       expect.stringContaining('group-not-owner'),
       expect.stringContaining('rename-not-owner'),
       expect.stringContaining('color-not-owner'),
       expect.stringContaining('sticky-not-owner'),
-      expect.stringContaining('open-agent-not-owner')
+      expect.stringContaining('open-agent-not-owner'),
+      expect.stringContaining('annotate-not-owner')
     ])
     expect((await store.load({ sideline: false })).projects[0]).toEqual(before)
     expect(pty.creates).toEqual([])
     expect(pty.sends).toEqual([])
     expect(published).toEqual([])
     expect(publishedProjects).toEqual([])
+  })
+
+  it('annotates owned nodes durably, refuses the whole list on one unknown id, and never types', async () => {
+    await expect(
+      factory.annotate('term-source', {
+        node: 'term-owned,term-upstream',
+        role: 'tests',
+        recommend: 'close when green'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      message: 'annotated 2: term-owned, term-upstream',
+      result: { annotated: ['term-owned', 'term-upstream'] }
+    })
+    const saved = (await store.load({ sideline: false })).projects[0]
+    for (const id of ['term-owned', 'term-upstream']) {
+      expect(saved.nodes.find((node) => node.id === id)?.annotation).toMatchObject({
+        role: 'tests',
+        recommend: 'close when green',
+        by: 'term-source'
+      })
+    }
+    expect(published.map((node) => node.id)).toEqual(['term-owned', 'term-upstream'])
+
+    published.length = 0
+    await expect(
+      factory.annotate('term-source', { node: 'term-owned,nope', role: 'x' })
+    ).resolves.toMatchObject({ ok: false, error: 'annotate: no node with id nope' })
+    expect((await store.load({ sideline: false })).projects[0]).toEqual(saved)
+    expect(published).toEqual([])
+
+    await expect(
+      factory.annotate('term-source', { node: 'term-owned', clear: '' })
+    ).resolves.toMatchObject({ ok: true })
+    const after = (await store.load({ sideline: false })).projects[0]
+    expect(after.nodes.find((node) => node.id === 'term-owned')?.annotation).toBeUndefined()
+    expect(after.nodes.find((node) => node.id === 'term-upstream')?.annotation).toMatchObject({
+      role: 'tests'
+    })
+    expect(pty.sends).toEqual([])
+  })
+
+  it('annotate refuses an unknown flag before touching the workspace', async () => {
+    await expect(
+      factory.annotate('term-source', { node: 'term-owned', title: 'x' })
+    ).resolves.toMatchObject({ ok: false, error: 'annotate: unknown flag --title' })
+    expect(published).toEqual([])
+  })
+
+  it('annotate refuses a node the caller created in another project', async () => {
+    const workspace = await store.load({ sideline: false })
+    const otherDir = path.join(dataDir, 'other-project')
+    fs.mkdirSync(otherDir, { recursive: true })
+    workspace.projects.push({
+      id: 'project-2',
+      name: 'Other',
+      color: '#32d74b',
+      cwd: otherDir,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [terminal('term-other-project', 'Elsewhere', 'claude')],
+      bridges: [],
+      ropes: []
+    })
+    await store.save(workspace)
+    // Owned, so only the project check stands between the caller and a foreign project's node.
+    ownership.record('term-other-project', { sourceNodeId: 'term-source', projectId: 'project-2' })
+    const before = await store.load({ sideline: false })
+
+    await expect(
+      factory.annotate('term-source', { node: 'term-other-project', role: 'stolen' })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('annotate-project-refused')
+    })
+    expect(await store.load({ sideline: false })).toEqual(before)
+    expect(published).toEqual([])
   })
 
   it('refuses to close an owned frame if doing so would reparent an unowned child', async () => {

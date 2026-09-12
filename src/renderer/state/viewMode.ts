@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { readLocal, writeLocal } from '../lib/localStore'
 import { useSettings } from './settings'
 
-// Which view each project shows (canvas or kanban) — PERSONAL, per machine: persisted in
-// localStorage, deliberately never in the git-shared .nodeterm/project.json (spec rule).
+// Which view each project shows (canvas, kanban, or the network overview) — PERSONAL, per machine:
+// persisted in localStorage, deliberately never in the git-shared .nodeterm/project.json (spec rule).
 //
 // A project with an EXPLICIT entry uses it; a project with NONE follows `defaultView` (the
 // Settings → "Default view" choice, synced in from settings). So changing the default flips every
@@ -12,15 +12,17 @@ import { useSettings } from './settings'
 export const PROJECT_VIEW_KEY = 'nodeterm.projectView'
 export const GLOBAL_KANBAN_KEY = 'nodeterm.globalKanban'
 
-export type ProjectView = 'canvas' | 'kanban'
+export type ProjectView = 'canvas' | 'kanban' | 'overview'
 
-/** Parses the persisted map, keeping only valid canvas/kanban entries. Exported for tests. */
+/** Parses the persisted map, keeping only valid canvas/kanban/overview entries. Exported for tests. */
 export function parseViewMap(raw: string | null): Record<string, ProjectView> {
   try {
     const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     const out: Record<string, ProjectView> = {}
-    for (const [id, v] of Object.entries(parsed)) if (v === 'kanban' || v === 'canvas') out[id] = v
+    for (const [id, v] of Object.entries(parsed)) {
+      if (v === 'kanban' || v === 'canvas' || v === 'overview') out[id] = v
+    }
     return out
   } catch {
     return {}
@@ -40,7 +42,10 @@ interface ViewModeState {
   /** The fallback view for projects with no explicit entry (Settings → Default view). */
   defaultView: ProjectView
   setDefaultView(v: ProjectView): void
+  /** The board: from kanban → canvas; from canvas OR the overview → kanban. */
   toggle(projectId: string): void
+  /** The network overview (third view): from overview → canvas; from canvas OR the board → overview. */
+  toggleOverview(projectId: string): void
   /** Global swimlane overview — when true, kanban shows all projects as swimlanes instead of per-project tabs. */
   globalKanban: boolean
   toggleGlobalKanban(): void
@@ -110,6 +115,17 @@ export const useViewMode = create<ViewModeState>((set) => ({
       // the user just left, and firing it later would pop a card out of nowhere.
       return { viewByProject: next, requestedCardNodeId: null }
     }),
+  toggleOverview: (projectId) =>
+    set((s) => {
+      // Same shape as `toggle`: one view per project, so the two are exclusive by construction.
+      const cur = s.viewByProject[projectId] ?? s.defaultView
+      const next: Record<string, ProjectView> = {
+        ...s.viewByProject,
+        [projectId]: cur === 'overview' ? 'canvas' : 'overview'
+      }
+      save(next)
+      return { viewByProject: next, requestedCardNodeId: null }
+    }),
   toggleGlobalKanban: () =>
     set((s) => {
       const next = !s.globalKanban
@@ -141,4 +157,48 @@ export function isGlobalKanbanOpen(): boolean {
     return false
   }
   return useViewMode.getState().globalKanban
+}
+
+/** True when the given project currently shows the network overview. */
+export function isOverviewOpen(projectId: string): boolean {
+  return !!projectId && viewFor(useViewMode.getState(), projectId) === 'overview'
+}
+
+/** The board in either form (per-project or global) — the case where "go to" opens a CARD. */
+export function isAnyKanbanOpen(projectId: string): boolean {
+  return isGlobalKanbanOpen() || isKanbanOpen(projectId)
+}
+
+/**
+ * Any full-page overlay over the canvas: the board (per-project or global) or the overview. The
+ * one predicate every canvas-only shortcut asks, so none of them fires on a canvas hidden under
+ * an overlay it forgot about.
+ */
+export function isOverlayViewOpen(projectId: string): boolean {
+  return isAnyKanbanOpen(projectId) || isOverviewOpen(projectId)
+}
+
+/**
+ * What "go to node" means under the project's current view: on the board (either form) it opens
+ * the node's CARD; under the overview it LEAVES the overview, then frames; on the canvas it frames.
+ * The board is asked first: the tab's board toggle opens Omni without touching the per-project
+ * view, so a project can still read 'overview' beneath a global board that is what is on screen.
+ */
+export function goToNodeAction(projectId: string): 'card' | 'leave-overview' | 'frame' {
+  if (isAnyKanbanOpen(projectId)) return 'card'
+  return isOverviewOpen(projectId) ? 'leave-overview' : 'frame'
+}
+
+/**
+ * The overview toggle every entry point shares (⌘K, the registry command, the minimap ⤢). From the
+ * global board it CLOSES the board and OPENS the overview: that board can sit over a project whose
+ * own view already reads 'overview', where a plain toggle would land on the canvas instead.
+ */
+export function toggleOverviewView(projectId: string): void {
+  const vm = useViewMode.getState()
+  if (isGlobalKanbanOpen()) {
+    vm.toggleGlobalKanban()
+    if (isOverviewOpen(projectId)) return
+  }
+  vm.toggleOverview(projectId)
 }
