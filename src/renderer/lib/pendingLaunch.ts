@@ -190,6 +190,40 @@ export function canDeliverInBackground(
 }
 
 /**
+ * The off-screen pass: paste each launch `canDeliverInBackground` allows, through `pasteIntoShell`.
+ * An id enters `inFlight` before the first await, so a pass that starts while this one's paste is
+ * out skips it. A launch that lands is disarmed where it was fired from (`disarm`) and stays in flight
+ * for good; a refusal, a pane that is not at a shell prompt included, leaves flight and joins
+ * `refused`, for the on-screen loop to take when its project is viewed. Nothing here warns or retries.
+ */
+export async function deliverInBackground(
+  launches: readonly (LaunchToFire & { projectId: string })[],
+  inFlight: Set<string>,
+  refused: Set<string>,
+  io: LaunchPaste & {
+    isReady: (id: string) => boolean
+    disarm: (id: string, projectId: string) => void
+  }
+): Promise<void> {
+  const pastes: Promise<void>[] = []
+  for (const f of launches) {
+    if (!canDeliverInBackground(f.id, inFlight, refused, io.isReady)) continue
+    inFlight.add(f.id)
+    pastes.push(
+      pasteIntoShell(f.id, f.command, io).then((ok) => {
+        if (!ok) {
+          inFlight.delete(f.id)
+          refused.add(f.id)
+          return
+        }
+        io.disarm(f.id, f.projectId)
+      })
+    )
+  }
+  await Promise.all(pastes)
+}
+
+/**
  * Where a launch that LANDED is disarmed: on the copy of its node that will be SAVED, decided when
  * the paste resolves, because the screen can move while it is out. `launch.projectId` is the project
  * it was fired from; `canvas` is what React Flow holds by then — the project its nodes belong to (the

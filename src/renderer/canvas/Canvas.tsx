@@ -451,7 +451,7 @@ import {
 } from '../session/relay-tab'
 import { buildBackgroundLinkMaps, buildContextLinkNote, buildLinkMap, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
 import {
-  canDeliverInBackground,
+  deliverInBackground,
   disarmDelivered,
   launchesToFire,
   launchRetryDelay,
@@ -1945,24 +1945,17 @@ export function Canvas() {
     // name — and nothing here warns or retries: a node that has never started (a cold open) keeps
     // waiting for its project to be viewed, as its reply said, and a refused paste is left to the
     // loop above, which has the backoff and the badge, for when that project is next on screen.
-    for (const f of storedLaunchesToFire(
-      useProjects.getState().projects,
-      nodesProjectIdRef.current,
-      useAgentStatus.getState().byId,
-      setupDoneForGroup
-    )) {
-      if (!canDeliverInBackground(f.id, launchInFlight.current, backgroundRefused.current, isSessionReady))
-        continue
-      launchInFlight.current.add(f.id)
-      void pasteIntoShell(f.id, f.command, paste).then((ok) => {
-        if (!ok) {
-          launchInFlight.current.delete(f.id)
-          backgroundRefused.current.add(f.id)
-          return
-        }
-        disarm(f.id, f.projectId)
-      })
-    }
+    void deliverInBackground(
+      storedLaunchesToFire(
+        useProjects.getState().projects,
+        nodesProjectIdRef.current,
+        useAgentStatus.getState().byId,
+        setupDoneForGroup
+      ),
+      launchInFlight.current,
+      backgroundRefused.current,
+      { ...paste, isReady: isSessionReady, disarm }
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchNudge are the triggers
   }, [nodes, armedDepSig, armedSetupSig, launchNudge])
 

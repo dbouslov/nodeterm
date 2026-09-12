@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   canDeliverInBackground,
+  deliverInBackground,
   disarmDelivered,
   launchesToFire,
   launchRetryDelay,
@@ -472,5 +473,70 @@ describe('pasteIntoShell — a held launch is pasted only where a shell holds th
     expect(landed.log).toEqual(['pane reviewer', 'send reviewer: claude "review"'])
     // A refused paste stays refused: the caller's backoff and badge take it from there.
     expect(await pasteIntoShell('reviewer', 'claude "review"', io('zsh', false))).toBe(false)
+  })
+})
+
+/**
+ * The off-screen pass itself: which of `storedLaunchesToFire`'s launches are pasted, and what becomes
+ * of each. Canvas hands it its in-flight and refused sets, the pane check, the paste and the disarm;
+ * here those are fakes that log what was asked of them.
+ */
+describe('deliverInBackground — the off-screen pass', () => {
+  const launch = { projectId: 'code', id: 'reviewer', command: 'echo reviewer' }
+  const fakes = (pane: string | null = 'zsh') => {
+    const log: string[] = []
+    return {
+      log,
+      io: {
+        isReady: () => true,
+        paneCommand: async (id: string) => {
+          log.push(`pane ${id}`)
+          return pane
+        },
+        send: async (id: string, command: string) => {
+          log.push(`send ${id}: ${command}`)
+          return true
+        },
+        disarm: (id: string, projectId: string) => void log.push(`disarm ${projectId}/${id}`)
+      }
+    }
+  }
+
+  it('skips a launch in flight — its own included, while the first paste is still out', async () => {
+    // The effect re-runs on every `nodes` change: a pass that starts before the last one's paste
+    // resolved must find the id already in flight, or the launch is typed twice.
+    const { log, io } = fakes()
+    const inFlight = new Set<string>()
+    const refused = new Set<string>()
+    const first = deliverInBackground([launch], inFlight, refused, io)
+    const second = deliverInBackground([launch], inFlight, refused, io)
+    await Promise.all([first, second])
+    expect(log.filter((l) => l.startsWith('send'))).toEqual(['send reviewer: echo reviewer'])
+  })
+
+  it('skips a launch refused before — the on-screen loop and its badge take it', async () => {
+    const { log, io } = fakes()
+    await deliverInBackground([launch], new Set(), new Set(['reviewer']), io)
+    expect(log).toEqual([])
+  })
+
+  it('skips a node whose pane is not at a shell prompt, and leaves it to the on-screen loop', async () => {
+    const { log, io } = fakes('claude')
+    const inFlight = new Set<string>()
+    const refused = new Set<string>()
+    await deliverInBackground([launch], inFlight, refused, io)
+    expect(log).toEqual(['pane reviewer'])
+    // Out of flight and marked refused, as a refused paste is: never retried from the background.
+    expect([...inFlight]).toEqual([])
+    expect([...refused]).toEqual(['reviewer'])
+  })
+
+  it('delivers, then disarms the copy in the project it was fired from — and keeps it in flight', async () => {
+    const { log, io } = fakes()
+    const inFlight = new Set<string>()
+    await deliverInBackground([launch], inFlight, new Set(), io)
+    expect(log).toEqual(['pane reviewer', 'send reviewer: echo reviewer', 'disarm code/reviewer'])
+    // Exactly-once: a delivered id never leaves the in-flight set.
+    expect([...inFlight]).toEqual(['reviewer'])
   })
 })
