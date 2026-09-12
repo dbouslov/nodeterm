@@ -451,6 +451,7 @@ import { buildBackgroundLinkMaps, buildContextLinkNote, buildLinkMap, buildNoteP
 import {
   launchesToFire,
   launchRetryDelay,
+  storedLaunchesToFire,
   unmetDeps,
   LAUNCH_STALL_MS,
   type ArmedNode
@@ -1736,6 +1737,17 @@ export function Canvas() {
       for (const d of p.after) sig += `${d}=${s.byId[d]?.state ?? ''},`
       sig += '|'
     }
+    // …and the armed nodes of every project that is NOT on screen, so a dependency finishing in the
+    // background re-runs the launch effect as well (see `storedLaunchesToFire`).
+    for (const proj of useProjects.getState().projects) {
+      if (proj.id === nodesProjectIdRef.current || proj.closed) continue
+      for (const n of proj.nodes) {
+        if (!n.pendingLaunch) continue
+        sig += `${n.id}:`
+        for (const d of n.pendingLaunch.after) sig += `${d}=${s.byId[d]?.state ?? ''},`
+        sig += '|'
+      }
+    }
     return sig
   })
   // ---- the setup gate an armed node waits on ----
@@ -1777,6 +1789,10 @@ export function Canvas() {
   // action is irreversible, so the set (not the node data) is what guarantees exactly-once.
   const launchInFlight = useRef<Set<string>>(new Set())
   const launchAttempts = useRef<Map<string, number>>(new Map())
+  // Background deliveries that were REFUSED (the off-screen pass in the effect below). Never retried
+  // from the background — the effect re-runs on every `nodes` change, so a dead session would be
+  // pasted at on each drag frame — and left to the on-screen loop, which has the backoff and badge.
+  const backgroundRefused = useRef<Set<string>>(new Set())
   // Per-node "the gate is open but nothing has come up to deliver into" timers — the source of the
   // visible `stalled` warning. One per armed node, armed once and cleared the moment the node
   // becomes ready, is delivered, or stops being armed.
@@ -1889,6 +1905,46 @@ export function Canvas() {
         // longer the only place the failure exists.
         useLaunchDelivery.getState().markFailed(f.id, attempt)
         console.warn('[pending-launch] gave up delivering held launch for', f.id)
+      })
+    }
+    // The projects that are NOT on screen (`storedLaunchesToFire`). Only a session that is already
+    // up is delivered to — a node this run mounted and then parked or released stays typeable by
+    // name — and nothing here warns or retries: a node that has never started (a cold open) keeps
+    // waiting for its project to be viewed, as its reply said, and a refused paste is left to the
+    // loop above, which has the backoff and the badge, for when that project is next on screen.
+    for (const f of storedLaunchesToFire(
+      useProjects.getState().projects,
+      nodesProjectIdRef.current,
+      useAgentStatus.getState().byId,
+      setupDoneForGroup
+    )) {
+      if (launchInFlight.current.has(f.id) || backgroundRefused.current.has(f.id)) continue
+      if (!isSessionReady(f.id)) continue
+      launchInFlight.current.add(f.id)
+      void api.pty.sendText(f.id, f.command).then((ok) => {
+        if (!ok) {
+          launchInFlight.current.delete(f.id)
+          backgroundRefused.current.add(f.id)
+          return
+        }
+        // Disarm the node where it lives NOW — the live canvas if its project came on screen while
+        // the paste was in flight, else the stored project — and let the ordinary debounced save
+        // write it. Not `writeDisk`: that saves the store without committing the live canvas first,
+        // then clears `dirty` over whatever the on-screen project had not saved yet.
+        if (nodesRef.current.some((n) => n.id === f.id)) {
+          setNodes((ns) =>
+            ns.map((n) => (n.id === f.id ? { ...n, data: { ...n.data, pendingLaunch: undefined } } : n))
+          )
+        } else {
+          useProjects.setState((s) => ({
+            projects: s.projects.map((p) =>
+              p.id === f.projectId
+                ? { ...p, nodes: p.nodes.map((n) => (n.id === f.id ? { ...n, pendingLaunch: undefined } : n)) }
+                : p
+            )
+          }))
+        }
+        markDirty()
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchNudge are the triggers

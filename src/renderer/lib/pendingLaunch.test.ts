@@ -3,6 +3,7 @@ import {
   launchesToFire,
   launchRetryDelay,
   launchTooltip,
+  storedLaunchesToFire,
   unmetDeps,
   LAUNCH_DELIVERY_ATTEMPTS,
   LAUNCH_STALL_MS,
@@ -236,5 +237,46 @@ describe('launchTooltip — the QUEUED badge never goes silent (#569 item 1)', (
   it('failed outranks the dependency sentence — the warning is never buried', () => {
     const t = launchTooltip({ kind: 'failed', attempts: 5, at: 1 }, 'Builder', cmd)
     expect(t).not.toContain('Waiting for Builder')
+  })
+})
+
+/**
+ * An armed node whose project is NOT on screen. The canvas effect evaluated only React Flow's
+ * `nodes` — the active project — so a dependency that went `done` while its project was in the
+ * background released nothing, and the dependent sat as a bare shell until something brought that
+ * project back (field report 2026-09-11: two orchestrated projects whose verbs travel the screen to
+ * their own; a review panel fired fourteen minutes after its target finished, the instant a
+ * `rename` travelled back).
+ */
+describe('storedLaunchesToFire — armed nodes in a project that is not on screen', () => {
+  const stored = (id: string, after?: string[]) => ({
+    id,
+    ...(after ? { pendingLaunch: { after, command: `echo ${id}` } } : {})
+  })
+  const code = { id: 'code', nodes: [stored('builder'), stored('reviewer', ['builder'])] }
+  const research = { id: 'research', nodes: [stored('station')] }
+
+  it('fires an off-screen armed node once its dependency is done', () => {
+    expect(storedLaunchesToFire([code, research], 'research', { builder: { state: 'done' } })).toEqual([
+      { projectId: 'code', id: 'reviewer', command: 'echo reviewer' }
+    ])
+  })
+
+  it('leaves the ACTIVE project to the live canvas — its stored copy may be stale', () => {
+    expect(storedLaunchesToFire([code, research], 'code', { builder: { state: 'done' } })).toEqual([])
+  })
+
+  it('holds on working, unknown and errored deps — the same gate as on screen', () => {
+    expect(storedLaunchesToFire([code], null, { builder: { state: 'working' } })).toEqual([])
+    expect(storedLaunchesToFire([code], null, {})).toEqual([])
+    expect(
+      storedLaunchesToFire([code], null, { builder: { state: 'done', lastTurnError: { at: 1 } } })
+    ).toEqual([])
+  })
+
+  it('skips a closed project — its launch waits for the project to be reopened', () => {
+    expect(
+      storedLaunchesToFire([{ ...code, closed: true }], null, { builder: { state: 'done' } })
+    ).toEqual([])
   })
 })

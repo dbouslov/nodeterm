@@ -2116,6 +2116,18 @@ else, and its context links must keep classifying across restarts).
   threw the command away in exactly the state the button exists to rescue). (6) Canvas subscribes
   to `armedDepSig`, NOT `useAgentStatus(s => s.byId)` —
   the same discipline as `loopSig`; the full map re-renders the canvas on every hook event.
+  (7) The effect also covers the projects that are **not on screen** (`storedLaunchesToFire`, over
+  each background project's serialized nodes; `armedDepSig` includes them). React Flow holds only
+  the active project, so an armed node anywhere else used to fire only once its project was brought
+  back on screen — with two orchestrated projects travelling the screen to their own, a review panel
+  sat as bare shells for fourteen minutes after its target finished (2026-09-11). It delivers only
+  into a session that is already up (`isSessionReady`: a parked or released tmux session stays
+  typeable by name), then clears `pendingLaunch` where the node lives by then (the stored project,
+  or the live node if its project came on screen mid-paste) and marks the canvas dirty — never a
+  bare `writeDisk`, which saves without committing the live canvas and then clears `dirty`. It
+  never warns and never retries: a
+  cold-opened node that has never mounted still waits for its project to be viewed, a refused paste
+  is left to the on-screen loop and its badge, and a closed project waits for its reopen.
   Pure logic + refusal matrix in `renderer/lib/pendingLaunch.ts` (unit-tested);
   the dep→node edge is a **rope** (`ctrl-<dep>-<node>`, persisted in `project.ropes` like the
   opener's) whose LOOK is derived: dashed + ⏳ while the node's `pendingLaunch.after` still lists the

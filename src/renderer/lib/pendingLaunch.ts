@@ -99,6 +99,40 @@ export function launchesToFire(
   return out
 }
 
+/**
+ * `launchesToFire` for the projects that are NOT on screen, read off their SERIALIZED nodes.
+ *
+ * Canvas's launch effect runs over React Flow's `nodes`, which hold only the active project, so an
+ * armed node anywhere else was never evaluated: a dependency that went `done` while its project was
+ * in the background released nothing, and the dependent sat as a bare shell until that project was
+ * brought back on screen — by the user, or by an orchestrator's verb travelling there. With two
+ * orchestrated projects, each travelling the screen to its own, that is the ordinary case.
+ *
+ * Each project is its own `live` set, because `--after` ids are project-local. The ACTIVE project
+ * is skipped — its stored copy lags the live canvas, which answers for it — and so is a CLOSED one:
+ * its tab is gone, so it starts on the reopen, as a cold open into a closed project already does.
+ * Whether there is a session to deliver into is the caller's question, exactly as on screen.
+ */
+export function storedLaunchesToFire(
+  projects: readonly {
+    id: string
+    closed?: boolean
+    nodes: readonly { id: string; pendingLaunch?: PendingLaunch }[]
+  }[],
+  activeProjectId: string | null,
+  status: StatusById,
+  setupDone?: (groupId: string) => boolean
+): (LaunchToFire & { projectId: string })[] {
+  const out: (LaunchToFire & { projectId: string })[] = []
+  for (const p of projects) {
+    if (p.id === activeProjectId || p.closed) continue
+    const armed = p.nodes.map((n) => ({ id: n.id, data: { pendingLaunch: n.pendingLaunch } }))
+    const live = new Set(p.nodes.map((n) => n.id))
+    for (const f of launchesToFire(armed, status, live, setupDone)) out.push({ ...f, projectId: p.id })
+  }
+  return out
+}
+
 /** The deps an armed node is still waiting on — what the node badge and tooltip report. */
 export function unmetDeps(
   node: ArmedNode,
