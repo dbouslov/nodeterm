@@ -79,12 +79,24 @@ describe('armed-launch delivery (source pins)', () => {
     // Exactly-once: an id enters the in-flight set before the send and only LEAVES it on a
     // refusal (a successful delivery is irreversible and must never be re-attempted).
     expect(body).toContain('launchInFlight.current.add(f.id)')
-    expect(body).toMatch(/if \(ok\)[\s\S]{0,400}?pendingLaunch: undefined/)
+    expect(body).toMatch(/if \(ok\)[\s\S]{0,400}?disarm\(f\.id/)
     expect(body).toMatch(/launchInFlight\.current\.delete\(f\.id\)/)
     // Satisfaction is still `launchesToFire`'s call — the ready gate is an ADDITIONAL condition,
     // never a replacement for the dependency matrix.
     expect(body).toContain('launchesToFire(')
     expect(body).toContain('setupDoneForGroup')
+  })
+
+  it('types a held launch only at a shell prompt — the on-screen paste goes through `pasteIntoShell`', () => {
+    // Wiring only: what the gate decides is unit-tested in pendingLaunch.test.ts. A direct
+    // `sendText` here would type a launch that landed before a relaunch into its agent.
+    expect(launchEffect()).toMatch(/pasteIntoShell\(f\.id, f\.command, paste\)\.then\(\(ok\) => \{\s*if \(ok\)/)
+  })
+
+  it('hands the projects that are not on screen to `deliverInBackground`, with the same pane check', () => {
+    // Wiring only: the pass's skips and its disarm are unit-tested. Without this call an armed node
+    // off screen never launches until its project is viewed.
+    expect(launchEffect()).toMatch(/deliverInBackground\([\s\S]{0,400}?\.\.\.paste\b/)
   })
 
   it('stops reporting on a node that is no longer armed — no stale warning on a running session', () => {

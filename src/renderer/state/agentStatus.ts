@@ -6,9 +6,10 @@ import type { NodeTerminalApi, ObservedClaudeAccount } from '@shared/types'
 
 /**
  * Transient per-node status for agent (e.g. Claude Code) sessions, driven by the agent's hooks.
- * `unread`, `session`, `sessionId`, `agentId`, `account`, `loop` and `hibernated` are persisted to
- * localStorage so they survive a reload/restart; the live `state` (working/waiting/…) is not
- * (it'd be stale on relaunch), and neither are its two clocks (`stateAt`, `lastEventAt`).
+ * `unread`, `session`, `sessionId`, `agentId`, `account`, `loop`, `hibernated` and `lastTurnClean`
+ * are persisted to localStorage so they survive a reload/restart; the live `state`
+ * (working/waiting/…) is not (it'd be stale on relaunch), and neither are its two clocks (`stateAt`,
+ * `lastEventAt`) — only the fact that the last turn ended cleanly is (see `lastTurnClean`).
  * `agentId` is durable because a PLAIN terminal's agent identity exists nowhere else: an
  * explicit agent node re-derives it from `data.agentId`, but a hand-launched `claude` in a
  * plain terminal is only known here, and its context links must keep classifying across
@@ -160,15 +161,31 @@ export interface AgentNodeStatus {
    * had produced nothing, and started a whole dependency chain on bad ground. That is what
    * `depSatisfied` now refuses (`renderer/lib/pendingLaunch.ts`).
    *
-   * TRANSIENT, like `state` itself, and for the same reason `lastEventAt` is: after a relaunch no
-   * hook has spoken, nothing armed can fire anyway, and a verdict restored from disk would
-   * describe a turn from another app run.
+   * TRANSIENT, like `state` itself: a verdict restored from disk would describe a turn from another
+   * app run. What a wait needs survives anyway, as the ABSENCE of `lastTurnClean` — an errored end
+   * never records one, so after a relaunch the dependents of an errored station still hold.
    *
    * `at` only. Whether the hook payload carries the failure text has not been measured, and
    * `last_assistant_message` is the previous assistant turn rather than the error — see
    * `NormalizedAgentEvent.errored`. Reading the error itself is still owed.
    */
   lastTurnError?: { at: number }
+  /**
+   * The last turn edge this store recorded for the node was a CLEAN end — `done` with no
+   * `lastTurnError` — and no live state since has said the station is busy again.
+   *
+   * PERSISTED, unlike `state`, for one reader: an `--after` wait (`depSatisfied` in
+   * `renderer/lib/pendingLaunch.ts`). `state` is empty after every relaunch and an idle station
+   * reports nothing, so a station that had finished before the restart read "unknown" forever, and
+   * a `verify` panel or `--after` node armed behind it never started (2026-09-11: two panels
+   * stranded for half an hour behind targets that had finished before a relaunch).
+   *
+   * Set on the edge into a clean `done`; dropped by a live busy state (`working`/`blocked`/
+   * `waiting`) and by an errored `done`. A move to `undefined` — a session starting or ending, the
+   * stale-working sweep — leaves it standing: none of those is a newer turn. A live state always
+   * outranks it; the wait consults it only while `state` is unknown.
+   */
+  lastTurnClean?: boolean
   /** Set when running /loop, /schedule or /cron (heuristic); shown as a connected node. */
   loop?: {
     count: number
@@ -372,6 +389,8 @@ export function createAgentStatusSession(
         // Independent of `hibernated`: the deep "pause & end session" choice recycles the tmux
         // session, so a paused node can perfectly well hydrate with `hibernated` unset.
         if (v.paused) out[id].paused = true
+        // Only when set, like the flags above — a wait's one durable turn fact (`lastTurnClean`).
+        if (v.lastTurnClean) out[id].lastTurnClean = true
         // A recurring job (cron/schedule — and tmux keeps in-session loops alive too) outlives
         // the app: restore its card. Minimal shape check so a corrupt entry can't break load.
         if (v.loop && typeof v.loop === 'object' && v.loop.kind) {
@@ -407,7 +426,8 @@ export function createAgentStatusSession(
           v.agentId ||
           v.account ||
           v.hibernated ||
-          v.paused
+          v.paused ||
+          v.lastTurnClean
         ) {
           out[id] = {
             unread: v.unread,
@@ -422,7 +442,8 @@ export function createAgentStatusSession(
             hibernated: v.hibernated,
             // Never written without a flag it belongs to (see `hibernatedPane`'s load comment).
             hibernatedPane: v.hibernated || v.paused ? v.hibernatedPane : undefined,
-            paused: v.paused
+            paused: v.paused,
+            lastTurnClean: v.lastTurnClean
           }
         }
       }
@@ -500,6 +521,10 @@ export function createAgentStatusSession(
         // error and the next prompt say nothing about whether that turn produced anything.
         if (newTurn) next.lastTurnError = undefined
         else if (errored) next.lastTurnError = { at: now }
+        // Its durable half (see `lastTurnClean`): a clean end records it, a live busy state or an
+        // errored end retracts it, and a move to `undefined` says nothing about a newer turn.
+        if (state === 'done') next.lastTurnClean = next.lastTurnError ? undefined : true
+        else if (state !== undefined) next.lastTurnClean = undefined
         // A LIVE state is proof the CLI is running, so the hibernated flag is simply wrong and is
         // dropped here — the one self-heal this flag has. It is set by a controller that watched
         // the CLI let go of the pane, but the world moves on without us: the user relaunches the
@@ -564,7 +589,9 @@ export function createAgentStatusSession(
         // `state` itself is transient, so a plain transition writes nothing — but dropping a
         // PERSISTED flag has to reach disk, or a relaunch would restore a hibernated/paused node
         // that has been demonstrably running since.
-        if (alive && (prev.hibernated || prev.paused)) save(byId)
+        // …and so does a moved `lastTurnClean`: it is the one durable fact a turn edge writes.
+        if ((alive && (prev.hibernated || prev.paused)) || !!prev.lastTurnClean !== !!next.lastTurnClean)
+          save(byId)
         return { byId }
       }),
 

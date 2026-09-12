@@ -4,7 +4,9 @@
 // dependency edges to draw meanwhile. Kept free of React/store imports so the satisfaction
 // matrix is unit-testable — Canvas.tsx only wraps these in an effect and a setState.
 import type { AgentState } from '@shared/agents/normalize'
+import { isShellCommand } from '@shared/agents/pane'
 import type { PendingLaunch } from '@shared/types'
+import { canCommitCanvas } from '../state/persistGuards'
 
 /** The subset of a canvas node this module reads. */
 export interface ArmedNode {
@@ -15,12 +17,19 @@ export interface ArmedNode {
 /** The subset of the agentStatus store this module reads. */
 export type StatusById = Record<
   string,
-  { state?: AgentState; lastTurnError?: { at: number } } | undefined
+  { state?: AgentState; lastTurnError?: { at: number }; lastTurnClean?: boolean } | undefined
 >
 
 export interface LaunchToFire {
   id: string
   command: string
+}
+
+/** A project as the store serializes it — the subset the off-screen pass reads and disarms. */
+export interface StoredProject {
+  id: string
+  closed?: boolean
+  nodes: readonly { id: string; pendingLaunch?: PendingLaunch }[]
 }
 
 /**
@@ -39,6 +48,12 @@ export interface LaunchToFire {
  * upstream stations have not emitted a hook event yet, and reading "no news" as "finished"
  * would fire every dependent immediately — the exact bug that makes a dependency edge useless.
  *
+ * …UNLESS the last turn this renderer recorded for it ended cleanly (`lastTurnClean`, persisted).
+ * "No news" after a RELAUNCH is not a fan-out's silence: `state` is empty after every restart and
+ * an idle station reports nothing, so a station that had finished before it read "unknown" forever
+ * and everything armed behind it sat as a bare shell (2026-09-11). A fresh fan-out has no such
+ * record, so it still holds; and any live state outranks the record — busy is busy.
+ *
  * A dep that is `done` **with a live `lastTurnError`** is refused (issue #521). An errored station
  * reaches idle IMMEDIATELY and looked healthy from every surface an orchestrator can read, so a
  * whole dependency chain launched against an upstream that had produced nothing. Firing with a
@@ -52,7 +67,9 @@ export interface LaunchToFire {
 function depSatisfied(depId: string, status: StatusById, live: ReadonlySet<string>): boolean {
   if (!live.has(depId)) return true
   const st = status[depId]
-  return st?.state === 'done' && !st.lastTurnError
+  if (st?.lastTurnError) return false
+  if (st?.state === 'done') return true
+  return st?.state === undefined && st?.lastTurnClean === true
 }
 
 /** Of the deps this node is still waiting on, which are held because they ERRORED rather than
@@ -97,6 +114,141 @@ export function launchesToFire(
     if (p.after.every((d) => depSatisfied(d, status, live))) out.push({ id: n.id, command: p.command })
   }
   return out
+}
+
+/**
+ * `launchesToFire` for the projects that are NOT on screen, read off their SERIALIZED nodes.
+ *
+ * Canvas's launch effect runs over React Flow's `nodes`, which hold only the active project, so an
+ * armed node anywhere else was never evaluated: a dependency that went `done` while its project was
+ * in the background released nothing, and the dependent sat as a bare shell until that project was
+ * brought back on screen — by the user, or by an orchestrator's verb travelling there. With two
+ * orchestrated projects, each travelling the screen to its own, that is the ordinary case.
+ *
+ * Each project is its own `live` set, because `--after` ids are project-local. The ACTIVE project
+ * is skipped — its stored copy lags the live canvas, which answers for it — and so is a CLOSED one:
+ * its tab is gone, so it starts on the reopen, as a cold open into a closed project already does.
+ * Whether there is a session to deliver into is the caller's question, exactly as on screen.
+ */
+export function storedLaunchesToFire(
+  projects: readonly StoredProject[],
+  activeProjectId: string | null,
+  status: StatusById,
+  setupDone?: (groupId: string) => boolean
+): (LaunchToFire & { projectId: string })[] {
+  const out: (LaunchToFire & { projectId: string })[] = []
+  for (const p of projects) {
+    if (p.id === activeProjectId || p.closed) continue
+    const armed = p.nodes.map((n) => ({ id: n.id, data: { pendingLaunch: n.pendingLaunch } }))
+    const live = new Set(p.nodes.map((n) => n.id))
+    for (const f of launchesToFire(armed, status, live, setupDone)) out.push({ ...f, projectId: p.id })
+  }
+  return out
+}
+
+/** How a held launch reaches its pane: the pane's foreground command, and the paste itself. */
+export interface LaunchPaste {
+  paneCommand: (id: string) => Promise<string | null>
+  send: (id: string, command: string) => Promise<boolean>
+}
+
+/**
+ * Paste a held launch, but only into a pane a SHELL holds (`isShellCommand` over the pane's
+ * foreground command). The on-screen and the off-screen paste both go through here.
+ *
+ * The disarm of a launch that LANDED reaches disk only on the next debounced save, so a quit inside
+ * that window (nothing saves on quit), or a paused autosave, leaves the node armed on disk while its
+ * agent runs in the pane. After the relaunch the in-flight set is empty and the dep's clean end reads
+ * satisfied again (`lastTurnClean`), so the launch fired a second time, typed into that agent as a
+ * prompt. A pane that could not be seen (`null`) is refused too: a refusal is retried and reported,
+ * and a paste into an agent cannot be taken back.
+ */
+export async function pasteIntoShell(id: string, command: string, io: LaunchPaste): Promise<boolean> {
+  if (!isShellCommand(await io.paneCommand(id))) return false
+  return io.send(id, command)
+}
+
+/**
+ * May the off-screen pass paste this launch NOW? `storedLaunchesToFire` says it may fire; off screen
+ * there is no badge to report a stall or a refusal on, so the pass pastes only where nothing can go
+ * quietly wrong:
+ * - not in flight (`inFlight`, Canvas's `launchInFlight`): a paste is out, or has LANDED — the same
+ *   exactly-once set the on-screen loop keeps;
+ * - never refused here (`refused`): the effect re-runs on every `nodes` change, so a retry would paste
+ *   at a dead session on each drag frame — the on-screen loop, with its backoff and badge, takes it
+ *   when that project is next viewed;
+ * - a session is up (`isReady`, i.e. `isSessionReady`): a node mounted this run and then parked or
+ *   released stays typeable by name, while a cold open that never mounted waits to be viewed.
+ */
+export function canDeliverInBackground(
+  id: string,
+  inFlight: ReadonlySet<string>,
+  refused: ReadonlySet<string>,
+  isReady: (id: string) => boolean
+): boolean {
+  return !inFlight.has(id) && !refused.has(id) && isReady(id)
+}
+
+/**
+ * The off-screen pass: paste each launch `canDeliverInBackground` allows, through `pasteIntoShell`.
+ * An id enters `inFlight` before the first await, so a pass that starts while this one's paste is
+ * out skips it. A launch that lands is disarmed where it was fired from (`disarm`) and stays in flight
+ * for good; a refusal, a pane that is not at a shell prompt included, leaves flight and joins
+ * `refused`, for the on-screen loop to take when its project is viewed. Nothing here warns or retries.
+ */
+export async function deliverInBackground(
+  launches: readonly (LaunchToFire & { projectId: string })[],
+  inFlight: Set<string>,
+  refused: Set<string>,
+  io: LaunchPaste & {
+    isReady: (id: string) => boolean
+    disarm: (id: string, projectId: string) => void
+  }
+): Promise<void> {
+  const pastes: Promise<void>[] = []
+  for (const f of launches) {
+    if (!canDeliverInBackground(f.id, inFlight, refused, io.isReady)) continue
+    inFlight.add(f.id)
+    pastes.push(
+      pasteIntoShell(f.id, f.command, io).then((ok) => {
+        if (!ok) {
+          inFlight.delete(f.id)
+          refused.add(f.id)
+          return
+        }
+        io.disarm(f.id, f.projectId)
+      })
+    )
+  }
+  await Promise.all(pastes)
+}
+
+/**
+ * Where a launch that LANDED is disarmed: on the copy of its node that will be SAVED, decided when
+ * the paste resolves, because the screen can move while it is out. `launch.projectId` is the project
+ * it was fired from; `canvas` is what React Flow holds by then — the project its nodes belong to (the
+ * epoch tag), the store's active id, and whether this node is among them.
+ *
+ * `'live'` while the canvas holds the node and may be committed (`canCommitCanvas`): the caller
+ * clears React Flow's copy, and the next commit overwrites the stored one. Otherwise the projects
+ * come back with the STORED copy cleared. That covers a launch that was never on screen (the
+ * off-screen pass), and one whose project LEFT the screen mid-paste: a switch commits the live
+ * canvas, this node still armed, before it swaps it out — and until the swap lands the store already
+ * names the next project while React Flow still holds this one, so a clear on the live copy would be
+ * thrown away with it. Left armed on disk, the launch outlives this run's `launchInFlight` and fires
+ * a second time after a relaunch, now that a clean end survives one (`lastTurnClean`).
+ */
+export function disarmDelivered<P extends StoredProject>(
+  projects: readonly P[],
+  launch: { id: string; projectId: string | null },
+  canvas: { nodesProjectId: string | null; activeProjectId: string; holds: boolean }
+): 'live' | P[] {
+  if (canvas.holds && canCommitCanvas(canvas.nodesProjectId, canvas.activeProjectId)) return 'live'
+  return projects.map((p) =>
+    p.id === launch.projectId
+      ? { ...p, nodes: p.nodes.map((n) => (n.id === launch.id ? { ...n, pendingLaunch: undefined } : n)) }
+      : p
+  )
 }
 
 /** The deps an armed node is still waiting on — what the node badge and tooltip report. */
@@ -185,6 +337,8 @@ export function launchTooltip(
     return (
       `This session did not accept its launch — ${delivery.attempts} ` +
       `attempt${delivery.attempts === 1 ? ' was' : 's were'} refused, and nothing will retry it.\n` +
+      'The terminal may not be at a shell prompt because something is already running in it, and ' +
+      '\u25b6 types the command into whatever holds it.\n' +
       `Press \u25b6 to run it now.\n${runs}`
     )
   if (delivery?.kind === 'stalled')

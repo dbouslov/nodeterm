@@ -327,10 +327,12 @@ import {
   agentRestartFn,
   guardConcurrentRestart,
   planBulkRestart,
+  queryPaneWithin,
   restartEligibility,
   restartSessionId,
   settleRestart,
   summarizeBulkRestart,
+  RESTART_EXIT_TIMEOUT_MS,
   type BulkRestartPlan,
   type RestartOutcome
 } from '../terminal/agent-restart'
@@ -459,8 +461,12 @@ import {
 import { buildContextLinkNote, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
 import { startContextLinkSync, type ContextLinkSync } from '../lib/contextLinkSync'
 import {
+  deliverInBackground,
+  disarmDelivered,
   launchesToFire,
   launchRetryDelay,
+  pasteIntoShell,
+  storedLaunchesToFire,
   unmetDeps,
   LAUNCH_STALL_MS,
   type ArmedNode
@@ -1787,6 +1793,17 @@ export function Canvas() {
       for (const d of p.after) sig += `${d}=${s.byId[d]?.state ?? ''},`
       sig += '|'
     }
+    // …and the armed nodes of every project that is NOT on screen, so a dependency finishing in the
+    // background re-runs the launch effect as well (see `storedLaunchesToFire`).
+    for (const proj of useProjects.getState().projects) {
+      if (proj.id === nodesProjectIdRef.current || proj.closed) continue
+      for (const n of proj.nodes) {
+        if (!n.pendingLaunch) continue
+        sig += `${n.id}:`
+        for (const d of n.pendingLaunch.after) sig += `${d}=${s.byId[d]?.state ?? ''},`
+        sig += '|'
+      }
+    }
     return sig
   })
   // ---- the setup gate an armed node waits on ----
@@ -1828,6 +1845,10 @@ export function Canvas() {
   // action is irreversible, so the set (not the node data) is what guarantees exactly-once.
   const launchInFlight = useRef<Set<string>>(new Set())
   const launchAttempts = useRef<Map<string, number>>(new Map())
+  // Background deliveries that were REFUSED (the off-screen pass in the effect below). Never retried
+  // from the background — the effect re-runs on every `nodes` change, so a dead session would be
+  // pasted at on each drag frame — and left to the on-screen loop, which has the backoff and badge.
+  const backgroundRefused = useRef<Set<string>>(new Set())
   // Per-node "the gate is open but nothing has come up to deliver into" timers — the source of the
   // visible `stalled` warning. One per armed node, armed once and cleared the moment the node
   // becomes ready, is delivered, or stops being armed.
@@ -1863,6 +1884,36 @@ export function Canvas() {
   // sitting in a poll loop burning context.
   useEffect(() => {
     const live = new Set(nodes.map((n) => n.id))
+    // The project these `nodes` belong to: where an on-screen launch below is fired from.
+    const onScreenProjectId = nodesProjectIdRef.current
+    // Disarm a launch that LANDED on the copy of its node that will be saved (`disarmDelivered`) — the
+    // screen can move while a paste is out, on screen and off alike — and let the ordinary debounced
+    // save write it. Not `writeDisk`: that saves the store without committing the live canvas first,
+    // then clears `dirty` over whatever the on-screen project had not saved yet.
+    const disarm = (id: string, projectId: string | null) => {
+      const where = disarmDelivered(
+        useProjects.getState().projects,
+        { id, projectId },
+        {
+          nodesProjectId: nodesProjectIdRef.current,
+          activeProjectId: useProjects.getState().activeProjectId,
+          holds: nodesRef.current.some((n) => n.id === id)
+        }
+      )
+      if (where === 'live')
+        setNodes((ns) =>
+          ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, pendingLaunch: undefined } } : n))
+        )
+      else useProjects.setState({ projects: where })
+      markDirty()
+    }
+    // A launch is typed only at a shell prompt (`pasteIntoShell`), on screen and off: a node can be
+    // armed on disk although its launch landed last run, with its agent running in the pane. The
+    // pane query is bounded, as TerminalNode's are; a lapse reads as unseen, which is refused.
+    const paste = {
+      paneCommand: (id: string) => queryPaneWithin(() => api.pty.paneCommand(id), RESTART_EXIT_TIMEOUT_MS),
+      send: (id: string, command: string) => api.pty.sendText(id, command)
+    }
     const ready = launchesToFire(
       nodes as unknown as ArmedNode[],
       useAgentStatus.getState().byId,
@@ -1916,18 +1967,16 @@ export function Canvas() {
       launchInFlight.current.add(f.id)
       const attempt = (launchAttempts.current.get(f.id) ?? 0) + 1
       launchAttempts.current.set(f.id, attempt)
-      void api.pty.sendText(f.id, f.command).then((ok) => {
+      void pasteIntoShell(f.id, f.command, paste).then((ok) => {
         if (ok) {
-          setNodes((ns) =>
-            ns.map((n) => (n.id === f.id ? { ...n, data: { ...n.data, pendingLaunch: undefined } } : n))
-          )
+          disarm(f.id, onScreenProjectId)
           useLaunchDelivery.getState().clear(f.id)
-          markDirty()
           return
         }
         // Refused although the session reported ready — a narrow residual race now, not the
-        // whole cold-start window. Let it back out of flight and re-run after the backoff; a
-        // launch that silently vanishes is worse than a late one.
+        // whole cold-start window — or its pane is not at a shell prompt. Let it back out of
+        // flight and re-run after the backoff; a launch that silently vanishes is worse than a
+        // late one.
         launchInFlight.current.delete(f.id)
         const delay = launchRetryDelay(attempt)
         if (delay !== null) {
@@ -1942,6 +1991,22 @@ export function Canvas() {
         console.warn('[pending-launch] gave up delivering held launch for', f.id)
       })
     }
+    // The projects that are NOT on screen (`storedLaunchesToFire`). Only a session that is already
+    // up is delivered to — a node this run mounted and then parked or released stays typeable by
+    // name — and nothing here warns or retries: a node that has never started (a cold open) keeps
+    // waiting for its project to be viewed, as its reply said, and a refused paste is left to the
+    // loop above, which has the backoff and the badge, for when that project is next on screen.
+    void deliverInBackground(
+      storedLaunchesToFire(
+        useProjects.getState().projects,
+        nodesProjectIdRef.current,
+        useAgentStatus.getState().byId,
+        setupDoneForGroup
+      ),
+      launchInFlight.current,
+      backgroundRefused.current,
+      { ...paste, isReady: isSessionReady, disarm }
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchNudge are the triggers
   }, [nodes, armedDepSig, armedSetupSig, launchNudge])
 
