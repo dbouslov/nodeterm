@@ -12192,7 +12192,19 @@ export function Canvas() {
               return
             }
             setNodes(plan.nodes)
-            if (pid && plan.kanban && plan.kanban !== board) store.setProjectKanban(pid, plan.kanban)
+            if (pid && board && plan.kanban && plan.kanban !== board) {
+              store.setProjectKanban(pid, plan.kanban)
+              // Board-log the successor's move through the funnel `assign` uses, so the feed shows it.
+              // Only the successor's: the caller's card leaves with its node.
+              const cardTitle = (id: string): string => {
+                const n = nodesRef.current.find((x) => x.id === id)
+                const card = n ? toKanbanSession(n) : null
+                return card ? card.title || 'Untitled' : ''
+              }
+              for (const { nodeId: nid, event } of boardLogEvents(board, plan.kanban, cardTitle)) {
+                if (nid === successorId) useBoardLog.getState().append(api, pid, { kind: 'event', nodeId: nid, event })
+              }
+            }
             markDirty()
             // Reply FIRST: the teardown below ends the caller's own session, the one waiting on it.
             reply({

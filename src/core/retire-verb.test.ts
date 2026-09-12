@@ -8,7 +8,14 @@ import {
   recordFreshSpawnOwner,
   resetPaneOwnershipForTests
 } from './agents/pane-ownership'
-import { OpenerLedger, forgetOnClose, recordOpenReply, retireRefusal } from './retire-verb'
+import {
+  OpenerLedger,
+  forgetOnClose,
+  recordOpenReply,
+  retireRefusal,
+  withOpenerLedger,
+  type ControlReply
+} from './retire-verb'
 
 /** A ledger in which `opener`'s verified open call created `ids`. */
 function openedBy(opener: string, ids: string[], verb = 'open-claude'): OpenerLedger {
@@ -94,7 +101,8 @@ describe('the proof survives a park cycle and ends only with a real close', () =
     expect(Object.keys(platform.listeners)).toEqual([IPC.ptyDestroy])
     expect(platform.senderListeners).toEqual({})
     expect(platform.handlers).toEqual({})
-    // Nor is the proof the pane registry, which a session end clears and an attach never refills.
+    // Nor may retire consult the pane registry, which a session end clears and an attach never
+    // refills: with the successor's pane entry gone, retire must still succeed.
     recordFreshSpawnOwner('succ', 'project-1')
     forgetPaneOwner('succ')
     expect(paneOwnerProject('succ')).toBeUndefined()
@@ -116,5 +124,64 @@ describe('the proof survives a park cycle and ends only with a real close', () =
     forgetOnClose(platform, ledger)
     platform.listeners[IPC.ptyDestroy]('caller')
     expect(ledger.opened('caller', 'succ')).toBe(false)
+  })
+})
+
+describe("main's wiring: the gate runs before the renderer round-trip, the record after it", () => {
+  /** A stand-in for main's forward to the renderer, counting whether it ran. */
+  function forwarding(reply: ControlReply): { ran: () => number; forward: () => Promise<ControlReply> } {
+    let n = 0
+    return {
+      ran: () => n,
+      forward: async () => {
+        n++
+        return reply
+      }
+    }
+  }
+  const req = (verb: string, args: Record<string, string>, verified = true) => ({
+    verb,
+    nodeId: 'caller',
+    args,
+    verified
+  })
+
+  it('never forwards a refused retire, so the renderer never moves or closes anything', async () => {
+    const f = forwarding({ ok: true })
+    const reply = await withOpenerLedger(new OpenerLedger(), req('retire', { successor: 'succ' }), f.forward)
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toMatch(/not a session you opened/)
+    expect(f.ran()).toBe(0)
+  })
+
+  it("records an open call on the way back, then forwards that caller's retire into it", async () => {
+    const ledger = new OpenerLedger()
+    await withOpenerLedger(ledger, req('open-agent', { agent: 'claude' }), async () => ({
+      ok: true,
+      result: { ids: ['succ'] }
+    }))
+    const f = forwarding({ ok: true, message: 'retired' })
+    expect(await withOpenerLedger(ledger, req('retire', { successor: 'succ' }), f.forward)).toEqual({
+      ok: true,
+      message: 'retired'
+    })
+    expect(f.ran()).toBe(1)
+  })
+
+  it('forwards an unverified open, but it proves nothing', async () => {
+    const ledger = new OpenerLedger()
+    const open = forwarding({ ok: true, result: { ids: ['succ'] } })
+    await withOpenerLedger(ledger, req('open-claude', {}, false), open.forward)
+    expect(open.ran()).toBe(1)
+    expect(ledger.opened('caller', 'succ')).toBe(false)
+  })
+
+  it('passes every other verb straight through', async () => {
+    const f = forwarding({ ok: true, message: 'moved' })
+    expect(await withOpenerLedger(new OpenerLedger(), req('move', { nodes: 'a' }), f.forward)).toEqual({
+      ok: true,
+      message: 'moved'
+    })
+    expect(f.ran()).toBe(1)
   })
 })

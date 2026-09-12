@@ -72,11 +72,38 @@ export function retireRefusal(
   if (!ledger.opened(req.nodeId, successor)) {
     return (
       `retire: ${successor} is not a session you opened during this app run — open your successor ` +
-      'with open-claude or open-agent, then retire into it. The proof ends when that node closes or ' +
-      'the app restarts. Nothing changed.'
+      'with open-claude, open-agent or open-terminal, then retire into it. The proof ends when that ' +
+      'node closes or the app restarts. Nothing changed.'
     )
   }
   return null
+}
+
+/** A control reply, as main's handler returns it. */
+export interface ControlReply {
+  ok: boolean
+  message?: string
+  result?: unknown
+  error?: string
+}
+
+/**
+ * Main's whole retire wiring, as ONE call around its renderer round-trip, so the gate cannot be
+ * dropped without dropping the forward with it: a refused `retire` never reaches the renderer, and
+ * every verified open call's reply is recorded on the way back.
+ */
+export async function withOpenerLedger(
+  ledger: OpenerLedger,
+  req: { verb: string; nodeId: string; args: Record<string, string>; verified: boolean },
+  forward: () => Promise<ControlReply>
+): Promise<ControlReply> {
+  if (req.verb === 'retire') {
+    const refusal = retireRefusal(ledger, req)
+    if (refusal) return { ok: false, error: refusal, message: refusal }
+  }
+  const reply = await forward()
+  recordOpenReply(ledger, req, reply)
+  return reply
 }
 
 /** End proofs on a REAL close only. Not `ptyKill` (a park), not `ptyCreate` (a re-mount), not
