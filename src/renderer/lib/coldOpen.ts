@@ -20,6 +20,16 @@
 // the React component is not testable and these are.
 
 import { rootPositionIn, type PlacedNode } from './projectOpen'
+import {
+  GROUP_PAD_X,
+  centerOf,
+  containerJoinedBy,
+  framesJoinedBy,
+  placeOpened,
+  type Box,
+  type Point,
+  type Size
+} from '@shared/placement'
 
 /** A serialized node, as the projects store keeps them for non-active projects. Structural subset
  *  of `CanvasNodeState` — deliberately not the type itself, so tests can build one in a line. */
@@ -146,56 +156,78 @@ export function coldResolveAfter(
   return { ok: true, after: ids }
 }
 
+/** A stored node as a ROOT-space box for the placement engine. */
+export function coldBox(nodes: readonly ColdNode[], n: ColdNode): Box {
+  const at = rootPositionIn(nodes.map(asPlaced), asPlaced(n))
+  return { x: at.x, y: at.y, w: widthOf(n), h: heightOf(n) }
+}
+
 /**
- * Where the i-th opened node lands when the source IS in this project: the same geometry the live
- * path's `placeBelow` uses (below the source, fanned right), computed from the source's PERSISTED
- * size and resolved to ROOT space so a source sitting inside a frame still places correctly.
- * Returns a CENTER point — the factories' `center` parameter.
+ * Where the i-th opened node lands when the source IS in this project: the shared engine's
+ * `placeOpened` — the live canvas's rule — over the stored nodes. Below the source, fanned right,
+ * or RIGHT of its `--after` deps (`deps`; waiting on the opener itself stays below it). `reserved`
+ * holds the siblings this same call already placed, which are not in `nodes` because the store has
+ * not been written yet. Resolved to ROOT space so a source inside a frame still places correctly;
+ * the frames of the container the node is filed into (`coldFileIntoFrame`) are not obstacles,
+ * because that container grows to hold it — the source's own frames for a lineage child, its DEPS'
+ * for an `--after` dependent, none for a node that stays top-level (`framesJoinedBy`). Returns a
+ * CENTER point — the factories' `center` parameter.
  */
 export function coldPlaceBelow(
   nodes: readonly ColdNode[],
   source: ColdNode,
-  i: number
+  i: number,
+  opts: { reserved?: readonly Box[]; size?: Size; deps?: readonly ColdNode[] } = {}
 ): { x: number; y: number } {
-  const abs = rootPositionIn(nodes.map(asPlaced), asPlaced(source))
-  return {
-    x: abs.x + widthOf(source) / 2 + i * 460,
-    y: abs.y + heightOf(source) + 80 + 210
+  const size = opts.size ?? { w: 600, h: 400 }
+  const depNodes = (opts.deps ?? []).filter((d) => d.id !== source.id)
+  const frames = framesJoinedBy(nodes, source.id, depNodes)
+  const existing = [
+    ...nodes.filter((n) => !frames.has(n.id)).map((n) => coldBox(nodes, n)),
+    ...(opts.reserved ?? [])
+  ]
+  const deps = depNodes.map((d) => coldBox(nodes, d))
+  return centerOf(placeOpened(existing, coldBox(nodes, source), deps, size, i), size)
+}
+
+/**
+ * A cold open files what it opened into the frame that node JOINS — the live rule
+ * (`withOpenedNode`), so it stays where `coldPlaceBelow` put it: below the source inside the
+ * SOURCE's frame for a lineage child, beside its `--after` deps inside THEIRS for a dependent
+ * (`containerJoinedBy`, from `deps` — the source itself among them is still lineage). `placed` are
+ * the new nodes' ROOT-space boxes, in order; the answer is their frame-relative positions (same
+ * order) and every frame up the chain that must grow to hold them — right and down, never moved,
+ * the cold `--group` rule (`extent: 'parent'` clamps a child that falls outside its frame). A node
+ * with no container, or whose frame is gone, files nothing.
+ */
+export function coldFileIntoFrame(
+  nodes: readonly ColdNode[],
+  source: ColdNode,
+  placed: readonly Box[],
+  opts: { deps?: readonly ColdNode[] } = {}
+): { frameId?: string; positions: Point[]; frames: { id: string; size: { width: number; height: number } }[] } {
+  const container = containerJoinedBy(nodes, source.id, opts.deps ?? [])
+  const frame = container ? nodes.find((n) => n.id === container && n.kind === 'group') : undefined
+  if (!frame) return { positions: placed.map((b) => ({ x: b.x, y: b.y })), frames: [] }
+  const origin = coldBox(nodes, frame)
+  const positions = placed.map((b) => ({ x: b.x - origin.x, y: b.y - origin.y }))
+  const frames: { id: string; size: { width: number; height: number } }[] = []
+  let kids: Box[] = positions.map((p, i) => ({ ...p, w: placed[i].w, h: placed[i].h }))
+  let cur: ColdNode | undefined = frame
+  const seen = new Set<string>()
+  while (cur?.kind === 'group' && !seen.has(cur.id)) {
+    seen.add(cur.id)
+    const width = Math.max(cur.size?.width ?? 0, ...kids.map((k) => k.x + k.w + GROUP_PAD_X))
+    const height = Math.max(cur.size?.height ?? 0, ...kids.map((k) => k.y + k.h + GROUP_PAD_X))
+    if (width === cur.size?.width && height === cur.size?.height) break
+    frames.push({ id: cur.id, size: { width, height } })
+    // The grown frame, in its own parent's space, is what that parent must now hold.
+    kids = [{ x: cur.position.x, y: cur.position.y, w: width, h: height }]
+    const parentId: string | undefined = cur.parentId
+    cur = parentId ? nodes.find((n) => n.id === parentId) : undefined
   }
+  return { frameId: frame.id, positions, frames }
 }
-
-// Grid geometry for nodes opened INTO a group frame. Exported so Canvas's LIVE path uses these
-// exact numbers too — the cold and live placements are the same layout, and two copies of a
-// magic-number grid drift into two layouts.
-export const GROUP_PAD_X = 24
-export const GROUP_PAD_TOP = 56
-export const GROUP_GAP = 24
-
-export function groupSlot(slot: number, w: number, h: number): { x: number; y: number } {
-  return {
-    x: GROUP_PAD_X + (slot % 2) * (w + GROUP_GAP),
-    y: GROUP_PAD_TOP + Math.floor(slot / 2) * (h + GROUP_GAP)
-  }
-}
-
-export function groupSizeFor(
-  children: number,
-  w: number,
-  h: number
-): { width: number; height: number } {
-  const cols = Math.min(2, Math.max(1, children))
-  const rows = Math.max(1, Math.ceil(children / 2))
-  return {
-    width: GROUP_PAD_X * 2 + cols * w + (cols - 1) * GROUP_GAP,
-    height: GROUP_PAD_TOP + rows * h + (rows - 1) * GROUP_GAP + GROUP_PAD_X
-  }
-}
-
-/** How many direct children a stored frame already holds — the `existing` offset for `groupSlot`. */
-export function coldGroupChildCount(nodes: readonly ColdNode[], groupId: string): number {
-  return nodes.filter((n) => n.parentId === groupId).length
-}
-
 /**
  * The reply sentence for a session that was opened into a project the user is not looking at.
  *

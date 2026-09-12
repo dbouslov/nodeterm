@@ -125,7 +125,7 @@ describe('missingDepRopes — a wait with no rope is a wait nothing on screen ex
 
   it('synthesizes dep -> node for an armed node whose rope was never written', () => {
     expect(missingDepRopes([{ id: 'a', data: {} }, armed('b', ['a'])], [])).toEqual([
-      { id: 'ctrl-a-b', source: 'a', target: 'b' }
+      { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' }
     ])
   })
 
@@ -135,7 +135,7 @@ describe('missingDepRopes — a wait with no rope is a wait nothing on screen ex
 
   it('an OPPOSITE rope is not the same relation — the dep rope is still owed', () => {
     expect(missingDepRopes([{ id: 'a', data: {} }, armed('b', ['a'])], [{ source: 'b', target: 'a' }])).toEqual([
-      { id: 'ctrl-a-b', source: 'a', target: 'b' }
+      { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' }
     ])
   })
 
@@ -149,7 +149,7 @@ describe('missingDepRopes — a wait with no rope is a wait nothing on screen ex
 
   it('a repeated dep yields ONE rope — two edges with one id would be a React Flow collision', () => {
     expect(missingDepRopes([{ id: 'a', data: {} }, armed('b', ['a', 'a'])], [])).toEqual([
-      { id: 'ctrl-a-b', source: 'a', target: 'b' }
+      { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' }
     ])
   })
 })

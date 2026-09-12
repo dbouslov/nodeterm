@@ -340,6 +340,9 @@ export interface CanvasNodeState {
   tags?: string[]
   /** When true the node body is hidden (header-only). */
   collapsed?: boolean
+  /** Pinned in place: automatic layout (arrange, align, Restructure, frame fitting) never moves it
+   *  or anything inside it. The file is hand-editable, so only a literal `true` is honoured. */
+  pinned?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /**
@@ -508,11 +511,17 @@ export interface Viewport {
   zoom: number
 }
 
+/** Lineage vs dependency on a ROPE (`project.ropes`): `opener` = the source opened the target,
+ *  `dep` = the target was armed `--after` the source. Absent on pre-2026-09 files and on bridges;
+ *  an absent kind reads as `opener`. */
+export type RopeKind = 'opener' | 'dep'
+
 /** A persistent "bridge" link between two Claude nodes (lets their sessions message each other). */
 export interface BridgeLink {
   id: string
   source: string
   target: string
+  kind?: RopeKind
 }
 
 /** One kanban board column. Column order = array order in ProjectKanban.columns. */

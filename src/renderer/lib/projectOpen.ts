@@ -3,6 +3,7 @@
 // calls and the reply — so every decision that does not need React is unit-testable here, the
 // same reasoning as controlRouting.ts / pendingLaunch.ts.
 import { oneLine } from '@shared/one-line'
+import { centerOf, placeLoose } from '@shared/placement'
 
 /** The little these helpers need to know about a project. */
 export interface ProjectForOpen {
@@ -258,21 +259,15 @@ export function nextFreePosition(
   nodes: readonly PlacedNode[],
   size: { width: number; height: number } = { width: 640, height: 440 }
 ): { x: number; y: number } {
-  if (!nodes.length) return { x: 40 + size.width / 2, y: 40 + size.height / 2 }
   const byId = new Map<string, PlacedNode>()
   for (const n of nodes) if (n.id) byId.set(n.id, n)
-  let left = Infinity
-  let bottom = -Infinity
-  for (const n of nodes) {
-    const at = rootPosition(n, byId)
-    if (Number.isFinite(at.x)) left = Math.min(left, at.x)
-    const b = at.y + placedH(n)
-    if (Number.isFinite(b)) bottom = Math.max(bottom, b)
-  }
-  if (!Number.isFinite(left) || !Number.isFinite(bottom)) {
-    return { x: 40 + size.width / 2, y: 40 + size.height / 2 }
-  }
-  return { x: left + size.width / 2, y: bottom + 80 + size.height / 2 }
+  // A box with a non-finite coordinate (hand-edited file) is left out, never allowed to poison
+  // the min/max — the old loop guarded each term the same way.
+  const boxes = nodes
+    .map((n) => ({ ...rootPosition(n, byId), w: placedW(n), h: placedH(n) }))
+    .filter((b) => [b.x, b.y, b.w, b.h].every(Number.isFinite))
+  const s = { w: size.width, h: size.height }
+  return centerOf(placeLoose(boxes, s), s)
 }
 
 /**

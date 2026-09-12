@@ -38,6 +38,13 @@ describe('new node placement with snap-to-grid', () => {
     expect([node.position.x % 16, node.position.y % 16]).toEqual([0, 0])
   })
 
+  it('a node placed WITHOUT a cursor lands on one fixed origin — its index no longer staggers it', () => {
+    // The old count-keyed stagger stepped 360×320 for 600×400 nodes, so it caused the overlap it
+    // existed to avoid; every real caller now passes a point from the placement engine.
+    settings({ snapToGrid: false })
+    expect(createStickyNode(5).position).toEqual(createStickyNode(0).position)
+  })
+
   it('never lands a position on -0, which would ride into project.json', () => {
     settings({ snapToGrid: true, gridSize: GRID })
     const node = createStickyNode(0, { x: 4, y: 4 })

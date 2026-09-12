@@ -128,6 +128,8 @@ export interface LinkDocEntry {
   agent?: string
   /** Provider session id — opencode has no transcript file, so the CLI exports it by id. */
   sessionId?: string
+  /** Managed Claude account the session runs under: scopes a transcript lookup made at read time. */
+  accountId?: string
   /** Present when this entry is a sticky note: its text. Note entries have no transcript/terminal. */
   note?: string
 }
@@ -157,6 +159,7 @@ export function buildLinkDoc(
       }
       if (!isNote && n.agentId) entry.agent = n.agentId
       if (!isNote && n.sessionId) entry.sessionId = n.sessionId
+      if (!isNote && n.accountId) entry.accountId = n.accountId
       if (isNote) entry.note = n.note
       return entry
     }),
