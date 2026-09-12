@@ -5,6 +5,7 @@ import {
   launchesToFire,
   launchRetryDelay,
   launchTooltip,
+  pasteIntoShell,
   storedLaunchesToFire,
   unmetDeps,
   LAUNCH_DELIVERY_ATTEMPTS,
@@ -428,5 +429,48 @@ describe('after a restart — a persisted clean end (`lastTurnClean`)', () => {
   it('holds when no clean end was persisted', () => {
     expect(launchesToFire([armed('c', ['a'])], { a: {} }, live)).toEqual([])
     expect(unmetDeps(armed('c', ['a']), { a: { lastTurnClean: false } }, live)).toEqual(['a'])
+  })
+})
+
+/**
+ * A held launch is typed only at a shell prompt. After a relaunch a node can still be armed on disk
+ * although its launch LANDED last run — the disarm was lost to a quit inside the save debounce, to a
+ * quit (nothing saves on quit) or to a paused autosave — and with its dep's clean end surviving the
+ * relaunch (`lastTurnClean`) the launch fired again, into the agent the first paste started.
+ */
+describe('pasteIntoShell — a held launch is pasted only where a shell holds the pane', () => {
+  const io = (pane: string | null, accepted = true) => {
+    const log: string[] = []
+    return {
+      log,
+      paneCommand: async (id: string) => {
+        log.push(`pane ${id}`)
+        return pane
+      },
+      send: async (id: string, command: string) => {
+        log.push(`send ${id}: ${command}`)
+        return accepted
+      }
+    }
+  }
+
+  it('skips a node whose pane runs something else — the agent its launch already started', async () => {
+    const fake = io('claude')
+    expect(await pasteIntoShell('reviewer', 'claude "review"', fake)).toBe(false)
+    expect(fake.log).toEqual(['pane reviewer'])
+  })
+
+  it('skips a pane it could not see — unknown is never a shell prompt', async () => {
+    const fake = io(null)
+    expect(await pasteIntoShell('reviewer', 'claude "review"', fake)).toBe(false)
+    expect(fake.log).toEqual(['pane reviewer'])
+  })
+
+  it('pastes at a shell prompt, and answers what the paste answered', async () => {
+    const landed = io('-zsh')
+    expect(await pasteIntoShell('reviewer', 'claude "review"', landed)).toBe(true)
+    expect(landed.log).toEqual(['pane reviewer', 'send reviewer: claude "review"'])
+    // A refused paste stays refused: the caller's backoff and badge take it from there.
+    expect(await pasteIntoShell('reviewer', 'claude "review"', io('zsh', false))).toBe(false)
   })
 })

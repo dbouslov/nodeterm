@@ -87,6 +87,13 @@ describe('armed-launch delivery (source pins)', () => {
     expect(body).toContain('setupDoneForGroup')
   })
 
+  it('types a held launch only at a shell prompt — both pastes go through `pasteIntoShell`', () => {
+    // Wiring only: what the gate decides is unit-tested in pendingLaunch.test.ts. A direct
+    // `sendText` at either site would type a launch that landed before a relaunch into its agent.
+    const body = launchEffect()
+    expect(body.match(/pasteIntoShell\(f\.id, f\.command, paste\)/g)?.length).toBe(2)
+  })
+
   it('stops reporting on a node that is no longer armed — no stale warning on a running session', () => {
     const body = launchEffect()
     expect(body).toMatch(/delivery\.clear\(id\)[\s\S]{0,120}?clearStallTimer\(id\)/)

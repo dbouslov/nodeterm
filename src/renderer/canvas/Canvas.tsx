@@ -318,10 +318,12 @@ import {
   agentRestartFn,
   guardConcurrentRestart,
   planBulkRestart,
+  queryPaneWithin,
   restartEligibility,
   restartSessionId,
   settleRestart,
   summarizeBulkRestart,
+  RESTART_EXIT_TIMEOUT_MS,
   type BulkRestartPlan,
   type RestartOutcome
 } from '../terminal/agent-restart'
@@ -453,6 +455,7 @@ import {
   disarmDelivered,
   launchesToFire,
   launchRetryDelay,
+  pasteIntoShell,
   storedLaunchesToFire,
   unmetDeps,
   LAUNCH_STALL_MS,
@@ -1853,6 +1856,13 @@ export function Canvas() {
       else useProjects.setState({ projects: where })
       markDirty()
     }
+    // A launch is typed only at a shell prompt (`pasteIntoShell`), on screen and off: a node can be
+    // armed on disk although its launch landed last run, with its agent running in the pane. The
+    // pane query is bounded, as TerminalNode's are; a lapse reads as unseen, which is refused.
+    const paste = {
+      paneCommand: (id: string) => queryPaneWithin(() => api.pty.paneCommand(id), RESTART_EXIT_TIMEOUT_MS),
+      send: (id: string, command: string) => api.pty.sendText(id, command)
+    }
     const ready = launchesToFire(
       nodes as unknown as ArmedNode[],
       useAgentStatus.getState().byId,
@@ -1906,15 +1916,16 @@ export function Canvas() {
       launchInFlight.current.add(f.id)
       const attempt = (launchAttempts.current.get(f.id) ?? 0) + 1
       launchAttempts.current.set(f.id, attempt)
-      void api.pty.sendText(f.id, f.command).then((ok) => {
+      void pasteIntoShell(f.id, f.command, paste).then((ok) => {
         if (ok) {
           disarm(f.id, onScreenProjectId)
           useLaunchDelivery.getState().clear(f.id)
           return
         }
         // Refused although the session reported ready — a narrow residual race now, not the
-        // whole cold-start window. Let it back out of flight and re-run after the backoff; a
-        // launch that silently vanishes is worse than a late one.
+        // whole cold-start window — or its pane is not at a shell prompt. Let it back out of
+        // flight and re-run after the backoff; a launch that silently vanishes is worse than a
+        // late one.
         launchInFlight.current.delete(f.id)
         const delay = launchRetryDelay(attempt)
         if (delay !== null) {
@@ -1943,7 +1954,7 @@ export function Canvas() {
       if (!canDeliverInBackground(f.id, launchInFlight.current, backgroundRefused.current, isSessionReady))
         continue
       launchInFlight.current.add(f.id)
-      void api.pty.sendText(f.id, f.command).then((ok) => {
+      void pasteIntoShell(f.id, f.command, paste).then((ok) => {
         if (!ok) {
           launchInFlight.current.delete(f.id)
           backgroundRefused.current.add(f.id)

@@ -2111,7 +2111,10 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   arming would hand delivery to the canvas effect, which races the node's PTY into existence.
   (4) Delivery is **exactly-once via `launchInFlight`** (an id stays in the set forever once
   `sendText` resolved true — clearing `pendingLaunch` is a state update that can lag a re-render),
-  and a **refused** `sendText` retries (`launchRetryDelay`'s backoff) instead of vanishing.
+  and a **refused** `sendText` retries (`launchRetryDelay`'s backoff) instead of vanishing. It pastes
+  only into a pane a **shell** holds (`pasteIntoShell`; anything else counts as refused): a disarm
+  lost to a quit inside the save debounce left a landed launch armed on disk, to be typed into its
+  agent after the relaunch.
   (5) `pendingLaunch` **is persisted** (unlike `initialCommand`), and so is the one turn fact a wait
   needs: agent `state` is not, but a CLEAN end is recorded as the durable **`lastTurnClean`**
   (agentStatus), and `depSatisfied` accepts it while `state` is unknown. Before 2026-09-11 a

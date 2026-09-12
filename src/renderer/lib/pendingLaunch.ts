@@ -4,6 +4,7 @@
 // dependency edges to draw meanwhile. Kept free of React/store imports so the satisfaction
 // matrix is unit-testable — Canvas.tsx only wraps these in an effect and a setState.
 import type { AgentState } from '@shared/agents/normalize'
+import { isShellCommand } from '@shared/agents/pane'
 import type { PendingLaunch } from '@shared/types'
 import { canCommitCanvas } from '../state/persistGuards'
 
@@ -143,6 +144,28 @@ export function storedLaunchesToFire(
     for (const f of launchesToFire(armed, status, live, setupDone)) out.push({ ...f, projectId: p.id })
   }
   return out
+}
+
+/** How a held launch reaches its pane: the pane's foreground command, and the paste itself. */
+export interface LaunchPaste {
+  paneCommand: (id: string) => Promise<string | null>
+  send: (id: string, command: string) => Promise<boolean>
+}
+
+/**
+ * Paste a held launch, but only into a pane a SHELL holds (`isShellCommand` over the pane's
+ * foreground command). The on-screen and the off-screen paste both go through here.
+ *
+ * The disarm of a launch that LANDED reaches disk only on the next debounced save, so a quit inside
+ * that window (nothing saves on quit), or a paused autosave, leaves the node armed on disk while its
+ * agent runs in the pane. After the relaunch the in-flight set is empty and the dep's clean end reads
+ * satisfied again (`lastTurnClean`), so the launch fired a second time, typed into that agent as a
+ * prompt. A pane that could not be seen (`null`) is refused too: a refusal is retried and reported,
+ * and a paste into an agent cannot be taken back.
+ */
+export async function pasteIntoShell(id: string, command: string, io: LaunchPaste): Promise<boolean> {
+  if (!isShellCommand(await io.paneCommand(id))) return false
+  return io.send(id, command)
 }
 
 /**
