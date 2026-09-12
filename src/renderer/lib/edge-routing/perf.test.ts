@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { routeAll } from './index'
+import { portsFor } from './ports'
+import { routeOne } from './route'
 import type { RouteEdge, RouteNode, RouteRequest } from './types'
 
 function canvas(nodes: number, edges: number, frames: number): RouteRequest {
@@ -40,6 +42,37 @@ describe('routing cost pins (deterministic; spec Section 6)', () => {
     expect(g.routes.size).toBe(req.edges.length)
     expect(g.widenings).toBe(0)
     expect(g.fallbacks).toBe(0)
+  })
+  // A blocked end moving to another side of its node (route.ts `detour`) runs only where the edge
+  // was about to fall back, so a route the ordinary search finds comes out identical with the move
+  // allowed and without it. Asked of every edge of the crowded canvas and of 200 small crowded ones,
+  // where ports are boxed in most often.
+  it('the side change leaves every route the ordinary search finds exactly as it was', () => {
+    let seed = 3
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    const reqs = [canvas(120, 200, 8)]
+    for (let t = 0; t < 200; t++) {
+      const count = 4 + Math.floor(rnd() * 3)
+      const ns: RouteNode[] = []
+      for (let i = 0; i < count; i++) ns.push({ id: `n${i}`, x: Math.floor(rnd() * 900), y: Math.floor(rnd() * 700), width: 200, height: 100, isFrame: false })
+      const es: RouteEdge[] = []
+      for (let i = 0; i < count * 2; i++) {
+        const s = Math.floor(rnd() * count), d = Math.floor(rnd() * count)
+        if (s !== d) es.push({ id: `e${t}-${i}`, source: `n${s}`, target: `n${d}`, kind: i % 2 ? 'context' : 'rope', ropeKind: 'dep' })
+      }
+      reqs.push({ nodes: new Map(ns.map((v) => [v.id, v])), edges: es })
+    }
+    let checked = 0
+    for (const req of reqs) {
+      const ports = portsFor(req)
+      for (const e of req.edges) {
+        const without = routeOne(e, req, ports.get(e.id)!, false)
+        if (without.fallback) continue
+        checked++
+        expect(routeOne(e, req, ports.get(e.id)!, true), e.id).toEqual(without)
+      }
+    }
+    expect(checked).toBeGreaterThan(0)
   })
   it('drag pass (one node moved) on the same canvas: no widened search, no fallback', () => {
     const req = spaced(120, 200)
