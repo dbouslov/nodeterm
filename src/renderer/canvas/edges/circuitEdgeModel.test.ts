@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { circuitEdgeModel } from './circuitEdgeModel'
+import { SELECTED_COLOR } from '../../lib/edgeKinds'
 import type { Route, RouteNode } from '../../lib/edge-routing'
 
 const route: Route = {
@@ -29,9 +30,9 @@ describe('circuitEdgeModel', () => {
     const dim = circuitEdgeModel(route, { kind: 'rope' }, { ...quiet, anyLit: true }, [a, b])
     expect(dim.className).toContain('edge-dim')
   })
-  it('selected: white stroke, thicker, label shown', () => {
+  it('selected: the selected-edge token as stroke, thicker, label shown', () => {
     const m = circuitEdgeModel(route, { kind: 'rope', state: { agentColor: '#10a37f' } }, { ...quiet, selected: true, lit: true, anyLit: true }, [a, b])
-    expect(m.style).toMatchObject({ stroke: '#ffffff', strokeWidth: 3 })
+    expect(m.style).toMatchObject({ stroke: SELECTED_COLOR, strokeWidth: 3 })
     expect(m.showLabel).toBe(true)
   })
   it('waiting rope: dasharray 6 4 and the animated class', () => {

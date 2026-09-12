@@ -36,6 +36,12 @@ describe('edge look table', () => {
     expect(lookOf('rope', { agentColor: '#10a37f', driven: true }, true)).toMatchObject({ color: SELECTED_COLOR, width: 4 })
     expect(lookOf('context', undefined, true)).toMatchObject({ color: SELECTED_COLOR, width: 3.5 })
   })
+  it('the selected overlay paints a theme token, never a literal', () => {
+    // It was `#ffffff`, which is the selection colour of exactly one theme. The stroke, the
+    // arrowheads, the endpoint outlines and the label all take this one value, and the legend's
+    // sample with it, so a literal here is invisible on the other theme's canvas in five places.
+    expect(SELECTED_COLOR).toMatch(/^var\(--[a-z-]+\)$/)
+  })
   it('edgeAnimated agrees with lookOf', () => {
     expect(edgeAnimated('rope', { waiting: true })).toBe(true)
     expect(edgeAnimated('trigger')).toBe(false)

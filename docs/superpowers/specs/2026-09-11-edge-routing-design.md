@@ -94,7 +94,9 @@ export function lookOf(kind: EdgeKind, state: EdgeState): ResolvedLook  // colou
 State overlays, applied after the kind look, in this order:
 
 - **driven** (rope): clay `#d97757`, width 2.5, animated. The RUNNING badge's colour, as today.
-- **selected**: white `#ffffff`, width +1.5, label shown with the removal hint (Section 4).
+- **selected**: `--edge-selected` (`#ffffff` dark / `#3a3026` light), width +1.5, label shown with
+  the removal hint (Section 4). A token, not a literal: the stroke is also the label's TEXT colour,
+  and white on the light theme's near-white card is unreadable.
 - **lit** (hovered, or an endpoint node selected): width +1, a soft glow (`filter: drop-shadow`
   in the edge colour), endpoint outlines (Section 4).
 - **dim**: when any edge is lit or selected, every other edge drops to opacity 0.2 over 120 ms.
@@ -338,7 +340,7 @@ top-centre, children in a row below, dependents to the right), opener ropes leav
 and arrive at top ports, and dep ropes run left to right, so the tree reads as a circuit board
 with no diagonal runs.
 
-**Styles** (`styles.css`): the seven `--edge-*` tokens in both theme blocks; `.edge-lit`,
+**Styles** (`styles.css`): the eight `--edge-*` tokens in both theme blocks; `.edge-lit`,
 `.edge-dim`, the flow animation (the existing React Flow `animated` dash animation is reused by
 class), `.edge-legend`.
 

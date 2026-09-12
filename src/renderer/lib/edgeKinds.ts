@@ -40,7 +40,9 @@ export interface EdgeLook {
   animated: boolean
 }
 
-export const SELECTED_COLOR = '#ffffff'
+/** The selected overlay's one colour — stroke, arrowheads, endpoint outlines, label and the
+ *  legend's sample. A theme token, not a literal: `#ffffff` was invisible on the light canvas. */
+export const SELECTED_COLOR = 'var(--edge-selected)'
 export const DRIVEN_COLOR = '#d97757'
 
 interface KindLook {
