@@ -47,6 +47,14 @@
   --warn: #ff9f0a;
   --caution: #ffd60a;
   --success: #32d74b;
+  /* Edge kinds (spec 2026-09-11 edge routing): hue per kind, theme-aware; ropes and fan-out use
+     the agent's brand colour inline instead. */
+  --edge-context: var(--accent);
+  --edge-note: #ffd60a;
+  --edge-trigger: #bf5af2;
+  --edge-annotation: #6ac4dc;
+  --edge-handoff: #ff9f0a;
+  --edge-neutral: #8e8e93;
 
   /* THE CANVAS. Deliberately blacker than `--bg` in dark — the nodes are the content and the
      field behind them recedes. In light it has to go the other way, off-white and slightly
@@ -149,6 +157,12 @@
   --accent-hover: #0a6ed1;
   /* Accent as text has to DARKEN here, where the dark theme's lightened blue disappears. */
   --accent-text: #0060df;
+  --edge-context: var(--accent);
+  --edge-note: #b58a00;
+  --edge-trigger: #8e44c9;
+  --edge-annotation: #1f8fa8;
+  --edge-handoff: #c97400;
+  --edge-neutral: #8e8e93;
 
   /* The canvas sits BELOW every node, so it is the one surface that must be darker than the
      panels — otherwise the nodes dissolve into the field and the layout loses its edges. */
@@ -12717,3 +12731,23 @@ body.focus-mode .dock:hover {
 .files-node.collapsed .files-node__header {
   border-bottom: none;
 }
+
+/* ---- circuit edges (spec 2026-09-11 edge routing) ---- */
+.react-flow__edge g[class*='edge-'] { transition: opacity 120ms ease; }
+.react-flow__edge .edge-dim { opacity: 0.2; }
+.react-flow__edge .edge-lit .react-flow__edge-path { filter: drop-shadow(0 0 3px currentColor); }
+.react-flow__edge .edge-animated .react-flow__edge-path { animation: dashdraw 0.5s linear infinite; }
+.react-flow__edge .edge-arrow { stroke: none; }
+.react-flow__edge .edge-outline { fill: none; stroke-width: 2; pointer-events: none; opacity: 0.9; }
+.edge-label {
+  position: absolute;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(28, 28, 30, 0.85);
+  pointer-events: none;
+  white-space: nowrap;
+}
+:root[data-theme='light'] .edge-label { background: rgba(255, 255, 255, 0.92); }
+@media (prefers-reduced-motion: reduce) { .react-flow__edge .edge-animated .react-flow__edge-path { animation: none; } }
