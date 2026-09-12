@@ -12751,3 +12751,25 @@ body.focus-mode .dock:hover {
 }
 :root[data-theme='light'] .edge-label { background: rgba(255, 255, 255, 0.92); }
 @media (prefers-reduced-motion: reduce) { .react-flow__edge .edge-animated .react-flow__edge-path { animation: none; } }
+
+/* ---- edge legend: a chip on the pill cluster's surface, one row above the pills and right of the
+   controls column (the Panel lives inside <ReactFlow>, the pills outside it, so it cannot join
+   their row). The list opens upward so the chip stays under the cursor that opened it. ---- */
+.react-flow__panel.edge-legend-panel {
+  margin: 0 0 calc(var(--float-gap) + 26px + 8px) calc(var(--float-gap) + var(--controls-w) + 12px);
+}
+.edge-legend { display: flex; flex-direction: column-reverse; align-items: flex-start; }
+.edge-legend-chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: rgba(var(--card-rgb), 0.92);
+  border: 1px solid rgba(var(--tint-rgb), 0.08);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.edge-legend-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.edge-legend-rows { list-style: none; margin: 0 0 6px; padding: 8px 10px; display: grid; gap: 6px; background: rgba(var(--card-rgb), 0.92); border: 1px solid rgba(var(--tint-rgb), 0.08); border-radius: 8px; }
+.edge-legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text); }
