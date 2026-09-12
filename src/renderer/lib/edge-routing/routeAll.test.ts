@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { routeAll } from './index'
-import type { RouteEdge, RouteNode, RouteRequest } from './types'
+import type { Point, RouteEdge, RouteNode, RouteRequest } from './types'
 
 const n = (id: string, x: number, y: number): RouteNode => ({ id, x, y, width: 200, height: 100, isFrame: false })
 const mk = (nodes: RouteNode[], edges: RouteEdge[]): RouteRequest => ({ nodes: new Map(nodes.map((v) => [v.id, v])), edges })
@@ -14,6 +14,42 @@ describe('routeAll', () => {
     const g = routeAll(mk([...base.nodes.values()], [...base.edges, { id: 'ax', source: 'a', target: 'ghost', kind: 'rope' }]))
     expect([...g.routes.keys()].sort()).toEqual(['ab', 'cd'])
     expect(g.fallbacks).toBe(0)
+  })
+  // A routed edge may never pass through a node's body, and that includes the nodes its search
+  // never saw: the obstacle list is filtered to the search window, so a route that leaves the
+  // window is in territory where nothing is registered as an obstacle. Asked over 120 random
+  // canvases because the escapes are rare (3 of 1,063 routes) and none of them look special.
+  it('no route crosses a node body, over 120 random canvases', () => {
+    const EPS = 0.5
+    const crosses = (a: Point, b: Point, box: RouteNode): boolean =>
+      Math.min(a.x, b.x) < box.x + box.width - EPS && box.x + EPS < Math.max(a.x, b.x) &&
+      Math.min(a.y, b.y) < box.y + box.height - EPS && box.y + EPS < Math.max(a.y, b.y)
+    let seed = 7
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    const bad: string[] = []
+    for (let t = 0; t < 120; t++) {
+      const count = 8 + Math.floor(rnd() * 10)
+      const ns: RouteNode[] = []
+      for (let i = 0; i < count; i++) ns.push({ id: `n${i}`, x: Math.floor(rnd() * 3000), y: Math.floor(rnd() * 2000), width: 200 + Math.floor(rnd() * 160), height: 100 + Math.floor(rnd() * 120), isFrame: false })
+      const es: RouteEdge[] = []
+      for (let i = 0; i < count; i++) {
+        const s = Math.floor(rnd() * count), d = Math.floor(rnd() * count)
+        if (s !== d) es.push({ id: `e${t}-${i}`, source: `n${s}`, target: `n${d}`, kind: i % 2 ? 'context' : 'rope', ropeKind: 'dep' })
+      }
+      const g = routeAll(mk(ns, es))
+      for (const e of es) {
+        const r = g.routes.get(e.id)
+        // The fallback path is the no-avoidance one by definition, so it is not held to this.
+        if (!r || r.fallback) continue
+        for (let i = 0; i + 1 < r.points.length; i++) {
+          for (const node of ns) {
+            if (node.id === e.source || node.id === e.target) continue
+            if (crosses(r.points[i], r.points[i + 1], node)) bad.push(`t=${t} ${e.id} segment ${i} crosses ${node.id}`)
+          }
+        }
+      }
+    }
+    expect(bad).toEqual([])
   })
   it('incremental: only edges touching a moved node (or crossing its box) are re-routed', () => {
     const g1 = routeAll(base)

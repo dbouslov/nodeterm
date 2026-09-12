@@ -47,4 +47,13 @@ describe('nudge', () => {
     const out = nudge(new Map([['e1', r1], ['e2', r2]]), edges, (id) => (id === 'e1' ? [wall] : []))
     expect(out.get('e1')!.points[1].x).toBe(500)
   })
+  it('an offset whose RUN crosses an obstacle is dropped too, not only one landing a corner in it', () => {
+    // The run out of A* legitimately hugs an obstacle's border, so the 6 px offset carries it
+    // INSIDE — and this obstacle sits between the three points the check used to sample (the two
+    // moved corners at y=50/350 and their midpoint at y=200), so the shift went through a node
+    // body. Live case: a 1,728 px run nudged 24 px into a node it had been running alongside.
+    const wall = { x: 500, y: 60, width: 240, height: 130 }
+    const out = nudge(new Map([['e1', r1], ['e2', r2]]), edges, (id) => (id === 'e1' ? [wall] : []))
+    expect(out.get('e1')!.points[1].x).toBe(500)
+  })
 })

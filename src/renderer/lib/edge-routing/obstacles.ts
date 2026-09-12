@@ -13,6 +13,12 @@ export const intersects = (a: Box, b: Box): boolean =>
 export const containsStrict = (b: Box, p: Point, eps = 0.5): boolean =>
   p.x > b.x + eps && p.x < b.x + b.width - eps && p.y > b.y + eps && p.y < b.y + b.height - eps
 
+/** Whether an axis-aligned segment enters `b`'s interior. Same tolerance, so a run ALONG a border
+ *  is clear — which is what A* produces when it threads a corridor. */
+export const segmentEnters = (b: Box, p: Point, q: Point, eps = 0.5): boolean =>
+  Math.min(p.x, q.x) < b.x + b.width - eps && b.x + eps < Math.max(p.x, q.x) &&
+  Math.min(p.y, q.y) < b.y + b.height - eps && b.y + eps < Math.max(p.y, q.y)
+
 export function windowFor(a: Box, b: Box, pad: number): Box {
   const x = Math.min(a.x, b.x) - pad
   const y = Math.min(a.y, b.y) - pad
