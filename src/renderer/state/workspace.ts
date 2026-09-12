@@ -1446,18 +1446,23 @@ export function selectedRootIds(nodes: CanvasNode[], ids: string[]): string[] {
  * Grows every ancestor frame of `groupId` to hug its children again, innermost first. A frame
  * that gained a child bigger than itself must be re-fitted BEFORE its own parent is, or the
  * parent is fitted around a size that is about to change.
+ *
+ * `afterFit` runs after each frame is fitted, with the canvas as it was before that fit, and
+ * returns the canvas the walk goes on with: `lib/reflow` moves the frame's neighbours there.
  */
-function fitAncestorChain(
+export function fitAncestorChain(
   nodes: CanvasNode[],
   groupId: string | undefined,
-  grid = 0
+  grid = 0,
+  afterFit?: (fitted: CanvasNode[], frameId: string, unfitted: CanvasNode[]) => CanvasNode[]
 ): CanvasNode[] {
   let next = nodes
   const seen = new Set<string>()
   let currentId = groupId
   while (currentId && !seen.has(currentId)) {
     seen.add(currentId)
-    next = fitGroupToChildren(next, currentId, grid)
+    const fitted = fitGroupToChildren(next, currentId, grid)
+    next = afterFit ? afterFit(fitted, currentId, next) : fitted
     currentId = next.find((n) => n.id === currentId)?.parentId
   }
   return next
