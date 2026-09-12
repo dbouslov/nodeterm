@@ -23,6 +23,22 @@ describe('routeAll', () => {
     expect(g2.routes.get('ab')).not.toBe(g1.routes.get('ab'))
     expect(g2.routes.get('ab')!.points[0].y).toBe(70)          // follows the new port
   })
+  // The canvas's tidy layouts leave a 40 px gap between neighbours, and OBSTACLE_MARGIN is the
+  // gutter each side of that gap claims: two 24 px margins overlap inside 40 px, the corridor
+  // between neighbours closes, and A* has nowhere to thread — 12 of these 22 edges gave up and
+  // drew the straight three-segment fallback straight through the nodes. The margin has to leave
+  // a corridor at the gap the layout actually produces.
+  it('a tidy 40 px grid routes every edge with no fallback', () => {
+    const gap = 40
+    const ns: RouteNode[] = []
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) ns.push(n(`n${r}-${c}`, c * (200 + gap), r * (100 + gap)))
+    const es: RouteEdge[] = []
+    for (let r = 0; r < 4; r++) for (let c = 0; c + 2 < 5; c++) es.push({ id: `h${r}-${c}`, source: `n${r}-${c}`, target: `n${r}-${c + 2}`, kind: 'context' })
+    for (let c = 0; c < 5; c++) for (let r = 0; r + 2 < 4; r++) es.push({ id: `v${r}-${c}`, source: `n${r}-${c}`, target: `n${r + 2}-${c}`, kind: 'rope', ropeKind: 'opener' })
+    const g = routeAll(mk(ns, es))
+    expect(g.routes.size).toBe(es.length)
+    expect(g.fallbacks).toBe(0)
+  })
   it('incremental: an untouched edge whose route crosses the moved node re-routes too', () => {
     const r = mk([n('a', 0, 0), n('b', 1000, 0), n('c', 400, 400), n('d', 400, 800)], [
       { id: 'ab', source: 'a', target: 'b', kind: 'context' },

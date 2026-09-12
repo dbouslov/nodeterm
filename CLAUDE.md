@@ -3127,7 +3127,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   encode the kind so a colourblind reader tells them apart. Paths are orthogonal, routed by the
   pure module `lib/edge-routing/` (no React, no store): ports are fixed per kind (context/note
   left–right, opener ropes and fan-out bottom→top, dep ropes right→left, with a flip rule),
-  every route avoids nodes and any frame that holds neither endpoint (`OBSTACLE_MARGIN` 24 px),
+  every route avoids nodes and any frame that holds neither endpoint (`OBSTACLE_MARGIN` 16 px,
+  under half the 40 px gap a tidy layout leaves so the corridor between neighbours stays open),
   parallel runs are nudged `CHANNEL_SPACING` apart in kind order, and a route the A* cannot find
   falls back to a plain three-segment path — an edge is never left undrawn (a port inside another
   node's margin falls back at once: no search can leave it, and letting A* prove that cost whole

@@ -197,7 +197,8 @@ subagent/loop builder and `triggerEdges` emit the same shape with `kind: 'fanout
 All numbers are constants in `types.ts`, exported for the tests:
 
 ```
-OBSTACLE_MARGIN = 24   // gutter every route keeps from a node it does not touch
+OBSTACLE_MARGIN = 16   // gutter every route keeps from a node it does not touch (under half a
+                       // tidy layout's 40 px gap, or the corridor between neighbours closes)
 PORT_STUB       = 20   // straight run out of a port before the first bend
 PORT_SPACING    = 12   // between exits on one side
 CHANNEL_SPACING = 12   // between parallel runs in one corridor
