@@ -1463,6 +1463,45 @@ function fitAncestorChain(
   return next
 }
 
+/** The height a never-measured node restores to: the literal each header chevron fell back to
+ *  (sticky and files their default size, terminal 300) — the node menu used 300 for every kind. */
+const collapseFallbackHeight = (type: string | undefined): number =>
+  type === 'sticky' ? STICKY_SIZE.height : type === 'files' ? FILES_SIZE.height : 300
+
+/**
+ * Minimize `ids` to their title bar (`on`) or restore them — the ONE implementation behind the
+ * header chevrons (terminal, sticky, files), the node menu's Minimize / Restore and the `minimize`
+ * control verb. Minimizing remembers the height to come back to in `data.expandedHeight`
+ * (flowToNodeStates persists that one while collapsed); restoring gives it back.
+ *
+ * A node already in the asked state is returned untouched: re-applying `expandedHeight` to an
+ * expanded node would undo any resize made since its last restore. When nothing changes the SAME
+ * array comes back, so `setNodes` skips the render.
+ *
+ * It resizes only the listed nodes — frames and neighbours are the caller's business.
+ */
+export function setCollapsed(nodes: CanvasNode[], ids: readonly string[], on: boolean): CanvasNode[] {
+  const want = new Set(ids)
+  let changed = false
+  const next = nodes.map((n) => {
+    if (!want.has(n.id) || !!n.data.collapsed === on) return n
+    changed = true
+    const expandedHeight =
+      (n.data.expandedHeight as number) ??
+      n.measured?.height ??
+      (n.height as number) ??
+      collapseFallbackHeight(n.type)
+    const height = on ? COLLAPSED_HEIGHT : expandedHeight
+    return {
+      ...n,
+      height,
+      style: { ...n.style, height },
+      data: { ...n.data, collapsed: on, expandedHeight }
+    }
+  })
+  return changed ? next : nodes
+}
+
 /**
  * Maximize (issue #399): resize `nodeId` to occupy `rect` — the visible viewport in ROOT/flow
  * coordinates, computed by the caller from the camera (`maximizeTargetRect`) — remembering the
