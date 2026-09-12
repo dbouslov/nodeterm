@@ -3,7 +3,7 @@
 // normal. Cost = Manhattan length + BEND_COST per turn; the heuristic is Manhattan distance.
 // Failure inside the window widens once to the whole canvas; failure again ⇒ the fallback
 // three-segment path (spec 3.5), so an edge is never left undrawn.
-import { obstaclesFor, windowFor } from './obstacles'
+import { containsStrict, obstaclesFor, windowFor } from './obstacles'
 import { buildGraph, type Graph } from './visibility'
 import { BEND_COST, WINDOW_PAD, outward, type Box, type Point, type Port, type Route, type RouteEdge, type RouteRequest } from './types'
 
@@ -23,54 +23,98 @@ export function compressCollinear(points: Point[]): Point[] {
   return out
 }
 
+/** The open list: a binary min-heap on (f, state key). Ties on f break on the lower key, the
+ *  order a fully sorted list gives, so the search — and the route — stay deterministic at
+ *  O(log n) a push and a pop instead of a sort per push. */
+function openList() {
+  const fs: number[] = [], ks: number[] = []
+  const less = (i: number, j: number) => fs[i] < fs[j] || (fs[i] === fs[j] && ks[i] < ks[j])
+  const swap = (i: number, j: number) => {
+    const f = fs[i]; fs[i] = fs[j]; fs[j] = f
+    const k = ks[i]; ks[i] = ks[j]; ks[j] = k
+  }
+  return {
+    get size() { return fs.length },
+    push(f: number, k: number) {
+      fs.push(f); ks.push(k)
+      for (let i = fs.length - 1; i > 0; ) {
+        const p = (i - 1) >> 1
+        if (!less(i, p)) break
+        swap(i, p); i = p
+      }
+    },
+    /** Removes and returns the state key with the lowest (f, key). */
+    pop(): number {
+      const top = ks[0]
+      const f = fs.pop()!, k = ks.pop()!
+      if (fs.length) {
+        fs[0] = f; ks[0] = k
+        for (let i = 0; ; ) {
+          const l = 2 * i + 1, r = l + 1
+          let m = i
+          if (l < fs.length && less(l, m)) m = l
+          if (r < fs.length && less(r, m)) m = r
+          if (m === i) break
+          swap(i, m); i = m
+        }
+      }
+      return top
+    }
+  }
+}
+
 export function astar(g: Graph, from: Port, to: Port): Point[] | null {
   const start = g.vertexAt(from)
   const goal = g.vertexAt(to)
   if (start < 0 || goal < 0) return null
+  const X = g.xs, Y = g.ys, W = X.length
   const mustLeave = dirOfNormal(outward(from.side))
   const mustArrive = ((dirOfNormal(outward(to.side)) + 2) % 4) as Dir
-  const goalP = g.at(goal)
-  const h = (v: number) => { const p = g.at(v); return Math.abs(p.x - goalP.x) + Math.abs(p.y - goalP.y) }
-  // State = vertex * 4 + incoming direction. 4 = "no direction yet" handled as separate start.
-  const key = (v: number, d: Dir) => v * 4 + d
-  const gScore = new Map<number, number>()
-  const came = new Map<number, number>()
-  const open: { k: number; f: number; v: number; d: Dir }[] = []
-  const push = (k: number, f: number, v: number, d: Dir) => { open.push({ k, f, v, d }); open.sort((a, b) => a.f - b.f || a.k - b.k) }
+  const gx = X[goal % W], gy = Y[Math.floor(goal / W)]
+  const h = (v: number) => Math.abs(X[v % W] - gx) + Math.abs(Y[Math.floor(v / W)] - gy)
+  // State = vertex * 4 + incoming direction, in flat typed arrays rather than Maps: a target that
+  // cannot be reached makes the search visit every state of the widened graph, and this
+  // bookkeeping was then most of a drag frame.
+  const states = W * Y.length * 4
+  const gScore = new Float64Array(states).fill(Infinity)
+  const came = new Int32Array(states).fill(-2) // -1 = seeded from the start port
+  const closed = new Uint8Array(states)
+  const open = openList()
   // Seed: only the neighbour in the mandated leaving direction.
+  const s = g.at(start)
   for (const u of g.neighbors(start)) {
-    const d = dirOf(g.at(start), g.at(u))
+    const q = g.at(u)
+    const d = dirOf(s, q)
     if (d !== mustLeave) continue
-    const p = g.at(start), q = g.at(u)
-    const cost = Math.abs(q.x - p.x) + Math.abs(q.y - p.y)
-    gScore.set(key(u, d), cost)
-    came.set(key(u, d), -1)
-    push(key(u, d), cost + h(u), u, d)
+    const cost = Math.abs(q.x - s.x) + Math.abs(q.y - s.y)
+    gScore[u * 4 + d] = cost
+    came[u * 4 + d] = -1
+    open.push(cost + h(u), u * 4 + d)
   }
-  const closed = new Set<number>()
-  while (open.length) {
-    const cur = open.shift()!
-    if (closed.has(cur.k)) continue
-    closed.add(cur.k)
-    if (cur.v === goal && cur.d === mustArrive) {
+  while (open.size) {
+    const ck = open.pop()
+    if (closed[ck]) continue
+    closed[ck] = 1
+    const cv = Math.floor(ck / 4), cd = (ck % 4) as Dir
+    if (cv === goal && cd === mustArrive) {
       const pts: Point[] = [g.at(goal)]
-      let k = cur.k
-      while (came.get(k) !== -1 && came.has(k)) { k = came.get(k)!; pts.push(g.at(Math.floor(k / 4))) }
+      let k = ck
+      while (came[k] >= 0) { k = came[k]; pts.push(g.at(Math.floor(k / 4))) }
       pts.push(g.at(start))
       return compressCollinear(pts.reverse())
     }
-    const p = g.at(cur.v)
-    for (const u of g.neighbors(cur.v)) {
-      const d = dirOf(p, g.at(u))
-      if (d === ((cur.d + 2) % 4)) continue // no U-turn
-      const q = g.at(u)
-      const step = Math.abs(q.x - p.x) + Math.abs(q.y - p.y) + (d === cur.d ? 0 : BEND_COST)
-      const nk = key(u, d)
-      const ng = gScore.get(cur.k)! + step
-      if (ng < (gScore.get(nk) ?? Infinity)) {
-        gScore.set(nk, ng)
-        came.set(nk, cur.k)
-        push(nk, ng + h(u), u, d)
+    const px = X[cv % W], py = Y[Math.floor(cv / W)]
+    for (const u of g.neighbors(cv)) {
+      // Neighbours are the four grid steps, and X and Y are sorted: ±1 is right/left, ±W down/up.
+      const d: Dir = u === cv + 1 ? 0 : u === cv - 1 ? 2 : u > cv ? 1 : 3
+      if (d === ((cd + 2) % 4)) continue // no U-turn
+      const step = Math.abs(X[u % W] - px) + Math.abs(Y[Math.floor(u / W)] - py) + (d === cd ? 0 : BEND_COST)
+      const nk = u * 4 + d
+      const ng = gScore[ck] + step
+      if (ng < gScore[nk]) {
+        gScore[nk] = ng
+        came[nk] = ck
+        open.push(ng + h(u), nk)
       }
     }
   }
@@ -108,16 +152,23 @@ export function routeOne(edge: RouteEdge, req: RouteRequest, ports: [Port, Port]
   const a = req.nodes.get(edge.source)!
   const b = req.nodes.get(edge.target)!
   const endpoints: [Box, Box] = [a, b]
-  const attempt = (window: Box): Point[] | null => {
-    const blocked = obstaclesFor(edge, req, window)
-    return astar(buildGraph(blocked, ports, endpoints, window), ports[0], ports[1])
-  }
-  let points = attempt(windowFor(a, b, WINDOW_PAD))
-  if (!points) {
+  const attempt = (window: Box, blocked: Box[]): Point[] | null =>
+    astar(buildGraph(blocked, ports, endpoints, window), ports[0], ports[1])
+  const near = windowFor(a, b, WINDOW_PAD)
+  const nearBlocked = obstaclesFor(edge, req, near)
+  // A port strictly inside another node's margin (or inside the other endpoint) can be neither
+  // left nor reached, so A* would exhaust the graph — twice, with the widening — before giving
+  // up. Measured on the perf canvases and 1,700 random ones: every such search failed and no
+  // successful route had one, so it goes straight to the fallback. The obstacle that holds a port
+  // always meets the window, so the window's list is enough to decide.
+  const portBlocked = ports.some((p) => [...nearBlocked, a, b].some((s) => containsStrict(s, p)))
+  let points = portBlocked ? null : attempt(near, nearBlocked)
+  if (!points && !portBlocked) {
     let all: Box = { x: 0, y: 0, width: 0, height: 0 }
     let first = true
     for (const n of req.nodes.values()) { all = first ? { ...n } : windowFor(all, n, 0); first = false }
-    points = attempt(windowFor(all, all, WINDOW_PAD))
+    const wide = windowFor(all, all, WINDOW_PAD)
+    points = attempt(wide, obstaclesFor(edge, req, wide))
   }
   const fallback = !points
   const pts = points ?? fallbackPoints(ports)

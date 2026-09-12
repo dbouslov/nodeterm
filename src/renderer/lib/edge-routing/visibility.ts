@@ -2,8 +2,10 @@
 // and right (already inflated by the margin), horizontal lines at every top and bottom, plus the
 // two ports and their stubs. Vertices are the intersections not inside an obstacle or an endpoint
 // node; two vertices adjacent on one line are joined when the segment between them is clear.
-import { containsStrict } from './obstacles'
 import { outward, PORT_STUB, type Box, type Point, type Port } from './types'
+
+/** containsStrict's tolerance: a point ON a (inflated) border counts as outside. */
+const EPS = 0.5
 
 export interface Graph {
   xs: number[]
@@ -36,18 +38,36 @@ export function buildGraph(blocked: Box[], ports: [Port, Port], endpoints: [Box,
   const X = uniqSorted(xs)
   const Y = uniqSorted(ys)
   const W = X.length
-  const free = new Uint8Array(W * Y.length)
+  const H = Y.length
   // Endpoint nodes are not obstacles for routing AROUND (their ports sit on them) but no vertex
   // may lie strictly inside them, so the route cannot cut through its own node.
   const solid = [...blocked, ...endpoints]
-  for (let iy = 0; iy < Y.length; iy++)
-    for (let ix = 0; ix < W; ix++) {
-      const p = { x: X[ix], y: Y[iy] }
-      free[iy * W + ix] = solid.some((b) => containsStrict(b, p)) ? 0 : 1
+  // Both predicates the search asks — is a vertex strictly inside a solid, is a step's midpoint —
+  // are marked once per solid over the rows and columns it spans, not re-asked of every solid at
+  // every step: that scan was most of the search time on a crowded canvas.
+  const free = new Uint8Array(W * H).fill(1)
+  const hShut = new Uint8Array(Math.max(0, W - 1) * H) // step ix → ix+1 on row iy
+  const vShut = new Uint8Array(W * Math.max(0, H - 1)) // step iy → iy+1 on column ix
+  for (const s of solid) {
+    const x0 = s.x + EPS, x1 = s.x + s.width - EPS
+    const y0 = s.y + EPS, y1 = s.y + s.height - EPS
+    for (let iy = 0; iy < H; iy++) {
+      if (!(Y[iy] > y0 && Y[iy] < y1)) continue
+      for (let ix = 0; ix < W; ix++) {
+        if (X[ix] > x0 && X[ix] < x1) free[iy * W + ix] = 0
+        if (ix < W - 1) {
+          const mx = (X[ix] + X[ix + 1]) / 2
+          if (mx > x0 && mx < x1) hShut[iy * (W - 1) + ix] = 1
+        }
+      }
     }
-  const clear = (a: Point, b: Point): boolean => {
-    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-    return !solid.some((s) => containsStrict(s, m))
+    for (let ix = 0; ix < W; ix++) {
+      if (!(X[ix] > x0 && X[ix] < x1)) continue
+      for (let iy = 0; iy < H - 1; iy++) {
+        const my = (Y[iy] + Y[iy + 1]) / 2
+        if (my > y0 && my < y1) vShut[ix * (H - 1) + iy] = 1
+      }
+    }
   }
   const g: Graph = {
     xs: X,
@@ -60,13 +80,10 @@ export function buildGraph(blocked: Box[], ports: [Port, Port], endpoints: [Box,
     neighbors(v) {
       const ix = v % W, iy = Math.floor(v / W)
       const out: number[] = []
-      const here = g.at(v)
-      const tryV = (nx: number, ny: number) => {
-        if (nx < 0 || ny < 0 || nx >= W || ny >= Y.length) return
-        const u = ny * W + nx
-        if (free[u] && clear(here, g.at(u))) out.push(u)
-      }
-      tryV(ix - 1, iy); tryV(ix + 1, iy); tryV(ix, iy - 1); tryV(ix, iy + 1)
+      if (ix > 0 && free[v - 1] && !hShut[iy * (W - 1) + ix - 1]) out.push(v - 1)
+      if (ix < W - 1 && free[v + 1] && !hShut[iy * (W - 1) + ix]) out.push(v + 1)
+      if (iy > 0 && free[v - W] && !vShut[ix * (H - 1) + iy - 1]) out.push(v - W)
+      if (iy < H - 1 && free[v + W] && !vShut[ix * (H - 1) + iy]) out.push(v + W)
       return out
     },
     vertexAt: (p) => {
