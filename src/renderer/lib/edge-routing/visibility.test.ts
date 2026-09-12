@@ -4,6 +4,20 @@ import { containsStrict, inflate, windowFor } from './obstacles'
 import { OBSTACLE_MARGIN, type Box, type Point, type Port } from './types'
 
 describe('buildGraph', () => {
+  it('places no grid line outside the search window', () => {
+    // An obstacle that MEETS the window can reach far past it — a frame, a wide node — and a line
+    // pushed from that far border put vertices outside the window, where the obstacle list (itself
+    // filtered to the window) registers nothing. A route could take them and cross a node nobody
+    // had told the search about.
+    const a: Box = { x: 0, y: 0, width: 200, height: 100 }
+    const b: Box = { x: 400, y: 0, width: 200, height: 100 }
+    const win = windowFor(a, b, 200)
+    const wide = inflate({ x: 300, y: 300, width: 4000, height: 4000 }, OBSTACLE_MARGIN)
+    const ports: [Port, Port] = [{ x: 200, y: 50, side: 'right' }, { x: 400, y: 50, side: 'left' }]
+    const g = buildGraph([wide], ports, [a, b], win)
+    expect(g.xs.filter((x) => x < win.x || x > win.x + win.width)).toEqual([])
+    expect(g.ys.filter((y) => y < win.y || y > win.y + win.height)).toEqual([])
+  })
   it('free vertices and open steps are exactly the containsStrict definition (random canvases)', () => {
     // The two predicates, asked the slow way: a vertex is free unless strictly inside a solid (an
     // obstacle or an endpoint) — the ports excepted, they sit on their node's border — and a step
