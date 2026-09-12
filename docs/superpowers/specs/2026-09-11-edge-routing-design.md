@@ -24,9 +24,11 @@ only on demand).
    this" survives.
 2. **Every family goes orthogonal.** One router, one look. The Network Overview's second React
    Flow instance inherits it unchanged. Context bridges keep left/right ports so they still meet
-   the drag handles. Exception (2026-09-12): when a port is boxed in (it or its stub lies inside
-   a neighbour's margin) that end leaves by another free side of its node instead of falling back
-   (3.5). Hand-placed notes sit that close: a row 12 px apart sent every note edge behind them.
+   the drag handles. Exception (2026-09-12), for every edge kind, not only context bridges: when a
+   port is boxed in (it or its stub lies inside a neighbour's margin or the other endpoint) that
+   end moves to the midpoint of the first usable side of its node, its own side first, and the
+   router runs ONE search from there before it falls back (3.5). Hand-placed notes sit that close:
+   a row 12 px apart sent every note edge behind them.
 3. **Frames are obstacles for foreign edges.** An edge into a member enters through the frame
    border and routes inside around sibling members. A line never crosses a frame it does not
    touch. (Frames never collapse in this app; `collapsed` exists on terminal nodes only, so the
@@ -233,6 +235,10 @@ side minus a 16 px inset at each end; when they do not fit, the spacing compress
 therefore never share an exit point, and a hub with twelve ropes fans them in the order they
 head out.
 
+Known limit (2026-09-12): an end moved by the side change (3.5) takes that side's midpoint, which
+can coincide with an edge already centred on that side. Follow-up: spread the moved end with that
+side's exits.
+
 ### 3.2 Obstacles (`obstacles.ts`)
 
 For one edge, the obstacle set is every measured, non-hidden node except:
@@ -249,8 +255,9 @@ vertices inside them.
 
 Only obstacles intersecting the search window (the bounding box of the two endpoints padded by
 `WINDOW_PAD`) enter the graph. If A* fails inside the window, the window widens once to the whole
-canvas; if it fails again, or a port is boxed in, a blocked end first tries the other sides of its
-node, then the edge gets the fallback (3.5).
+canvas; if it fails again, or a port is boxed in, a blocked end moves to the midpoint of the first
+usable side of its node, its own side first, for ONE search in the near window, and if that fails
+the edge gets the fallback (3.5).
 
 ### 3.3 Visibility graph (`visibility.ts`)
 
@@ -275,10 +282,12 @@ Before it, a side change (2026-09-12). A port that is boxed in (it or the end of
 strictly inside an obstacle's margin or the other endpoint) cannot be left, so that end moves to
 the midpoint of the first free side of its node (the preferred side first, then the side facing the
 other end most) for one search, in the near window only. Only an edge about to fall back reaches
-this step, so no route the ordinary search finds changes; `perf.test.ts` pins the spaced canvas's
-route set by digest. A drag pass skips the step (on a crowded canvas that one search mostly fails,
-and paying for it doubled the drag pass); the full pass when the drag ends takes it. What remains
-is the fallback proper:
+this step, so every route the ordinary search finds is unchanged before bundling; nudging can shift
+a neighbour that now shares a channel with a rescued edge. A drag pass skips the step for an edge
+whose own end moved (on a crowded canvas that one search mostly fails, and paying for it doubled
+the drag pass); the full pass when the drag ends takes it. An edge the drag re-routes only because
+the dragged node meets its route keeps the sides it had and is searched from them. What remains is
+the fallback proper:
 
 A plain three-segment orthogonal path between the same two ports (out along the source normal,
 across the midline, in along the target normal), with no avoidance. Pure, so the routing module

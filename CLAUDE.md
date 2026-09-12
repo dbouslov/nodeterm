@@ -3189,11 +3189,13 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   parallel runs are nudged `CHANNEL_SPACING` apart in kind order, and a route the A* cannot find
   falls back to a plain three-segment path — an edge is never left undrawn (a port inside another
   node's margin is never searched from: no search can leave it, and letting A* prove that cost
-  whole seconds on a crowded canvas; before falling back, a boxed-in end moves to another free side
-  of its node for one search, so hand-placed notes 12 px apart still route and a context/note edge
-  may then leave top or bottom — only an edge about to fall back takes this path, pinned by a
-  route-set digest in `perf.test.ts`, and a drag pass skips it until the drop). CI pins the
-  router's cost as counts, not time: `perf.test.ts`
+  whole seconds on a crowded canvas; before falling back, a boxed-in end of any edge kind moves to
+  the midpoint of the first free side of its node, its own side first, for ONE search, so
+  hand-placed notes 12 px apart still route and a context/note edge may then leave top or bottom —
+  only an edge about to fall back takes this path, so every other route is unchanged before
+  bundling (nudging can shift a neighbour that now shares a channel with a rescued edge); until the
+  drop, a drag pass skips it for an edge whose own end moved, and an edge the drag only crosses
+  keeps the sides it had). CI pins the router's cost as counts, not time: `perf.test.ts`
   wants no widened search and no fallback on a spaced 120-node / 200-edge canvas
   (`RoutedGraph.widenings`, `.fallbacks`); its wall-clock pins run only with `PERF=1`, since one
   timed sample flaked beside the rest of the suite. `EdgeRouter` (a child of `<ReactFlow>`)
