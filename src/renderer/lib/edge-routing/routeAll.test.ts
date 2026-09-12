@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { routeAll } from './index'
-import { inflate, segmentEnters } from './obstacles'
+import { inflate, intersects, segmentEnters } from './obstacles'
 import { OBSTACLE_MARGIN, outward, type Point, type Port, type RouteEdge, type RouteNode, type RouteRequest } from './types'
 
 const n = (id: string, x: number, y: number): RouteNode => ({ id, x, y, width: 200, height: 100, isFrame: false })
@@ -76,6 +76,21 @@ describe('routeAll', () => {
     const d = routeAll(mk(row(4), edges), routeAll(mk(row(0), edges)), new Set(['r']))
     expect(d.routes.get('rt')!.fallback).toBe(true)
     expect(routeAll(mk(row(4), edges)).routes.get('rt')!.fallback).toBe(false)
+  })
+  // A drag pass re-routes every edge whose route's bbox meets the dragged node, and one that had
+  // moved an end to another side went back to the fallback, behind the notes, until the drop: even
+  // for an unrelated node dragged into the empty corner of that bbox, 300 px from the wire.
+  it('a drag that only meets a moved-end route\'s bbox keeps it off the fallback, on the same ports', () => {
+    const row = [box('p', 0, 0, 200, 300), box('q', 212, 0, 200, 300), box('r', 424, 0, 200, 300), box('t', -700, -800, 640, 440)]
+    const edges: RouteEdge[] = [{ id: 'rt', source: 'r', target: 't', kind: 'note' }]
+    const g = routeAll(mk([...row, box('u', 100, -1400, 100, 100)], edges))
+    const before = g.routes.get('rt')!
+    expect(before.fallback).toBe(false)
+    const u = box('u', 100, -250, 100, 100)
+    expect(intersects(before.bbox, u)).toBe(true)
+    const d = routeAll(mk([...row, u], edges), g, new Set(['u']))
+    expect(d.routes.get('rt')!.fallback).toBe(false)
+    expect(d.routes.get('rt')!.ports).toEqual(before.ports)
   })
   // A routed edge may never pass through a node's body, and that includes the nodes its search
   // never saw: the obstacle list is filtered to the search window, so a route that leaves the
