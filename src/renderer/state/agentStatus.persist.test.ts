@@ -520,10 +520,15 @@ describe('`lastTurnClean` — the one turn fact that survives a restart (for `--
     const store = memStorage()
     vi.stubGlobal('localStorage', store)
     const { useAgentStatus } = await import('./agentStatus')
-    useAgentStatus.getState().setState('n41', 'done', 'claude')
-    useAgentStatus.getState().setState('n41', 'working', 'claude', true)
-    expect(useAgentStatus.getState().byId['n41'].lastTurnClean).toBeUndefined()
-    expect(JSON.parse(store.getItem('nodeterm.agentStatus')!).n41?.lastTurnClean).toBeUndefined()
+    // Every live busy state, not only `working`: a station blocked on a permission or waiting on its
+    // user at quit has not finished either.
+    for (const state of ['working', 'blocked', 'waiting'] as const) {
+      const id = `n41-${state}`
+      useAgentStatus.getState().setState(id, 'done', 'claude')
+      useAgentStatus.getState().setState(id, state, 'claude', true)
+      expect(useAgentStatus.getState().byId[id].lastTurnClean, state).toBeUndefined()
+      expect(JSON.parse(store.getItem('nodeterm.agentStatus')!)[id]?.lastTurnClean, state).toBeUndefined()
+    }
   })
 
   it('an errored end never records it (issue #521 across a restart)', async () => {
