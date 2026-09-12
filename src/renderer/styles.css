@@ -3941,7 +3941,8 @@ body,
 .controls-cluster,
 .dock,
 .dictation,
-.kanban-overlay {
+.kanban-overlay,
+.overview-overlay {
   -webkit-app-region: no-drag;
 }
 
@@ -9013,6 +9014,54 @@ button.group-node__setup:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* ---- Network overview: the third project view, same overlay contract as the board above (the
+   canvas stays mounted under it). Its graph is a SECOND, read-only React Flow instance. ---- */
+.overview-overlay { position: fixed; top: 44px; left: 0; right: 0; bottom: 0; z-index: 25; background: var(--canvas-bg); display: flex; flex-direction: column; overflow: hidden; }
+.overview-header { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 18px; padding-right: 300px; border-bottom: 1px solid rgba(var(--tint-rgb), 0.08); }
+.overview-header__dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.overview-header__name { font-size: 16px; font-weight: 700; color: rgba(var(--tint-rgb), 0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.overview-header__title { color: rgba(var(--tint-rgb), 0.55); white-space: nowrap; }
+.overview-header__spacer { flex: 1; }
+.overview-header__toggle,
+.overview-header__close { border: 0; background: rgba(var(--tint-rgb), 0.06); color: rgba(var(--tint-rgb), 0.6); height: 28px; min-width: 28px; padding: 0 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.overview-header__toggle:hover,
+.overview-header__close:hover { background: rgba(var(--tint-rgb), 0.12); color: var(--text-strong); }
+.overview-body { flex: 1; display: flex; min-height: 0; }
+.overview-graph { flex: 1; min-width: 0; position: relative; }
+.overview-findings { flex: 0 0 360px; border-left: 1px solid rgba(var(--tint-rgb), 0.08); overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.overview-findings__head { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(var(--tint-rgb), 0.55); padding: 4px 6px; }
+.overview-findings__empty { color: rgba(var(--tint-rgb), 0.55); font-size: 13px; padding: 6px; }
+.overview-finding { text-align: left; font: inherit; background: rgba(var(--tint-rgb), 0.04); border: 1px solid rgba(var(--tint-rgb), 0.08); border-left-width: 3px; border-radius: 8px; padding: 8px 10px; color: var(--text); cursor: pointer; display: grid; gap: 2px; }
+.overview-finding:hover { background: rgba(var(--tint-rgb), 0.08); }
+.overview-finding--agent { border-left-color: #d97757; }
+.overview-finding--warn.overview-finding--heuristic { border-left-color: #ff9f0a; }
+.overview-finding--info.overview-finding--heuristic { border-left-color: var(--accent); }
+.overview-finding__kind { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(var(--tint-rgb), 0.55); }
+.overview-finding__text { font-size: 13px; }
+.overview-finding__meta { font-size: 11px; color: rgba(var(--tint-rgb), 0.55); }
+.ov-node { width: 100%; height: 100%; box-sizing: border-box; background: rgba(var(--card-rgb), 0.92); border: 1px solid rgba(var(--tint-rgb), 0.12); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; color: var(--text); display: flex; flex-direction: column; gap: 4px; overflow: hidden; cursor: pointer; }
+.ov-node--working { box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.55); }
+.ov-node--attention { box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.6); }
+.ov-node__head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ov-node__title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-node__unread { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #d97757; }
+.ov-node__count { margin-left: auto; font-size: 10px; background: rgba(255, 159, 10, 0.2); border-radius: 999px; padding: 0 6px; }
+.ov-node__role { font-size: 12px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-node__role--none { color: rgba(var(--tint-rgb), 0.4); }
+.ov-node__text { margin: 0; font: 11px/1.3 ui-monospace, Menlo, monospace; color: rgba(var(--tint-rgb), 0.7); white-space: pre-wrap; }
+.ov-node__chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
+.ov-chip { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: rgba(var(--tint-rgb), 0.08); }
+.ov-chip--working { color: #d97757; }
+.ov-chip--attention { color: #ff453a; }
+.ov-chip--verdict { color: #ff9f0a; }
+.ov-group { width: 100%; height: 100%; box-sizing: border-box; border: 1.5px dashed; border-radius: 12px; position: relative; }
+.ov-group__label { position: absolute; top: -12px; left: 12px; background: var(--canvas-bg); border: 1px solid; border-radius: 999px; padding: 1px 8px; font-size: 12px; display: inline-flex; gap: 6px; align-items: center; color: var(--text); white-space: nowrap; }
+.ov-group__dot { width: 8px; height: 8px; border-radius: 50%; }
+.ov-group__branch { color: rgba(var(--tint-rgb), 0.6); }
+.ov-group__nolead { color: #ff9f0a; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+/* Frames pass pointer input through (see .react-flow__node-group above); the label opts back in,
+   so clicking it frames the group on the canvas. */
+.react-flow__node-group .ov-group__label { pointer-events: auto; cursor: pointer; }
 .kanban-source-filter {
   display: inline-flex;
   align-items: center;
