@@ -6,11 +6,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { projectJumpDigit } from './projectJump'
 import {
   hasTextFocus,
+  liveZoomShortcutContext,
   zoomShortcutAction,
   zoomShortcutAllowed,
   zoomShortcutChord,
   type ZoomShortcutEvent
 } from './zoomShortcut'
+import { useProjects } from '../state/projects'
+import { useViewMode } from '../state/viewMode'
 
 function ev(over: Partial<ZoomShortcutEvent> = {}): ZoomShortcutEvent {
   return {
@@ -85,6 +88,22 @@ describe('zoomShortcutAllowed', () => {
 
   it('allows on a plain canvas', () => {
     expect(zoomShortcutAllowed(FREE)).toBe(true)
+  })
+})
+
+describe('liveZoomShortcutContext', () => {
+  afterEach(() => {
+    useViewMode.setState({ viewByProject: {}, globalKanban: false })
+    useProjects.setState({ activeProjectId: '' })
+  })
+
+  it('reports the network overview as covering the canvas, like the board', () => {
+    // A camera move under the overview is invisible AND persisted: the board's reason exactly.
+    useProjects.setState({ activeProjectId: 'p' })
+    useViewMode.setState({ viewByProject: { p: 'overview' }, globalKanban: false })
+    expect(liveZoomShortcutContext().boardOpen).toBe(true)
+    useViewMode.setState({ viewByProject: { p: 'canvas' } })
+    expect(liveZoomShortcutContext().boardOpen).toBe(false)
   })
 })
 

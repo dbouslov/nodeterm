@@ -185,10 +185,10 @@ describe('breadcrumb wiring the CLAUDE.md bullet calls load-bearing', () => {
 
   it('the resume card slot is spent only on a card that can render, and only when opted in', () => {
     // Gated on settings.showResumeCard (default off) FIRST — a disabled card must not spend the
-    // one-shot slot — then once per app run, only with a live stop, and never under the opaque
-    // kanban overlay.
+    // one-shot slot — then once per app run, only with a live stop, and never under an opaque
+    // overlay (the board or the overview).
     expect(CANVAS_SRC).toContain(
-      'resumeCardEnabled &&\n        !resumeCardShown.has(project.id) &&\n        hasLiveStop &&\n        !isKanbanOpen(project.id)'
+      'resumeCardEnabled &&\n        !resumeCardShown.has(project.id) &&\n        hasLiveStop &&\n        !isOverlayViewOpen(project.id)'
     )
     expect(CANVAS_SRC).toContain(
       'const resumeCardEnabled = useSettings.getState().settings.showResumeCard'

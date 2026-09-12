@@ -95,6 +95,17 @@ describe('NetworkOverviewView', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('takes the keyboard off the canvas when it opens, so Escape reaches it and not a terminal', () => {
+    // xterm's helper textarea stands in for a terminal left focused under the overlay: xterm would
+    // send ESC to the agent CLI and cancel the event, and the overview would never see it.
+    const pane = document.createElement('textarea')
+    document.body.appendChild(pane)
+    pane.focus()
+    expect(document.activeElement).toBe(pane)
+    const { host } = mount()
+    expect(host.querySelector('.overview-overlay')!.contains(document.activeElement)).toBe(true)
+  })
+
   it('an Escape something else already handled does not close it', () => {
     const { onClose } = mount()
     act(() => {

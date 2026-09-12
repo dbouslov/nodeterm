@@ -2,7 +2,7 @@
 // docs/superpowers/specs/2026-09-11-network-overview-design.md §3). Its OWN read-only React Flow
 // instance over the SERIALIZED project — nothing here parks, releases or spawns a PTY, and the main
 // canvas stays mounted underneath.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Background, ReactFlow, ReactFlowProvider, type NodeMouseHandler } from '@xyflow/react'
 import { agentConfig, type AgentId } from '@shared/agents/config'
 import { circuitEdgeTypes, EdgeRouter } from '../../canvas/edges'
@@ -48,6 +48,13 @@ export function NetworkOverviewView({ projectName, projectColor, input, onClose,
   // Transient on purpose (spec §3): the sidebar reopens with the overview.
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const findings = useMemo(() => buildFindings(input), [input])
+
+  // Take the keyboard off the canvas underneath: a terminal still focused there would eat Escape
+  // (xterm sends ESC to the agent CLI and cancels the event) and every keystroke after it.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    rootRef.current?.focus()
+  }, [])
   const graph = useMemo(() => buildOverviewGraph(input, colorOf, findings), [input, findings])
 
   useEffect(() => {
@@ -64,7 +71,7 @@ export function NetworkOverviewView({ projectName, projectColor, input, onClose,
   const onNodeClick: NodeMouseHandler = useCallback((_e, n) => onGoToNode(n.id), [onGoToNode])
 
   return (
-    <div className="overview-overlay" role="region" aria-label="Network overview">
+    <div ref={rootRef} tabIndex={-1} className="overview-overlay" role="region" aria-label="Network overview">
       <div className="overview-header">
         <span className="overview-header__dot" style={{ background: projectColor }} />
         <span className="overview-header__name">{projectName}</span>

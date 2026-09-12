@@ -1,5 +1,5 @@
 import { useProjects } from '../state/projects'
-import { isKanbanOpen } from '../state/viewMode'
+import { isOverlayViewOpen } from '../state/viewMode'
 
 /**
  * The two canvas ZOOM chords as ONE pure decision:
@@ -70,9 +70,9 @@ export function zoomShortcutChord(e: ZoomShortcutEvent): ZoomShortcutAction | nu
  * signal. That path has to ask the same two questions this one does.
  */
 export function zoomShortcutAllowed(ctx: ZoomShortcutContext): boolean {
-  // The board covers the canvas completely, so a camera move there is invisible AND persisted —
-  // the user comes back to a canvas that jumped for no reason they saw. Same early-return
-  // discipline as undo/redo, dictation and Delete (`isKanbanOpen`).
+  // The board (or the network overview) covers the canvas completely, so a camera move there is
+  // invisible AND persisted — the user comes back to a canvas that jumped for no reason they saw.
+  // Same early-return discipline as undo/redo, dictation and Delete (`isOverlayViewOpen`).
   if (ctx.boardOpen) return false
   // In a text surface these are ordinary keystrokes: Shift+1 types `!`, and ⌘0 belongs to the
   // editor/terminal. Stealing them would make the canvas jump mid-sentence.
@@ -107,7 +107,7 @@ export function hasTextFocus(active: Element | null): boolean {
 /** The live shell state the refusals are decided against. */
 export function liveZoomShortcutContext(): ZoomShortcutContext {
   return {
-    boardOpen: isKanbanOpen(useProjects.getState().activeProjectId),
+    boardOpen: isOverlayViewOpen(useProjects.getState().activeProjectId),
     textFocus: hasTextFocus(typeof document === 'undefined' ? null : document.activeElement)
   }
 }

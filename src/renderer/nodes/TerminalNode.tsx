@@ -165,7 +165,7 @@ import { PresenceChips } from '../components/PresenceChips'
 import { useAgentNodes } from '../state/agentNodes'
 import { useTerminalFocus } from '../state/terminalFocus'
 import { useProjects } from '../state/projects'
-import { isGlobalKanbanOpen, isKanbanOpen, isOmniKanbanEnabled, useViewMode, viewFor } from '../state/viewMode'
+import { isOmniKanbanEnabled, isOverlayViewOpen, useViewMode, viewFor } from '../state/viewMode'
 import { useSshConn } from '../state/sshConn'
 import { useWorktrees } from '../state/worktrees'
 import { isRemoteSessionNode } from '@shared/worktree'
@@ -2852,7 +2852,7 @@ export function TerminalNode({
         terminalShortcutPolicy() !== 'terminal-first' && liveProjectJumpTarget(e) !== null
       const registryOwns = terminalChordBubbles(
         e,
-        isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId ?? '')
+        isOverlayViewOpen(useProjects.getState().activeProjectId ?? '')
       )
       const action = terminalKeyAction(e, term.hasSelection(), ownsProjectJump, registryOwns)
       if (action === 'pass') return true

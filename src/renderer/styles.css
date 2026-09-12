@@ -6433,6 +6433,43 @@ button.group-node__setup:disabled {
   box-shadow: 0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
 }
 
+/* ⤢ into the Network overview, over the minimap's top-left corner: the minimap is 200×150 one
+   --float-gap from the corner, and this 22px button sits 4px inside it. Its own panel comes after
+   the minimap's in the DOM, so it paints on top at the same panel z-index. */
+.react-flow__panel.minimap-expand-panel {
+  margin: 0 calc(var(--float-gap) + 200px - 26px) calc(var(--float-gap) + 150px - 26px) 0;
+  pointer-events: none;
+}
+.minimap-expand {
+  pointer-events: all;
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(var(--menu-rgb), 0.92);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.minimap-expand:hover { color: var(--text-strong); border-color: rgba(var(--tint-rgb), 0.3); }
+.minimap-expand__badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #ff9f0a;
+  color: #1c1c1e;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
 /* Minimap-scale status glow: same language as the node glows (amber working / red
    needs-you / accent unread). A static drop-shadow provides the halo; only
    stroke-opacity animates (cheap on tiny svg rects), cadence matching each canvas glow. */
@@ -9017,6 +9054,8 @@ button.group-node__setup:disabled {
 /* ---- Network overview: the third project view, same overlay contract as the board above (the
    canvas stays mounted under it). Its graph is a SECOND, read-only React Flow instance. ---- */
 .overview-overlay { position: fixed; top: 44px; left: 0; right: 0; bottom: 0; z-index: 25; background: var(--canvas-bg); display: flex; flex-direction: column; overflow: hidden; }
+/* It takes focus on mount only to hold the keyboard (see the component); no ring for that. */
+.overview-overlay:focus { outline: none; }
 .overview-header { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 18px; padding-right: 300px; border-bottom: 1px solid rgba(var(--tint-rgb), 0.08); }
 .overview-header__dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
 .overview-header__name { font-size: 16px; font-weight: 700; color: rgba(var(--tint-rgb), 0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

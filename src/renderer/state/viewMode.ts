@@ -177,3 +177,28 @@ export function isAnyKanbanOpen(projectId: string): boolean {
 export function isOverlayViewOpen(projectId: string): boolean {
   return isAnyKanbanOpen(projectId) || isOverviewOpen(projectId)
 }
+
+/**
+ * What "go to node" means under the project's current view: on the board (either form) it opens
+ * the node's CARD; under the overview it LEAVES the overview, then frames; on the canvas it frames.
+ * The board is asked first: the tab's board toggle opens Omni without touching the per-project
+ * view, so a project can still read 'overview' beneath a global board that is what is on screen.
+ */
+export function goToNodeAction(projectId: string): 'card' | 'leave-overview' | 'frame' {
+  if (isAnyKanbanOpen(projectId)) return 'card'
+  return isOverviewOpen(projectId) ? 'leave-overview' : 'frame'
+}
+
+/**
+ * The overview toggle every entry point shares (⌘K, the registry command, the minimap ⤢). From the
+ * global board it CLOSES the board and OPENS the overview: that board can sit over a project whose
+ * own view already reads 'overview', where a plain toggle would land on the canvas instead.
+ */
+export function toggleOverviewView(projectId: string): void {
+  const vm = useViewMode.getState()
+  if (isGlobalKanbanOpen()) {
+    vm.toggleGlobalKanban()
+    if (isOverviewOpen(projectId)) return
+  }
+  vm.toggleOverview(projectId)
+}

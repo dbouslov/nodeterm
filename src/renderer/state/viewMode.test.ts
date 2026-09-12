@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
+  goToNodeAction,
   parseViewMap,
   useViewMode,
   isAnyKanbanOpen,
   isKanbanOpen,
   isOverlayViewOpen,
   isOverviewOpen,
+  toggleOverviewView,
   viewFor
 } from './viewMode'
 import { useSettings } from './settings'
@@ -113,5 +115,63 @@ describe('the network overview is a third view', () => {
       useSettings.setState({ settings: prev })
     }
     expect(isOverviewOpen('')).toBe(false)
+  })
+})
+
+describe('what "go to node" means under each view', () => {
+  beforeEach(() =>
+    useViewMode.setState({ viewByProject: {}, defaultView: 'canvas', globalKanban: false, requestedCardNodeId: null })
+  )
+
+  it('frames on the canvas, opens the card on the board, and leaves the overview before framing', () => {
+    expect(goToNodeAction('p')).toBe('frame')
+    useViewMode.getState().toggle('p')
+    expect(goToNodeAction('p')).toBe('card')
+    useViewMode.getState().toggleOverview('p')
+    // Framing under the overlay would be invisible: the click would read as dead.
+    expect(goToNodeAction('p')).toBe('leave-overview')
+  })
+
+  it('the global board wins over an overview left open beneath it', () => {
+    // The tab's board toggle opens Omni without touching the per-project view, so a project can
+    // still read 'overview' under the global board — and the board is what is on screen.
+    useViewMode.getState().toggleOverview('p')
+    const prev = useSettings.getState().settings
+    useSettings.setState({ settings: { ...prev, omniKanbanEnabled: true } })
+    try {
+      useViewMode.setState({ globalKanban: true })
+      expect(goToNodeAction('p')).toBe('card')
+    } finally {
+      useSettings.setState({ settings: prev })
+    }
+  })
+})
+
+describe('the overview toggle every entry point shares', () => {
+  beforeEach(() =>
+    useViewMode.setState({ viewByProject: {}, defaultView: 'canvas', globalKanban: false, requestedCardNodeId: null })
+  )
+
+  it('is the plain toggle when no global board is up', () => {
+    toggleOverviewView('p')
+    expect(isOverviewOpen('p')).toBe(true)
+    toggleOverviewView('p')
+    expect(isOverviewOpen('p')).toBe(false)
+  })
+
+  it('from the global board it closes the board and OPENS the overview, whatever the view beneath', () => {
+    // A plain toggle with 'overview' beneath would land on the canvas: the ⤢ doing the opposite.
+    const prev = useSettings.getState().settings
+    useSettings.setState({ settings: { ...prev, omniKanbanEnabled: true } })
+    try {
+      for (const beneath of ['canvas', 'overview'] as const) {
+        useViewMode.setState({ viewByProject: { p: beneath }, globalKanban: true })
+        toggleOverviewView('p')
+        expect(useViewMode.getState().globalKanban).toBe(false)
+        expect(isOverviewOpen('p')).toBe(true)
+      }
+    } finally {
+      useSettings.setState({ settings: prev })
+    }
   })
 })
