@@ -169,6 +169,7 @@ import {
   workingNodes
 } from '../core/agent-status-mirror'
 import { paneOwnerProject } from '../core/agents/pane-ownership'
+import { OpenerLedger, forgetOnClose, recordOpenReply, retireRefusal } from '../core/retire-verb'
 import { createPushNotify, createLiveUpdatePush } from '../core/push-notify'
 import { createGrantsAccessor, type PushGrant } from '../core/push-grants'
 import { createRemoteGrantsCache } from '../core/remote-push-grants'
@@ -3282,6 +3283,10 @@ app.whenReady().then(async () => {
   // open-project. App restart clears the whole in-memory ledger by construction.
   corePlatform.on(IPC.ptyDestroy, (nodeId: string) => clearProjectGrants(nodeId))
   corePlatform.on(IPC.ptyRecycle, (nodeId: string) => clearProjectGrants(nodeId))
+  // Which sessions each caller's open call created this run — the only proof `retire` accepts.
+  // Cleared by a real close alone: a park and its re-mount leave it (core/retire-verb.ts).
+  const openerLedger = new OpenerLedger()
+  forgetOnClose(corePlatform, openerLedger)
   // App quit: detach every debugger lease. A second `before-quit` listener alongside the module-
   // level flush one (both fire); scoped here so it can reach `browserRevocation`. No push — the
   // window is going away. LIFECYCLE, so no tombstone (the in-memory ledger is gone on quit anyway).
@@ -3438,6 +3443,12 @@ app.whenReady().then(async () => {
     // the debugger handle and the CDP allowlist are main-side, and the renderer is the more
     // attackable half. Every other verb still round-trips to the renderer below.
     if (verb === 'browser') return handleBrowserVerb(nodeId, args, verified)
+    // `retire` is decided HERE before the renderer sees it: the proof that the caller's own open
+    // call created the successor this run lives in main's ledger (core/retire-verb.ts).
+    if (verb === 'retire') {
+      const refusal = retireRefusal(openerLedger, { nodeId, args, verified })
+      if (refusal) return { ok: false, error: refusal, message: refusal }
+    }
     // ── `open-project` + `--project` targeting, gated in MAIN before anything is forwarded
     // (issue #338 PR 1). The renderer never sees an invalid cwd or an unauthorized `--project`.
     // The verb itself is verified-only at the hook-server route (requiresVerified) — by the time
@@ -3548,6 +3559,8 @@ app.whenReady().then(async () => {
         pushBrowserLeases()
       }
     }
+    // Record which sessions a verified open call created — retire's proof (core/retire-verb.ts).
+    recordOpenReply(openerLedger, { verb, nodeId, args, verified }, result)
     // Record a project grant the moment an open-project succeeds — the open-browser ledger
     // pattern above, same conditions: ONLY when the caller's identity verdict for THIS request
     // was `verified` (main's own verdict, never anything off the wire) AND the renderer's reply

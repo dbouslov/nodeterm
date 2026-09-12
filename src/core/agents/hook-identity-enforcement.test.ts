@@ -26,6 +26,7 @@ import {
   IDENTITY_UNMINTABLE_NOTE,
   IDENTITY_UNMINTABLE_WARN_NOTE,
   NODE_IDENTITY_STRICT_AFTER,
+  RETIRE_CONTROL_REFUSAL,
   STRICT_CONTROL_REFUSAL,
   STRICT_CONTROL_VERBS,
   TOLERANT_CONTROL_VERBS
@@ -749,6 +750,14 @@ describe('/control/<strict verb> admits only a verified caller', () => {
     const res = await control(STRICT, 'n-strict-json', undefined, 'application/json')
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ ok: false, error: STRICT_CONTROL_REFUSAL })
+    expect(controlCalls).toEqual([])
+  })
+
+  it('`retire` is strict too, even with the hatch off — and its refusal names retire', async () => {
+    hookServer.setIdentityStrictOverride(() => false)
+    const res = await control('retire', 'n-strict-retire')
+    expect(res.status).toBe(403)
+    expect(await res.text()).toBe(`${RETIRE_CONTROL_REFUSAL}\n`)
     expect(controlCalls).toEqual([])
   })
 

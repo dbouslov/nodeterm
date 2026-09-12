@@ -533,6 +533,7 @@ import type {
 } from '@shared/types'
 import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/KanbanView'
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
+import { planRetire } from '../lib/retire'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
 import { reflow, resizesEnded, settle } from '../lib/reflow'
@@ -12165,6 +12166,42 @@ export function Canvas() {
                 capture: (rect) => api.captureCanvasSnapshot({ requestId, rect })
               })
             )
+            return
+          }
+          case 'retire': {
+            // The caller hands its place to a session it opened, then closes. MAIN already proved
+            // the caller verified and the successor its own current-run creation
+            // (core/retire-verb.ts); this is the canvas half (the pure `planRetire`) and the
+            // teardown. No confirm dialog: the only node closed is the caller itself.
+            const store = useProjects.getState()
+            const pid = store.activeProjectId
+            const successorId = (args.successor ?? '').trim()
+            const board = store.getProject(pid ?? '')?.kanban
+            const plan = planRetire({
+              callerId: sourceNodeId,
+              successorId,
+              live: nodesRef.current as CanvasNode[],
+              successorElsewhere: store.projects.some(
+                (p) => p.id !== pid && p.nodes.some((n) => n.id === successorId)
+              ),
+              kanban: board,
+              grid: snapGridNow()
+            })
+            if ('error' in plan) {
+              reply({ ok: false, error: plan.error })
+              return
+            }
+            setNodes(plan.nodes)
+            if (pid && plan.kanban && plan.kanban !== board) store.setProjectKanban(pid, plan.kanban)
+            markDirty()
+            // Reply FIRST: the teardown below ends the caller's own session, the one waiting on it.
+            reply({
+              ok: true,
+              message: `retired ${sourceNodeId}: ${successorId} took its place — this session closes now`,
+              result: { retired: sourceNodeId, successor: successorId }
+            })
+            deleteNodes([sourceNodeId])
+            setControlEdges((es) => es.filter((e) => e.source !== sourceNodeId && e.target !== sourceNodeId))
             return
           }
           default:

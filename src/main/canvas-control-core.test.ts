@@ -16,7 +16,12 @@ import {
 import { RETRYABLE } from '../core/agents/agent-message-decide'
 import { PROJECT_TARGETABLE_VERBS } from '../core/project-grants'
 import { DRY_RUN_VERBS } from '../shared/control-verbs'
-import { STRICT_CONTROL_VERBS } from '../core/agents/node-identity-policy'
+import {
+  RETIRE_CONTROL_REFUSAL,
+  STRICT_CONTROL_REFUSAL,
+  STRICT_CONTROL_VERBS,
+  strictRefusalFor
+} from '../core/agents/node-identity-policy'
 import { BROWSER_ACTION_KEYS } from '../core/browser-verb'
 import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from '../core/browser-outcomes'
 import { BROWSER_CAPABILITY_OFF_MESSAGE } from './browser-drive'
@@ -698,6 +703,38 @@ describe('the strict identity bucket now gates a real verb', () => {
       args: { url: 'https://example.com' }
     })
     expect(STRICT_CONTROL_VERBS.has('open-browser')).toBe(false)
+  })
+})
+
+describe('retire verb', () => {
+  it('requires --successor, and is not confirm-gated (the caller closes only itself)', () => {
+    expect(parseControlRequest('retire', {})).toEqual({ error: 'retire requires --successor <id>' })
+    expect(parseControlRequest('retire', { successor: 'n-2' })).toEqual({
+      verb: 'retire',
+      args: { successor: 'n-2' }
+    })
+    expect(isDestructiveVerb('retire')).toBe(false)
+  })
+
+  it('is in the strict identity bucket and is refused in its own words', () => {
+    expect(STRICT_CONTROL_VERBS.has('retire')).toBe(true)
+    expect(strictRefusalFor('retire')).toBe(RETIRE_CONTROL_REFUSAL)
+    expect(strictRefusalFor('browser')).toBe(STRICT_CONTROL_REFUSAL)
+  })
+
+  it('both agent-facing texts document it with its whole contract', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      const at = body.indexOf('`retire --successor <id>`')
+      expect(at, 'documented').toBeGreaterThan(-1)
+      const entry = body.slice(at, body.indexOf('\n- ', at))
+      expect(entry).toMatch(/you opened[\s\S]*this app run/i)
+      expect(entry).toMatch(/restart/i)
+      expect(entry).toMatch(/position, width, height and frame/i)
+      expect(entry).toMatch(/kanban column/i)
+      expect(entry).toMatch(/no confirm/i)
+      expect(entry).toMatch(/reply[\s\S]*before/i)
+      expect(entry).toMatch(/Server Edition/)
+    }
   })
 })
 
