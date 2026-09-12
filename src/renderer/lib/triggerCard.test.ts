@@ -78,12 +78,14 @@ describe('triggerEdges', () => {
       { id: 'trigger-c-1', type: 'trigger', data: { trigger: { bad: true } } }, // invalid spec
       { id: 'term-tgt-1', type: 'terminal', data: {} }
     ]
-    const edges = triggerEdges(nodes as never, '#fff')
+    const edges = triggerEdges(nodes as never)
     expect(edges.map((e) => `${e.source}>${e.target}`)).toEqual(['trigger-a-1>term-tgt-1'])
     expect(edges[0].selectable).toBe(false)
-    // The canvas has ONE edge renderer: a trigger edge routes between nearest borders like
-    // every other family, so a card above its target does not loop out of the wrong side.
-    expect(edges[0].type).toBe('floating')
+    // The canvas has ONE edge renderer: a trigger edge is a circuit edge like every other family,
+    // and its look (hue, dash) comes from its KIND at render time, never from the edge object.
+    expect(edges[0].type).toBe('circuit')
+    expect(edges[0].data).toEqual({ kind: 'trigger' })
+    expect(edges[0].style).toBeUndefined()
   })
 
   it('non-trigger nodes never draw', () => {
@@ -91,6 +93,6 @@ describe('triggerEdges', () => {
       { id: 'term-a-1', type: 'terminal', data: { trigger: spec() } },
       { id: 'term-tgt-1', type: 'terminal', data: {} }
     ]
-    expect(triggerEdges(nodes as never, '#fff')).toEqual([])
+    expect(triggerEdges(nodes as never)).toEqual([])
   })
 })

@@ -10,16 +10,15 @@ import { readFileSync } from 'node:fs'
 const src = readFileSync(new URL('./Canvas.tsx', import.meta.url), 'utf8')
 
 describe('canvas edge model (source pins)', () => {
-  it('every edge is a floating edge — no family picks a fixed handle side any more', () => {
-    expect(src).toContain('edgeTypes={edgeTypes}')
+  it('every edge is a circuit edge — no family picks a fixed handle side any more', () => {
+    expect(src).toContain('edgeTypes={circuitEdgeTypes}')
     expect(src).not.toMatch(/sourceHandle:\s*'/)
     expect(src).not.toMatch(/targetHandle:\s*'/)
   })
 
-  it('context and note links anchor on the bridge handles (left/right), ropes on any side', () => {
-    expect(src).toContain("data: { anchor: 'horizontal' }")
-    // Exactly the one family: ropes and card edges keep the four-side choice.
-    expect((src.match(/anchor: 'horizontal'/g) ?? []).length).toBe(1)
+  it('context and note links carry their kind, which keeps them on the bridge handles (left/right)', () => {
+    // The side rule itself is proven in lib/edge-routing/ports.test.ts.
+    expect(src).toContain("data: { kind: isNote ? 'note' : 'context' }")
   })
 
   it('the separate "waits for" family is gone; the waiting look is the rope\'s, from the model', () => {
