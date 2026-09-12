@@ -238,6 +238,25 @@ describe('light palette contrast', () => {
     }
   })
 
+  it('a selected edge is visible in BOTH themes', () => {
+    // It was the literal `#ffffff` in `lib/edgeKinds.ts`, so on the light canvas a selected edge
+    // was white on #f4efe6 and its label white on a near-white card — the selection you had just
+    // made was the one edge you could not see, and the legend's "Selected" sample was blank.
+    const from = (block: string, name: string): string => {
+      const m = new RegExp(`^\\s*${name}\\s*:\\s*([^;]+);`, 'm').exec(block)
+      if (!m) throw new Error(`this block does not define ${name}`)
+      return m[1].trim()
+    }
+    const triple = (v: string): [number, number, number] => v.split(',').map((n) => +n.trim()) as [number, number, number]
+    for (const block of [DARK, LIGHT]) {
+      const sel = hex(from(block, '--edge-selected'))
+      // A stroke is a graphical object: the 3:1 floor. The label paints the same colour as TEXT
+      // on the card surface, so that one owes 4.5:1.
+      expect(contrast(sel, hex(from(block, '--canvas-bg')))).toBeGreaterThanOrEqual(3)
+      expect(contrast(sel, triple(from(block, '--card-rgb')))).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
   it('no light surface is pure white — that brightness is the glare being avoided', () => {
     for (const t of ['--bg', '--panel', '--surface-raised', '--surface-overlay', '--canvas-bg']) {
       expect(luminance(hex(token(t))), t).toBeLessThan(0.97)

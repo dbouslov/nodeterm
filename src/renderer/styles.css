@@ -55,6 +55,10 @@
   --edge-annotation: #6ac4dc;
   --edge-handoff: #ff9f0a;
   --edge-neutral: #8e8e93;
+  /* A SELECTED edge: stroke, arrowheads, endpoint outlines and label all take this one value, so
+     it has to read both on the canvas and as text on a card. Maximum contrast in each theme —
+     white on the dark canvas, the warm ink on the light one. */
+  --edge-selected: #ffffff;
 
   /* THE CANVAS. Deliberately blacker than `--bg` in dark — the nodes are the content and the
      field behind them recedes. In light it has to go the other way, off-white and slightly
@@ -163,6 +167,7 @@
   --edge-annotation: #1f8fa8;
   --edge-handoff: #c97400;
   --edge-neutral: #8e8e93;
+  --edge-selected: #3a3026;
 
   /* The canvas sits BELOW every node, so it is the one surface that must be darker than the
      panels — otherwise the nodes dissolve into the field and the layout loses its edges. */

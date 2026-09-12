@@ -4,7 +4,7 @@
 // segments stretch or shrink and the polyline stays orthogonal. First and last segments (the
 // port stubs) are never nudged: the port spread already separates them.
 import { KIND_ORDER } from '../edgeKinds'
-import { containsStrict } from './obstacles'
+import { segmentEnters } from './obstacles'
 import { labelPointOf } from './route'
 import { CHANNEL_SPACING, type Box, type Point, type Route, type RouteEdge } from './types'
 
@@ -53,8 +53,10 @@ export function nudge(routes: Map<string, Route>, edges: RouteEdge[], obstaclesO
           const pts = pointsOf(s.edgeId)
           const a = pts[s.i], b = pts[s.i + 1]
           const moved = axis === 'x' ? [{ x: a.x + off, y: a.y }, { x: b.x + off, y: b.y }] : [{ x: a.x, y: a.y + off }, { x: b.x, y: b.y + off }]
-          const mid = { x: (moved[0].x + moved[1].x) / 2, y: (moved[0].y + moved[1].y) / 2 }
-          if (obstaclesOf(s.edgeId).some((o) => containsStrict(o, mid) || containsStrict(o, moved[0]) || containsStrict(o, moved[1]))) return
+          // The WHOLE moved run, not sample points: a corridor run hugs an obstacle's border, so
+          // the offset carries it inside, and an obstacle sitting between the two corners and
+          // their midpoint slipped through — the run then crossed a node body.
+          if (obstaclesOf(s.edgeId).some((o) => segmentEnters(o, moved[0], moved[1]))) return
           pts[s.i] = moved[0]
           pts[s.i + 1] = moved[1]
         })

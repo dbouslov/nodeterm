@@ -36,12 +36,15 @@ export function preferredSides(edge: RouteEdge, a: Box, b: Box): [Side, Side] {
 }
 
 interface Exit { edgeId: string; end: 0 | 1; along: number }
+/** One side of one node and everything leaving it. The node id and side are CARRIED, never parsed
+ *  back out of the bucket's key: an id is an opaque string and may hold a colon. */
+interface SideExits { nodeId: string; side: Side; exits: Exit[] }
 
 /** Every edge's two ports, with exits on one side spread PORT_SPACING apart, centred on the side's
  *  midpoint, sorted by heading so fan-out leaves in the order it travels. */
 export function portsFor(req: RouteRequest): Map<string, [Port, Port]> {
   const out = new Map<string, [Port, Port]>()
-  const bySide = new Map<string, Exit[]>() // `${nodeId}:${side}` → exits
+  const bySide = new Map<string, SideExits>() // `${nodeId}:${side}` → that side's exits
   for (const e of req.edges) {
     const a = req.nodes.get(e.source)
     const b = req.nodes.get(e.target)
@@ -51,19 +54,18 @@ export function portsFor(req: RouteRequest): Map<string, [Port, Port]> {
     const cb = centre(b)
     const push = (nodeId: string, side: Side, end: 0 | 1, from: typeof ca, to: typeof cb) => {
       const key = `${nodeId}:${side}`
-      const list = bySide.get(key) ?? []
+      const bucket = bySide.get(key) ?? { nodeId, side, exits: [] }
       // The heading's component ALONG the side (cos on top/bottom, sin on left/right), so exits
       // sit in the order their targets lie along that side — left to right, top to bottom.
       const heading = Math.atan2(to.y - from.y, to.x - from.x)
-      list.push({ edgeId: e.id, end, along: side === 'top' || side === 'bottom' ? Math.cos(heading) : Math.sin(heading) })
-      bySide.set(key, list)
+      bucket.exits.push({ edgeId: e.id, end, along: side === 'top' || side === 'bottom' ? Math.cos(heading) : Math.sin(heading) })
+      bySide.set(key, bucket)
     }
     push(e.source, sides[0], 0, ca, cb)
     push(e.target, sides[1], 1, cb, ca)
   }
   const partial = new Map<string, [Port | undefined, Port | undefined]>()
-  for (const [key, exits] of bySide) {
-    const [nodeId, side] = key.split(':') as [string, Side]
+  for (const { nodeId, side, exits } of bySide.values()) {
     const box = req.nodes.get(nodeId)!
     const horizontal = side === 'top' || side === 'bottom'
     const len = horizontal ? box.width : box.height

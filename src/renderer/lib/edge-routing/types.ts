@@ -36,8 +36,10 @@ export interface Route {
 }
 export interface RoutedGraph { routes: Map<string, Route>; fallbacks: number }
 
-/** Gutter every route keeps from a node it does not touch. */
-export const OBSTACLE_MARGIN = 24
+/** Gutter every route keeps from a node it does not touch. Under half the 40 px gap the canvas's
+ *  tidy layouts leave between neighbours: at 24 the two margins met inside that gap, the corridor
+ *  closed, and most edges on a tidy grid fell back to the straight path (routeAll.test.ts). */
+export const OBSTACLE_MARGIN = 16
 /** Straight run out of a port before the first bend. */
 export const PORT_STUB = 20
 /** Between exits on one side of one node. */

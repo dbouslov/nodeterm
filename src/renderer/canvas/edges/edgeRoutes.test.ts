@@ -20,4 +20,13 @@ describe('litSetFor', () => {
     expect([...litSetFor(edges, quiet, 'ab')].sort()).toEqual(['ab', 'bc'])
     expect([...litSetFor(edges.map((e) => ({ ...e, selected: false })), quiet, null)]).toEqual([])
   })
+  it('ignores a hovered id that is no longer an edge', () => {
+    // The hover survives the edge: delete it, hide it, or switch project while the cursor is on
+    // it and `hovered` still names it. Lighting a ghost means `anyLit` is true and every real
+    // edge dims to 0.2 with nothing lit — a canvas of faint edges and no way out but a click.
+    const quiet = new Map(nodes)
+    quiet.set('a', { ...nodes.get('a')!, selected: false })
+    const plain = edges.map((e) => ({ ...e, selected: false }))
+    expect([...litSetFor(plain, quiet, 'ab-deleted')]).toEqual([])
+  })
 })

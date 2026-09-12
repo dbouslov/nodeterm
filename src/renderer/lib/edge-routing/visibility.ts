@@ -24,11 +24,23 @@ function uniqSorted(vals: number[]): number[] {
 }
 
 export function buildGraph(blocked: Box[], ports: [Port, Port], endpoints: [Box, Box], window: Box): Graph {
-  const xs: number[] = [window.x, window.x + window.width]
-  const ys: number[] = [window.y, window.y + window.height]
-  for (const b of blocked) {
-    xs.push(b.x, b.x + b.width)
-    ys.push(b.y, b.y + b.height)
+  const wx0 = window.x, wx1 = window.x + window.width
+  const wy0 = window.y, wy1 = window.y + window.height
+  const xs: number[] = [wx0, wx1]
+  const ys: number[] = [wy0, wy1]
+  // Endpoint nodes are not obstacles for routing AROUND (their ports sit on them) but no vertex may
+  // lie strictly inside them, and no step may cross them, so the route cannot cut through its own
+  // node. Their borders are seeded as lines with everything else's: a step is shut by the midpoint
+  // sample below, and without a line at each border a step could straddle a box with its midpoint
+  // clear of it — the route then ran straight through the node it was drawing to.
+  const solid = [...blocked, ...endpoints]
+  // Borders only where they fall INSIDE the window. A solid that meets the window can extend far
+  // past it (a frame, a wide node), and a line from the far border put vertices out there —
+  // outside the window, where the obstacle list, itself filtered to the window, registers nothing.
+  // A route could then leave the window and cross a node no one had told it about.
+  for (const b of solid) {
+    for (const v of [b.x, b.x + b.width]) if (v > wx0 && v < wx1) xs.push(v)
+    for (const v of [b.y, b.y + b.height]) if (v > wy0 && v < wy1) ys.push(v)
   }
   for (const p of ports) {
     const o = outward(p.side)
@@ -39,9 +51,6 @@ export function buildGraph(blocked: Box[], ports: [Port, Port], endpoints: [Box,
   const Y = uniqSorted(ys)
   const W = X.length
   const H = Y.length
-  // Endpoint nodes are not obstacles for routing AROUND (their ports sit on them) but no vertex
-  // may lie strictly inside them, so the route cannot cut through its own node.
-  const solid = [...blocked, ...endpoints]
   // Both predicates the search asks — is a vertex strictly inside a solid, is a step's midpoint —
   // are marked once per solid over the rows and columns it spans, not re-asked of every solid at
   // every step: that scan was most of the search time on a crowded canvas.
