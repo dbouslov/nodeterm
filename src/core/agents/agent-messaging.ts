@@ -66,7 +66,12 @@ export interface MessagingStoredNode {
 export interface AgentMessagingDeps {
   paneOwner(nodeId: string): Promise<PaneOwner | null>
   sendEnvelope(nodeId: string, envelope: string): Promise<boolean>
-  hasLiveSession(nodeId: string): boolean
+  /**
+   * Does the target's session still exist, asked by NAME (`PtyManager.hasLiveSession`)? A parked
+   * node has no painter registered and is still a live session the delivery reaches. False only
+   * when the session is positively gone ⇒ `targetGone`.
+   */
+  hasLiveSession(nodeId: string): Promise<boolean>
   mirrorEntry?(nodeId: string): MirrorEntry | undefined
   /** The main-process projects store (`workspaceStore.persistedCanvases()` on the desktop). */
   projects(): readonly { id: string; nodes: readonly MessagingStoredNode[] }[]
@@ -563,7 +568,11 @@ export async function runDelivery(
         targetIsRemote: deps.isRemoteNode(req.targetNodeId),
         notPermitted,
         retryAfterMs,
-        targetLive: deps.hasLiveSession(req.targetNodeId)
+        // Asked only when the permission and rate gates have not already refused: for a parked node
+        // it is a `has-session` round-trip, and a caller refused anyway must not pay for one (the
+        // free-before-paid order `decidePreProbe` keeps).
+        targetLive:
+          notPermitted || retryAfterMs ? true : await deps.hasLiveSession(req.targetNodeId)
       },
       delivery
     )

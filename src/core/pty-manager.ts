@@ -4267,12 +4267,20 @@ export class PtyManager {
   }
 
   /**
-   * Does a live session exist for this node in THIS process right now? The messaging delivery's
-   * `targetLive` fact — deliberately not derived from an unreadable pane (see `DeliveryRequest`):
-   * only "no session is registered" may be reported as "the node is gone".
+   * Does this node's session still exist? The messaging delivery's `targetLive` fact — deliberately
+   * not derived from an unreadable pane (see `DeliveryRequest`): only a session tmux positively
+   * reports absent may be reported as "the node is gone".
+   *
+   * Asked by NAME, like everything the delivery then does to the pane (`paneOwner`, `sendEnvelope`
+   * address `nt-<id>`, never a registered pty). A registered painter is the wrong question: parking
+   * an off-screen node and the idle reap both release it (`releaseClient` → `forget`), dropping the
+   * `Session` while the tmux session and the agent in it run on (`attached=0`), and asking the
+   * registry answered `targetGone` for exactly those live chats. `sessionExists` keeps the fail-safe
+   * direction: a tmux that cannot be asked answers "exists", and gate 1's pane read then refuses
+   * what it cannot see.
    */
-  hasLiveSession(persistKey: string): boolean {
-    return !!this.sessionByPersistKey(persistKey)
+  hasLiveSession(persistKey: string): Promise<boolean> {
+    return this.sessionExists(persistKey)
   }
 
   /**
