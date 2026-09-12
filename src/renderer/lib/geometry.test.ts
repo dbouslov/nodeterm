@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { CanvasNode } from '../state/workspace'
+import type { CanvasNodeState } from '@shared/types'
+import { nodeStatesToFlow, type CanvasNode } from '../state/workspace'
 import { computeGeometry, geometryReply, type GeometryReport } from './geometry'
 
 interface Spec {
@@ -207,5 +208,23 @@ describe('geometryReply — what the verb answers', () => {
       ok: false,
       error: 'geometry: no frame "zz" on this canvas'
     })
+  })
+})
+
+describe("geometry from a project's serialized nodes (the off-canvas answer)", () => {
+  // Characterizes the input the off-canvas branch feeds in: stored nodes hydrated by
+  // `nodeStatesToFlow`, which has no `measured` and keeps the expanded height out of `size`.
+  it('hydrated nodes give the same rects: nested position, and a collapsed node at its header height', () => {
+    const stored: CanvasNodeState[] = [
+      { id: 'f', kind: 'group', position: { x: 100, y: 100 }, size: { width: 800, height: 600 }, title: 'Build', color: '#fff', group: null },
+      { id: 't', kind: 'terminal', position: { x: 40, y: 60 }, size: { width: 600, height: 400 }, title: 'Station', color: '#fff', group: null, parentId: 'f', collapsed: true }
+    ]
+    const reply = geometryReply(nodeStatesToFlow(stored))
+    if (!reply.ok) throw new Error(reply.error)
+    expect(reply.result.nodes).toEqual([
+      { id: 'f', kind: 'group', title: 'Build', parentId: null, x: 100, y: 100, width: 800, height: 600, collapsed: false, pinned: false },
+      { id: 't', kind: 'terminal', title: 'Station', parentId: 'f', x: 140, y: 160, width: 600, height: 40, collapsed: true, pinned: false }
+    ])
+    expect(reply.message).toBe('1 node, 1 frame, 0 overlaps')
   })
 })

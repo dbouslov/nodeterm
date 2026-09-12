@@ -121,8 +121,16 @@ export function routeControlSource(
  * would yank the human's view to the Hub's project on every call. The write lands in the owning
  * project's serialized nodes (`applyNodeMutation`) when that project is not the active one.
  */
+/*
+ * `geometry` is store-answered for `list`'s reason: it reads and changes nothing, and an
+ * orchestrator calls it before and after every layout step, so a live requirement would yank the
+ * human's view to the orchestrator's project on every check. Off canvas it reads the owning
+ * project's serialized nodes, hydrated by `nodeStatesToFlow` (stored sizes; a collapsed node at
+ * its header height).
+ */
 const STORE_ANSWERED_VERBS: ReadonlySet<string> = new Set([
   'list',
+  'geometry',
   'send',
   'reply',
   'sticky',
