@@ -42,11 +42,32 @@ describe('routeAll', () => {
         // The fallback path is the no-avoidance one by definition, so it is not held to this.
         if (!r || r.fallback) continue
         for (let i = 0; i + 1 < r.points.length; i++) {
-          for (const node of ns) {
-            if (node.id === e.source || node.id === e.target) continue
-            if (crosses(r.points[i], r.points[i + 1], node)) bad.push(`t=${t} ${e.id} segment ${i} crosses ${node.id}`)
-          }
+          for (const node of ns) if (crosses(r.points[i], r.points[i + 1], node)) bad.push(`t=${t} ${e.id} segment ${i} crosses ${node.id}`)
         }
+      }
+    }
+    expect(bad).toEqual([])
+  })
+  // The two endpoint boxes are solid for the search, but their borders were not among the grid
+  // lines, and a step is only shut when its MIDPOINT lands inside a solid. A step could therefore
+  // straddle an endpoint box with its midpoint clear of it (below: the run at y=1100 goes from
+  // x=2320 to x=1480, midpoint 1900, while `b` ends at 1800) and the route cut straight through
+  // the node it was drawing to. `c` is far away and only puts a grid row — its inflated top — at
+  // y=1100, inside `b`, which is the row the run then followed.
+  it('a route never cuts through its own source or target body', () => {
+    const EPS = 0.5
+    const a: RouteNode = { id: 'a', x: 1000, y: 0, width: 1300, height: 100, isFrame: false }
+    const b: RouteNode = { id: 'b', x: 1500, y: 1000, width: 300, height: 300, isFrame: false }
+    const c: RouteNode = { id: 'c', x: 300, y: 1116, width: 500, height: 100, isFrame: false }
+    const g = routeAll(mk([a, b, c], [{ id: 'ab', source: 'a', target: 'b', kind: 'context' }]))
+    const r = g.routes.get('ab')!
+    expect(r.fallback).toBe(false)
+    const bad: string[] = []
+    for (let i = 0; i + 1 < r.points.length; i++) {
+      const p = r.points[i], q = r.points[i + 1]
+      for (const box of [a, b]) {
+        if (Math.min(p.x, q.x) < box.x + box.width - EPS && box.x + EPS < Math.max(p.x, q.x) &&
+            Math.min(p.y, q.y) < box.y + box.height - EPS && box.y + EPS < Math.max(p.y, q.y)) bad.push(`segment ${i} (${p.x},${p.y})-(${q.x},${q.y}) crosses ${box.id}`)
       }
     }
     expect(bad).toEqual([])
