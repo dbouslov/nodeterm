@@ -688,6 +688,60 @@ describe('node icon serialization', () => {
   })
 })
 
+describe('node annotation serialization', () => {
+  const withAnnotation = (annotation: unknown): CanvasNode =>
+    ({
+      id: 't1',
+      type: 'terminal',
+      position: { x: 0, y: 0 },
+      width: 320,
+      height: 240,
+      data: { title: 'T', color: '#888', group: null, annotation }
+    }) as unknown as CanvasNode
+
+  const stateWithAnnotation = (annotation: unknown) => ({
+    id: 't1',
+    kind: 'terminal' as const,
+    position: { x: 0, y: 0 },
+    size: { width: 320, height: 240 },
+    title: 'T',
+    color: '#888',
+    group: null,
+    annotation
+  })
+
+  it('round-trips a well-formed annotation', () => {
+    const a = { role: 'lead', recommend: 'close', by: 'hub', at: 5 }
+    const states = flowToNodeStates([withAnnotation(a)])
+    expect(states[0].annotation).toEqual(a)
+    expect(nodeStatesToFlow(states)[0].data.annotation).toEqual(a)
+  })
+
+  it('leaves a node without one undefined', () => {
+    expect(flowToNodeStates([withAnnotation(undefined)])[0].annotation).toBeUndefined()
+  })
+
+  // project.json is git-shared and hand-editable: a cloned file is hostile input at hydration.
+  it('drops a hostile annotation on the way IN', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hydrate = (a: unknown) => nodeStatesToFlow([stateWithAnnotation(a) as any])[0].data.annotation
+    expect(hydrate('lead')).toBeUndefined()
+    expect(hydrate({ role: 'lead' })).toBeUndefined()
+    expect(hydrate({ role: 'x'.repeat(200), by: 'hub', at: 1 })).toEqual({ role: 'x'.repeat(80), by: 'hub', at: 1 })
+  })
+
+  // And on the way OUT: live node data is reachable by a peer canvas mutation.
+  it('drops a hostile annotation on the way OUT', () => {
+    expect(flowToNodeStates([withAnnotation({ role: 'lead', at: 1 })])[0].annotation).toBeUndefined()
+    expect(flowToNodeStates([withAnnotation({ by: 'hub', at: 1 })])[0].annotation).toBeUndefined()
+    expect(flowToNodeStates([withAnnotation({ role: 'a\nb', by: 'hub', at: 1 })])[0].annotation).toEqual({
+      role: 'a b',
+      by: 'hub',
+      at: 1
+    })
+  })
+})
+
 describe('resolveNewNodeAccount', () => {
   const accounts = [{ id: 'a1', label: 'work', createdAt: 0 }]
   it('prefers the explicit pick', () =>
