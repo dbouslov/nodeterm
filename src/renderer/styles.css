@@ -12745,11 +12745,10 @@ body.focus-mode .dock:hover {
   font-weight: 600;
   padding: 3px 6px;
   border-radius: 5px;
-  background: rgba(28, 28, 30, 0.85);
+  background: rgba(var(--card-rgb), 0.85);
   pointer-events: none;
   white-space: nowrap;
 }
-:root[data-theme='light'] .edge-label { background: rgba(255, 255, 255, 0.92); }
 @media (prefers-reduced-motion: reduce) { .react-flow__edge .edge-animated .react-flow__edge-path { animation: none; } }
 
 /* ---- edge legend: a chip on the pill cluster's surface, one row above the pills and right of the
