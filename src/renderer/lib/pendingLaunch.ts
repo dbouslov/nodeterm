@@ -337,6 +337,8 @@ export function launchTooltip(
     return (
       `This session did not accept its launch — ${delivery.attempts} ` +
       `attempt${delivery.attempts === 1 ? ' was' : 's were'} refused, and nothing will retry it.\n` +
+      'The terminal may not be at a shell prompt because something is already running in it, and ' +
+      '\u25b6 types the command into whatever holds it.\n' +
       `Press \u25b6 to run it now.\n${runs}`
     )
   if (delivery?.kind === 'stalled')
