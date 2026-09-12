@@ -6,7 +6,7 @@ import type { Route, RouteNode } from '../../lib/edge-routing'
 const route: Route = {
   points: [{ x: 200, y: 50 }, { x: 400, y: 50 }, { x: 400, y: 350 }, { x: 600, y: 350 }],
   ports: [{ x: 200, y: 50, side: 'right' }, { x: 600, y: 350, side: 'left' }],
-  fallback: false, labelAt: { x: 400, y: 200 }, bbox: { x: 200, y: 50, width: 400, height: 300 }
+  fallback: false, widened: false, labelAt: { x: 400, y: 200 }, bbox: { x: 200, y: 50, width: 400, height: 300 }
 }
 const a: RouteNode = { id: 'a', x: 0, y: 0, width: 200, height: 100, isFrame: false }
 const b: RouteNode = { id: 'b', x: 600, y: 300, width: 200, height: 100, isFrame: false }

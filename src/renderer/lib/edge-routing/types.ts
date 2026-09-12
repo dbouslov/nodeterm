@@ -31,10 +31,14 @@ export interface Route {
   ports: [Port, Port]
   /** True when A* gave up and the plain three-segment path was used. */
   fallback: boolean
+  /** True when the search failed inside its window and ran again over the whole canvas. */
+  widened: boolean
   labelAt: Point
   bbox: Box
 }
-export interface RoutedGraph { routes: Map<string, Route>; fallbacks: number }
+/** `fallbacks` and `widenings` count the searches THIS pass ran (a drag pass re-routes only some
+ *  edges), for the test harness: perf.test.ts pins both at zero on a spaced canvas. */
+export interface RoutedGraph { routes: Map<string, Route>; fallbacks: number; widenings: number }
 
 /** Gutter every route keeps from a node it does not touch. Under half the 40 px gap the canvas's
  *  tidy layouts leave between neighbours: at 24 the two margins met inside that gap, the corridor

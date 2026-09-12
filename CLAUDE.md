@@ -2239,8 +2239,14 @@ else, and its context links must keep classifying across restarts).
   **authorization** = the doc is selected by the REQUESTER's node id, so a token-holding caller
   can only read nodes in its own (directional) link map. Codex/gemini paths resolve via the
   handoff locators (`locateCodex`/`locateGemini` by sessionId); claude keeps the hook-fed path +
-  `locateClaude(sessionId, accountId)` fallback (cwd-newest is claude-only); Canvas rewrites link
-  files when a linked node's sessionId appears (`linkSessionSig`). **SSH projects:** the shim +
+  `locateClaude(sessionId, accountId)` fallback (cwd-newest is claude-only). **One owner pushes the
+  map**, `renderer/lib/contextLinkSync.ts` (mounted by Canvas): it re-pushes when the mounted
+  canvas's edges/nodes, ANY project's stored `bridges`, or a linked agent's identity change —
+  coalesced (a later change never resets its timer) and sent only when the content changed, with
+  main resolving a still-missing transcript at READ time. It used to be a Canvas effect keyed on
+  the visible canvas alone, so a bridge a cold open wrote into a background project
+  (`appendCanvasLinks`) was unreadable from both ends until some unrelated canvas edit
+  (2026-09-11). **SSH projects:** the shim +
   skill are installed on the remote host at connect (`RemoteHooks.installContextLink`, gated on
   the VERIFIED reverse hook tunnel; POSTs ride `--unix-socket` through it); a remote node's
   transcript is read over the ControlMaster (`initContextLink(ptyManager, deps)` — `src/main`
@@ -3106,12 +3112,24 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
 
 - **Context menus** (`components/ContextMenu.tsx`, portal, icons from `components/icons.tsx`):
   pane right-click = add nodes at cursor (terminal / Claude / sticky / open file) + select
-  all + fit + **Tidy canvas** (`arrangeAllNodes` — packs every top-level node, including group
-  frames as rigid units, into a non-overlapping grid via `arrangeNodes`, sorted by current
-  (y, x) so the pack roughly preserves reading order; mirrored in ⌘K as "Tidy canvas" and in the
-  keybinding registry as `canvas.tidy` (default ⌘/Ctrl+Shift+A, remappable); both
-  hidden below 2 top-level nodes, where it could only be a visual no-op that still writes
-  `project.json`) + restart-idle-agents (the bulk in-place agent restart, mirrored in ⌘K; both
+  all + fit + **Restructure canvas** (`arrangeAllNodes` → `lib/restructure.ts`
+  `restructureNodes`; ⌘/Ctrl+Shift+A, ⌘K, the pane menu, and the agent verb `restructure`) —
+  re-lays out every top-level UNIT (a node, or a frame: it moves as one block, its inside
+  untouched) by the rope graph. Rank = the longest OPENER chain from a root (`rankUnits`; a `dep`
+  rope keeps a dependent on its dependency's row, never above it; a cycle from a hand-edited file
+  is broken at its back edge). Within a row: deps before dependents, then children under their
+  opener, then current x — packed by restructure's own row packer, because `arrangeNodes` packs
+  in node-ARRAY order, not in the order of the ids it is handed (the old Tidy's "(y, x) sort"
+  never reached it). Rows are CENTERED under the rank-0 row's current center (the orchestrator
+  stays put horizontally, its tree hangs beneath it), ROW_GAP apart; loose units (no ropes) pack
+  below as the old Tidy grid (`arrangeNodes`), so with no ropes the result is a translation of
+  Tidy — which is why it replaced Tidy behind the same command id (`canvas.tidy`: only the title
+  changed, user overrides keep working). `--layout radial` (verb) / "Restructure canvas (radial)"
+  (⌘K) puts each generation on a ring around the root instead — opt-in, never the chord — spacing
+  units as discs of half their diagonal so nothing can overlap. Idempotent by test. The verb moves
+  nodes but, like `arrange`, never the user's camera; the Server Edition refuses it (it needs a
+  live canvas). The menu row and ⌘K entries are hidden below 2 top-level nodes, where it could
+  only be a visual no-op that still writes `project.json`) + restart-idle-agents (the bulk in-place agent restart, mirrored in ⌘K; both
   hidden when the canvas holds no restartable agent node, where they could only report "0
   restarted");
   node/selection right-click = group, color, duplicate, align-to-grid, collapse,
@@ -3128,6 +3146,45 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   ids it knows — so Delete, restart-agent, branch/transfer, terminal Search and Close can never
   be hidden, whatever settings.json says. The group-frame menu's colors strip answers to the same
   `colors` id; builders run through `tidySeparators` so a hidden row leaves no dangling rule.
+- **New-node placement is ONE engine** (`src/shared/placement/`, pure, imported by the renderer,
+  the cold-open path AND the Server Edition's headless factory — it lives in shared for that
+  reason). By hand: centered on the cursor, nudged to the nearest clear spot (`placeByHand`; the
+  old `emptyNodePos` passed a CENTER to a top-left check and cleared the wrong box). By agent:
+  `placeOpened` — BELOW the opener, fanned right (`placeChild`), or RIGHT of its `--after` deps
+  (`placeDependent`; dependency outranks lineage, and waiting on the opener itself stays below
+  it) — with a DIRECTED scan (right, then down; never above/left of the anchor). The live
+  dispatch (`renderer/lib/livePlacement.ts`), `coldPlaceBelow` and the headless `placeNode` all
+  call `placeOpened` over the same obstacle set, and `test/acceptance/placement-parity.test.ts`
+  fails the day they disagree (they did once: cold and headless kept the source's own frame as
+  an obstacle). A display verb answered OFF canvas places over its own project's stored nodes
+  (`placeBelowSource` → `coldPlaceBelow`), never over the active canvas. Into a frame: the first
+  grid slot no CURRENT child
+  occupies (`placeInFrame`; the old `groupSlot(count)` collided whenever a child had been moved),
+  then the frame hugs its children. Callers RESERVE each box they place before placing the next
+  (`setNodes` is async). Boxes are root space; ephemeral cards are not obstacles; the frames of the
+  CONTAINER a node joins are not obstacles for it (`framesJoinedBy`, derived from the one anchor
+  decision `containerJoinedBy` makes): it is filed into the innermost one and the frame chain grows
+  in the same write — live `withOpenedNode`, cold `coldFileIntoFrame`, headless open-* and
+  `sticky --create`. A LINEAGE child joins its SOURCE's frame; a node placed beside `--after` deps
+  joins the frame THOSE DEPS live in, never the source's just because the source is there, and
+  stays top-level (clearing every frame) when its deps are top-level or sit in different frames.
+  `PLACEMENT_GAP` (40) = `arrangeNodes`'s gap on purpose. The engine never moves an existing
+  node — only Restructure does, on an explicit action. `staggeredPosition` (360×320 steps keyed
+  on node COUNT for 600×400 nodes) is gone. Ropes carry `kind: 'opener' | 'dep'` (`BridgeLink`;
+  `sanitizeRopes` on both load seams; untagged = opener, and a restore never stamps a kind the
+  file did not carry, so a legacy dep rope is not rewritten as lineage on the next save) so the
+  ranker can tell the two apart after launch, when `pendingLaunch.after` is gone.
+- **Pin** (`data.pinned`, persisted as `pinned: true`; node menu "Pin" / "Unpin", frame menu "Pin
+  frame", hideable as `pin`; agent verb `pin --node <id> --set on|off`): automatic layout never
+  moves a pinned item or anything inside it. `isPinned(node, all)` walks the parent chain, and
+  only a literal `true` counts (`nodeStatesToFlow` drops anything else — project.json is
+  hand-editable). `arrangeNodes` skips pinned members; `alignNodes` aligns the rest TO them;
+  `fitGroupToChildren` grows a pinned frame in place (right / down) and never re-anchors or
+  shrinks it — the same rule in the Server Edition's copy. Restructure treats a pinned unit, or a
+  frame holding a pinned node, as FIXED: it still ranks, keeps its place, and `clearOfFixed`
+  moves anything laid out onto it (with no pins that pass changes nothing). Dragging by hand is
+  not blocked. The headless `pin` verb is refused (follow-up). A new automatic mover must skip
+  `isPinned` nodes.
 - **Add menu** = bottom dock (`Dock.tsx`) `+`, mirrored by the pane menu and command palette.
 - **Edges** are all one React Flow type, `circuit` (`canvas/edges/`, spec
   docs/superpowers/specs/2026-09-11-edge-routing-design.md). The look is a table lookup on the
@@ -3141,7 +3198,10 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   parallel runs are nudged `CHANNEL_SPACING` apart in kind order, and a route the A* cannot find
   falls back to a plain three-segment path — an edge is never left undrawn (a port inside another
   node's margin falls back at once: no search can leave it, and letting A* prove that cost whole
-  seconds on a crowded canvas). `EdgeRouter` (a child of `<ReactFlow>`) routes all edges once per
+  seconds on a crowded canvas). CI pins the router's cost as counts, not time: `perf.test.ts`
+  wants no widened search and no fallback on a spaced 120-node / 200-edge canvas
+  (`RoutedGraph.widenings`, `.fallbacks`); its wall-clock pins run only with `PERF=1`, since one
+  timed sample flaked beside the rest of the suite. `EdgeRouter` (a child of `<ReactFlow>`) routes all edges once per
   node-geometry change, incrementally during a drag, and publishes to `useEdgeRoutes` keyed by
   React Flow's `rfId` (edge components are not descendants of anything the host renders, so
   context cannot reach them). Hovering lights one edge and dims the rest; labels show only while

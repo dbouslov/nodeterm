@@ -108,6 +108,18 @@ describe('handleContextLinkRequest — local reads', () => {
     expect(out).toContain('user: ship it')
   })
 
+  it('resolves a transcript at READ time when the session reported one after the map was pushed', async () => {
+    // A node an agent opens is linked the moment it is created — before its CLI has started — so
+    // the push that carries the link can only carry an empty transcript path. The renderer does not
+    // re-push a map whose content did not change, so the read itself has to look again.
+    await setLinks({ 'node-A': [{ id: 'node-LATE', title: 'Late starter', agentId: 'claude' }] })
+    const p = join(dir, 'late.jsonl')
+    writeFileSync(p, CLAUDE_LINE)
+    setNodeTranscript('node-LATE', 'sess-late', p)
+    const out = await handleContextLinkRequest({ verb: 'summary', nodeId: 'node-A', args: {} })
+    expect(out).toContain('user: ship it')
+  })
+
   it('captures the terminal through the pty manager', async () => {
     await setLinks({ 'node-A': [{ id: 'node-B', title: 'Builder' }] })
     const out = await handleContextLinkRequest({ verb: 'terminal', nodeId: 'node-A', args: {} })

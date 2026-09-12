@@ -202,7 +202,8 @@ describe('HeadlessNodeFactory', () => {
     const created = raw.nodes.find((node) => node.id === id)
     // Local project files store cwd portably; WorkspaceStore resolves it back to absolute on load.
     expect(created).toMatchObject({ kind: 'terminal', cwd: '.' })
-    expect(created!.position.x).toBeGreaterThan(terminal('x', 'x').position.x)
+    // Below its opener, like the desktop (this factory used to place to the RIGHT).
+    expect(created!.position.y).toBeGreaterThan(terminal('x', 'x').position.y)
 
     const reloaded = await new WorkspaceStore().load({ sideline: false })
     expect(reloaded.projects[0].nodes.find((node) => node.id === id)).toMatchObject({
@@ -608,6 +609,35 @@ describe('HeadlessNodeFactory', () => {
     })
   })
 
+  it('never re-anchors a PINNED ancestor frame when it wraps that frame\'s children', async () => {
+    const workspace = await store.load({ sideline: false })
+    const nodes = workspace.projects[0].nodes
+    nodes.unshift({
+      id: 'group-pin',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      size: { width: 2400, height: 1200 },
+      title: 'Pinned',
+      color: '#7aa2f7',
+      group: null,
+      pinned: true
+    })
+    for (const node of nodes) {
+      if (node.id === 'term-upstream' || node.id === 'term-owned') node.parentId = 'group-pin'
+    }
+    await store.save(workspace)
+    ownership.record('group-pin', { sourceNodeId: 'term-source', projectId: 'project-1' })
+
+    const reply = await factory.group('term-source', { nodes: 'term-upstream,term-owned', label: 'Inner' })
+    expect(reply).toMatchObject({ ok: true })
+    const pinned = (await store.load({ sideline: false })).projects[0].nodes.find(
+      (node) => node.id === 'group-pin'
+    )!
+    expect(pinned.position).toEqual({ x: 0, y: 0 })
+    expect(pinned.size.width).toBeGreaterThanOrEqual(2400)
+    expect(pinned.size.height).toBeGreaterThanOrEqual(1200)
+  })
+
   it('lets the creator close a nested frame only, promoting surviving members to its parent', async () => {
     const outerReply = await factory.group('term-source', {
       nodes: 'term-upstream,term-owned',
@@ -913,8 +943,12 @@ describe('HeadlessNodeFactory', () => {
 
   it('places repeated spawns in the first free deterministic slots without overlapping busy nodes', async () => {
     const workspace = await store.load({ sideline: false })
-    // Slot zero to the right of the source is already busy before any control request arrives.
-    workspace.projects[0].nodes.push(terminal('term-busy-slot', 'Busy slot', 'gemini', 740))
+    // Slot zero BELOW the source (the desktop's opener→child rule) is already busy before any
+    // control request arrives.
+    workspace.projects[0].nodes.push({
+      ...terminal('term-busy-slot', 'Busy slot', 'gemini', 20),
+      position: { x: 20, y: 30 + 440 + 80 }
+    })
     await store.save(workspace)
 
     const spawnedIds: string[] = []
@@ -938,6 +972,120 @@ describe('HeadlessNodeFactory', () => {
       const node = nodes.find((candidate) => candidate.id === id)!
       return `${node.position.x},${node.position.y}`
     })).size).toBe(spawnedIds.length)
+  })
+
+  it('opens BELOW the opener like the desktop (siblings fanned right), an --after dependent RIGHT of its dep', async () => {
+    const src = terminal('term-source', 'Director')
+    const pair = await factory.openTerminal('term-source', { count: '2' }, true)
+    const dependent = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume', after: 'term-upstream' },
+      true
+    )
+    const nodes = (await store.load({ sideline: false })).projects[0].nodes
+    const byId = (id: string) => nodes.find((node) => node.id === id)!
+    const [a, b] = (pair.result as { ids: string[] }).ids.map(byId)
+    // ROW_GAP (80) below the opener, left-aligned with it; the sibling one node + gap (40) right.
+    expect(a.position).toEqual({ x: src.position.x, y: src.position.y + src.size.height + 80 })
+    expect(b.position).toEqual({ x: a.position.x + a.size.width + 40, y: a.position.y })
+    // term-upstream (x 80, 640 wide) is the dep: the dependent is top-aligned with it and to its
+    // right, on the first clear cell (term-owned at x 900 blocks the nearer ones).
+    const d = byId((dependent.result as { id: string }).id)
+    expect(d.position.y).toBe(30)
+    expect(d.position.x).toBeGreaterThanOrEqual(80 + 640 + 40)
+  })
+
+  /** Puts term-source inside a frame that hugs it (pad 28, header 34), so the slot below the
+   *  source is past the frame's bottom edge. The source's ROOT position becomes (28, 1062). */
+  const frameTheSource = async (): Promise<void> => {
+    const workspace = await store.load({ sideline: false })
+    const nodes = workspace.projects[0].nodes
+    nodes.unshift({
+      id: 'frame-1',
+      kind: 'group',
+      position: { x: 0, y: 1000 },
+      size: { width: 696, height: 530 },
+      title: 'Frame',
+      color: '#7aa2f7',
+      group: null
+    })
+    const source = nodes.find((node) => node.id === 'term-source')!
+    source.parentId = 'frame-1'
+    source.position = { x: 28, y: 62 }
+    await store.save(workspace)
+  }
+
+  it('files a framed source’s child INTO its frame, below the source, and grows the frame (the desktop rule)', async () => {
+    await frameTheSource()
+    const reply = await factory.openTerminal('term-source', {}, true)
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const child = saved.find((node) => node.id === id)!
+    const frame = saved.find((node) => node.id === 'frame-1')!
+    expect(child.parentId).toBe('frame-1')
+    // ROOT space: straight below the source (1062 + 440 + ROW_GAP 80); its own frame is no obstacle.
+    expect({ x: frame.position.x + child.position.x, y: frame.position.y + child.position.y }).toEqual({
+      x: 28,
+      y: 1062 + 440 + 80
+    })
+    // The frame holds it: a browser client applies extent:'parent' exactly as the desktop does.
+    expect(child.position.x + child.size.width).toBeLessThanOrEqual(frame.size.width)
+    expect(child.position.y + child.size.height).toBeLessThanOrEqual(frame.size.height)
+    // And the grown frame reaches Server clients, not only the disk.
+    expect(published.find((node) => node.id === 'frame-1')?.size).toEqual(frame.size)
+  })
+
+  it('keeps a node opened --after a dep OUTSIDE the frame top-level, beside its dep (only lineage joins)', async () => {
+    await frameTheSource()
+    const reply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume', after: 'term-upstream' },
+      true
+    )
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const dependent = saved.find((node) => node.id === id)!
+    expect(dependent.parentId).toBeUndefined()
+    // Beside term-upstream (x 80, 640 wide, y 30): top-aligned with it, to its right.
+    expect(dependent.position.y).toBe(30)
+    expect(dependent.position.x).toBeGreaterThanOrEqual(80 + 640 + 40)
+    // The source's frame is left exactly as it was.
+    expect(saved.find((node) => node.id === 'frame-1')!.size).toEqual({ width: 696, height: 530 })
+  })
+
+  it('files a node opened --after a dep INSIDE the frame into THAT frame, beside the dep', async () => {
+    await frameTheSource()
+    // Move the dep into the source's frame (and widen the frame to hold it): the dependent is
+    // placed beside the DEP, so it joins the dep's container — here the same frame.
+    const workspace = await store.load({ sideline: false })
+    const nodes = workspace.projects[0].nodes
+    nodes.find((node) => node.id === 'frame-1')!.size = { width: 1372, height: 530 }
+    const dep = nodes.find((node) => node.id === 'term-upstream')!
+    dep.parentId = 'frame-1'
+    dep.position = { x: 708, y: 62 } // root (708, 1062), right of the source
+    await store.save(workspace)
+
+    const reply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume', after: 'term-upstream' },
+      true
+    )
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const dependent = saved.find((node) => node.id === id)!
+    const frame = saved.find((node) => node.id === 'frame-1')!
+    expect(dependent.parentId).toBe('frame-1')
+    // ROOT space: right of the dep (708 + 640 + 40), top-aligned with it.
+    expect({ x: frame.position.x + dependent.position.x, y: frame.position.y + dependent.position.y }).toEqual({
+      x: 1388,
+      y: 1062
+    })
+    // The frame grew to hold it, as it does for a lineage child.
+    expect(dependent.position.x + dependent.size!.width).toBeLessThanOrEqual(frame.size!.width)
+    expect(published.find((node) => node.id === 'frame-1')?.size).toEqual(frame.size)
   })
 
   it.each([
@@ -1169,6 +1317,26 @@ describe('HeadlessNodeFactory', () => {
       'Round 1 complete\nRound 2 ready'
     )
     expect(published.filter((node) => node.id === id)).toHaveLength(2)
+  })
+
+  it('files a note created from a framed source into that frame, which grows (the desktop rule)', async () => {
+    await frameTheSource()
+    const reply = await factory.sticky('term-source', { node: 'Plan', create: 'yes', text: 'hello' })
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const note = saved.find((node) => node.id === id)!
+    const frame = saved.find((node) => node.id === 'frame-1')!
+    expect(note.parentId).toBe('frame-1')
+    // The text survives the fit, which replaces the node object it was written on.
+    expect(note.text).toBe('hello')
+    expect({ x: frame.position.x + note.position.x, y: frame.position.y + note.position.y }).toEqual({
+      x: 28,
+      y: 1062 + 440 + 80
+    })
+    expect(note.position.x + note.size.width).toBeLessThanOrEqual(frame.size.width)
+    expect(note.position.y + note.size.height).toBeLessThanOrEqual(frame.size.height)
+    expect(published.find((node) => node.id === 'frame-1')?.size).toEqual(frame.size)
   })
 
   it('refuses a non-v1 agent before a node or PTY is created', async () => {

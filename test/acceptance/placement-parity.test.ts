@@ -1,0 +1,212 @@
+import { describe, it, expect } from 'vitest'
+import { livePlaceOpened, openedFrameId, placeBelowSource } from '../../src/renderer/lib/livePlacement'
+import { coldFileIntoFrame, coldPlaceBelow, type ColdNode } from '../../src/renderer/lib/coldOpen'
+import type { CanvasNode } from '../../src/renderer/state/workspace'
+import { placeNode } from '../../src/server/headless-node-factory'
+import type { CanvasNodeState, Project } from '../../src/shared/types'
+
+/**
+ * PLACEMENT PARITY (spec §9): the three paths that place a node an agent OPENS resolve the same
+ * ROOT-space top-left for the same canvas — the live control dispatch (`livePlaceOpened`), the
+ * cold open into a project that is not on screen (`coldPlaceBelow`), and the Server Edition's
+ * headless factory (`placeNode`). This is the test that stops the three copies from coming back:
+ * they already drifted once, when the live path left the source's own frame out of the obstacles
+ * and the other two did not, so a framed source's child landed inside the frame on one path and
+ * below it on two.
+ *
+ * It lives in test/acceptance, not src/renderer/lib as the spec wrote it, because it imports
+ * renderer AND server code, which production layering forbids inside src/ (vitest.config.ts).
+ */
+
+/** One canvas, described once and rendered into each path's own node shape. */
+interface Spec {
+  id: string
+  x: number
+  y: number
+  w?: number
+  h?: number
+  parentId?: string
+  group?: boolean
+}
+
+const liveNodes = (scene: Spec[]): CanvasNode[] =>
+  scene.map(
+    (n) =>
+      ({
+        id: n.id,
+        type: n.group ? 'group' : 'terminal',
+        position: { x: n.x, y: n.y },
+        width: n.w ?? 600,
+        height: n.h ?? 400,
+        ...(n.parentId ? { parentId: n.parentId, extent: 'parent' } : {}),
+        data: { title: n.id, color: '#fff', group: null }
+      }) as CanvasNode
+  )
+
+const coldNodes = (scene: Spec[]): ColdNode[] =>
+  scene.map((n) => ({
+    id: n.id,
+    kind: n.group ? 'group' : 'terminal',
+    position: { x: n.x, y: n.y },
+    size: { width: n.w ?? 600, height: n.h ?? 400 },
+    ...(n.parentId ? { parentId: n.parentId } : {})
+  }))
+
+const storedProject = (scene: Spec[]): Project =>
+  ({
+    id: 'p',
+    name: 'P',
+    color: '#0a84ff',
+    cwd: '/tmp',
+    viewport: { x: 0, y: 0, zoom: 1 },
+    nodes: scene.map(
+      (n) =>
+        ({
+          id: n.id,
+          kind: n.group ? 'group' : 'terminal',
+          position: { x: n.x, y: n.y },
+          size: { width: n.w ?? 600, height: n.h ?? 400 },
+          title: n.id,
+          color: '#fff',
+          group: null,
+          tags: [],
+          ...(n.parentId ? { parentId: n.parentId } : {})
+        }) as CanvasNodeState
+    ),
+    bridges: [],
+    ropes: []
+  }) as unknown as Project
+
+const SIZE = { w: 600, h: 400 }
+
+/** The same open — node `index` 0 from `source`, waiting on `after` — through all three paths. */
+function allThree(scene: Spec[], source: string, after: string[] = []) {
+  const live = liveNodes(scene)
+  const cold = coldNodes(scene)
+  const project = storedProject(scene)
+  const center = coldPlaceBelow(cold, cold.find((n) => n.id === source)!, 0, {
+    size: SIZE,
+    deps: cold.filter((n) => after.includes(n.id))
+  })
+  return {
+    live: livePlaceOpened(live, live.find((n) => n.id === source)!, after, SIZE, 0),
+    cold: { x: center.x - SIZE.w / 2, y: center.y - SIZE.h / 2 },
+    headless: placeNode(
+      project,
+      project.nodes.find((n) => n.id === source)!,
+      { width: SIZE.w, height: SIZE.h },
+      [],
+      project.nodes.filter((n) => after.includes(n.id) && n.id !== source)
+    )
+  }
+}
+
+describe('placement parity — live, cold and headless place an opened node identically', () => {
+  it.each([
+    {
+      name: 'a top-level source whose first slot is taken',
+      scene: [{ id: 'src', x: 100, y: 100 }, { id: 'busy', x: 100, y: 580 }],
+      // below the source (100 + 400 + ROW_GAP 80), one node + PLACEMENT_GAP right of `busy`
+      expect: { x: 740, y: 580 }
+    },
+    {
+      name: 'a source inside a frame: the frame is no obstacle, its other children are',
+      scene: [
+        { id: 'g', x: 1000, y: 1000, w: 1400, h: 1200, group: true },
+        { id: 'src', x: 24, y: 56, parentId: 'g' }, // root (1024, 1056)
+        { id: 'sib', x: 24, y: 536, parentId: 'g' } // root (1024, 1536): the first slot
+      ],
+      expect: { x: 1664, y: 1536 }
+    },
+    {
+      name: 'a source two frames deep: every frame up the chain is skipped',
+      scene: [
+        { id: 'outer', x: 0, y: 0, w: 3000, h: 3000, group: true },
+        { id: 'inner', x: 1000, y: 1000, w: 1400, h: 1200, group: true, parentId: 'outer' },
+        { id: 'src', x: 24, y: 56, parentId: 'inner' }
+      ],
+      expect: { x: 1024, y: 1536 }
+    }
+  ])('$name', ({ scene, expect: at }) => {
+    const r = allThree(scene, 'src')
+    expect(r.live).toEqual(at)
+    expect(r.cold).toEqual(at)
+    expect(r.headless).toEqual(at)
+  })
+
+  it('off canvas (a display verb into a project not on screen): placed over THAT project, not the active canvas', () => {
+    // The source's project is the framed scene above; the ACTIVE canvas belongs to another project,
+    // whose one node sits where a canvas without the source's frame would put the child.
+    const scene: Spec[] = [
+      { id: 'g', x: 1000, y: 1000, w: 1400, h: 1200, group: true },
+      { id: 'src', x: 24, y: 56, parentId: 'g' },
+      { id: 'sib', x: 24, y: 536, parentId: 'g' }
+    ]
+    const active = liveNodes([{ id: 'decoy', x: 24, y: 536 }])
+    const stored = coldNodes(scene)
+    // The source as Canvas hydrates it off canvas (`nodeStatesToFlow` of the stored node).
+    const src = liveNodes(scene).find((n) => n.id === 'src')!
+    const center = placeBelowSource(active, src, SIZE, 0, {
+      offCanvas: { nodes: stored, source: stored.find((n) => n.id === 'src')! }
+    })
+    const at = { x: center.x - SIZE.w / 2, y: center.y - SIZE.h / 2 }
+    expect(at).toEqual(allThree(scene, 'src').live)
+    expect(at).toEqual({ x: 1664, y: 1536 })
+  })
+
+  it('an --after dependent: right of its dep on all three paths, from a framed source too', () => {
+    const scene: Spec[] = [
+      { id: 'g', x: 0, y: 0, w: 1400, h: 1200, group: true },
+      { id: 'src', x: 24, y: 56, parentId: 'g' },
+      { id: 'dep', x: 3000, y: 200 }
+    ]
+    const r = allThree(scene, 'src', ['dep'])
+    const at = { x: 3000 + 600 + 40, y: 200 }
+    expect(r.live).toEqual(at)
+    expect(r.cold).toEqual(at)
+    expect(r.headless).toEqual(at)
+  })
+
+  it('an --after dep INSIDE the source’s frame: the dependent lands inside that frame, beside the dep', () => {
+    // The dependent joins its DEP's container. Here the dep rides in the source's own frame, so
+    // the node lands beside it INSIDE the frame — reaching past the frame's right edge (2400),
+    // which grows for it rather than clamping the node back.
+    const scene: Spec[] = [
+      { id: 'g', x: 1000, y: 1000, w: 1400, h: 1200, group: true },
+      { id: 'src', x: 24, y: 56, parentId: 'g' },
+      { id: 'dep', x: 700, y: 56, parentId: 'g' } // root (1700, 1056)
+    ]
+    const r = allThree(scene, 'src', ['dep'])
+    const at = { x: 1700 + 600 + 40, y: 1056 }
+    expect(r.live).toEqual(at)
+    expect(r.cold).toEqual(at)
+    expect(r.headless).toEqual(at)
+    // And the same container on the two paths that expose one. The headless factory's filing is
+    // pinned on the real verb (src/server/headless-node-factory.test.ts, "--after a dep INSIDE
+    // the frame"), which the factory harness this test has no access to is needed for.
+    const live = liveNodes(scene)
+    expect(openedFrameId(live, live.find((n) => n.id === 'src')!, ['dep'])).toBe('g')
+    const cold = coldNodes(scene)
+    expect(
+      coldFileIntoFrame(cold, cold.find((n) => n.id === 'src')!, [{ ...at, ...SIZE }], {
+        deps: cold.filter((n) => n.id === 'dep')
+      }).frameId
+    ).toBe('g')
+  })
+
+  it('an --after dep just OUTSIDE the source’s frame: top-level beside it, clear of the frame, on all three paths', () => {
+    // Only a lineage child joins the source's frame. A dependent stays top-level beside its dep,
+    // so the frame is an obstacle for it: the slot right of `dep` (940, 1100) runs into the frame,
+    // and the node goes three cells right, past the frame's edge.
+    const scene: Spec[] = [
+      { id: 'g', x: 1000, y: 1000, w: 1400, h: 1200, group: true },
+      { id: 'src', x: 24, y: 56, parentId: 'g' },
+      { id: 'dep', x: 300, y: 1100 }
+    ]
+    const r = allThree(scene, 'src', ['dep'])
+    const at = { x: 940 + 3 * 640, y: 1100 }
+    expect(r.live).toEqual(at)
+    expect(r.cold).toEqual(at)
+    expect(r.headless).toEqual(at)
+  })
+})

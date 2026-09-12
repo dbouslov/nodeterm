@@ -32,7 +32,7 @@ describe('canvas edge model (source pins)', () => {
   it('--after writes a rope from each dep to each opened node, beside the hidden bridge', () => {
     // One helper, three verbs: the rope id shape is what hiddenLinkIds / delete key on.
     expect(src).toMatch(/const ropeDeps = \(ids: string\[\], after: string\[\] \| undefined\)/)
-    expect(src).toContain('ropeEdge(`ctrl-${dep}-${nid}`, dep, nid)')
+    expect(src).toContain("ropeEdge(`ctrl-${dep}-${nid}`, dep, nid, 'dep')")
     expect((src.match(/ropeDeps\(ids, after\)/g) ?? []).length).toBe(2)
   })
 

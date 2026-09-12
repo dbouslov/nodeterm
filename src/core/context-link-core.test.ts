@@ -88,6 +88,23 @@ describe('buildLinkDoc sessionId field', () => {
   })
 })
 
+describe('buildLinkDoc accountId field', () => {
+  it('copies accountId onto the entry (a read-time transcript lookup is scoped by it); notes get none', () => {
+    const doc = buildLinkDoc(
+      'node-A',
+      [
+        { id: 'node-M', title: 'M', cwd: '', agentId: 'claude', sessionId: 's1', accountId: 'acct-1' },
+        { id: 'node-B', title: 'B', cwd: '', agentId: 'claude' },
+        { id: 'note-1', title: 'N', note: 'txt' }
+      ],
+      { transcriptOf: () => '', tmuxBin: null, tmuxSocket: 's' }
+    )
+    expect(doc.links[0].accountId).toBe('acct-1')
+    expect(doc.links[1].accountId).toBeUndefined()
+    expect(doc.links[2].accountId).toBeUndefined()
+  })
+})
+
 describe('resolveLinkTranscript', () => {
   const locators = {
     claude: async (sid: string, acct?: string) => `/c/${acct ?? 'default'}/${sid}.jsonl`,

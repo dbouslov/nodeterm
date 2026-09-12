@@ -163,7 +163,8 @@ export function routeOne(edge: RouteEdge, req: RouteRequest, ports: [Port, Port]
   // always meets the window, so the window's list is enough to decide.
   const portBlocked = ports.some((p) => [...nearBlocked, a, b].some((s) => containsStrict(s, p)))
   let points = portBlocked ? null : attempt(near, nearBlocked)
-  if (!points && !portBlocked) {
+  const widened = !points && !portBlocked
+  if (widened) {
     let all: Box = { x: 0, y: 0, width: 0, height: 0 }
     let first = true
     for (const n of req.nodes.values()) { all = first ? { ...n } : windowFor(all, n, 0); first = false }
@@ -172,5 +173,5 @@ export function routeOne(edge: RouteEdge, req: RouteRequest, ports: [Port, Port]
   }
   const fallback = !points
   const pts = points ?? fallbackPoints(ports)
-  return { points: pts, ports, fallback, labelAt: labelPointOf(pts), bbox: bboxOfPoints(pts) }
+  return { points: pts, ports, fallback, widened, labelAt: labelPointOf(pts), bbox: bboxOfPoints(pts) }
 }

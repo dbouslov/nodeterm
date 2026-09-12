@@ -628,6 +628,26 @@ describe('group worktree serialization', () => {
   })
 })
 
+describe('pinned — persisted, and only a literal true survives the load seam', () => {
+  const term = (data: Record<string, unknown>) =>
+    ({
+      id: 't1', type: 'terminal', position: { x: 0, y: 0 }, width: 100, height: 50,
+      data: { title: 'T', color: '#fff', group: null, ...data }
+    }) as unknown as CanvasNode
+
+  it('round-trips pinned: true, and an unpinned node writes nothing', () => {
+    const states = flowToNodeStates([term({ pinned: true })])
+    expect(states[0].pinned).toBe(true)
+    expect(nodeStatesToFlow(states)[0].data.pinned).toBe(true)
+    expect(flowToNodeStates([term({})])[0].pinned).toBeUndefined()
+  })
+
+  it('drops a hand-edited value that is not the literal true', () => {
+    const [state] = flowToNodeStates([term({})])
+    expect(nodeStatesToFlow([{ ...state, pinned: 'yes' as unknown as boolean }])[0].data.pinned).toBeUndefined()
+  })
+})
+
 describe('node icon serialization', () => {
   const withIcon = (icon: unknown): CanvasNode =>
     ({

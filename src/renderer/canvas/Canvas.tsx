@@ -99,6 +99,7 @@ import {
   IconCanvasView,
   IconClose,
   IconCollapse,
+  IconPin,
   IconDino,
   IconDuplicate,
   IconEditor,
@@ -264,19 +265,26 @@ import {
   type BrowserResolveProject
 } from '../lib/controlRouting'
 import {
+  coldFileIntoFrame,
   coldGroupCwd,
-  coldGroupChildCount,
   coldOpenMessage,
   coldPlaceBelow,
   offCanvasNoticeText,
   offCanvasReplyClause,
   coldResolveAfter,
   coldResolveGroup,
-  groupSizeFor,
-  groupSlot,
   storedAgentIdOf,
   type ColdNode
 } from '../lib/coldOpen'
+import {
+  liveBox,
+  liveBoxesOf,
+  livePlaceOpened,
+  openedFrameId,
+  placeBelowSource,
+  withOpenedNode
+} from '../lib/livePlacement'
+import { rankUnits, restructureNodes, type RestructureLayout } from '../lib/restructure'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
 import { applyAnnotation, normalizeNodeAnnotation, parseAnnotateArgs } from '@shared/node-annotation'
 import { annotateNodes, annotateReply } from '../lib/annotateNodes'
@@ -450,7 +458,8 @@ import {
   reconnectRelayTab,
   type RelayTab,
 } from '../session/relay-tab'
-import { buildBackgroundLinkMaps, buildContextLinkNote, buildLinkMap, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
+import { buildContextLinkNote, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
+import { startContextLinkSync, type ContextLinkSync } from '../lib/contextLinkSync'
 import {
   launchesToFire,
   launchRetryDelay,
@@ -460,7 +469,18 @@ import {
 } from '../lib/pendingLaunch'
 import { WAIT_LABEL, dropAfterDep, edgeHidden, hiddenEdgeNodeIds, missingDepRopes, ropeInfoOf, ropeVisual } from '../lib/edgeModel'
 import { triggerEdges } from '../lib/triggerCard'
-import { freeSpot } from '../lib/placement'
+import {
+  GROUP_PAD_X,
+  PLACEMENT_GAP,
+  ancestorFrameIds,
+  centerOf,
+  placeByHand,
+  placeChild,
+  placeDependent,
+  placeInFrame,
+  type Box,
+  type Size as BoxSize
+} from '@shared/placement'
 import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
@@ -497,6 +517,7 @@ import type {
   PendingLaunch,
   Project,
   ProjectKanban,
+  RopeKind,
   SshPassphraseRequest,
   SshProjectStatus,
   TranscriptHit
@@ -605,6 +626,8 @@ import {
   refitMaximizedNode,
   restoreMaximizedNode,
   placeNodeInRect,
+  terminalNodeSize,
+  isPinned,
   type CanvasNode
 } from '../state/workspace'
 import { codexAccountSelectable, codexAccountSwitchStillEligible } from './codex-account-switch'
@@ -847,12 +870,28 @@ async function waitForCanvasNode(
 // persisted per project as `ropes`, so the lineage survives restarts. Selectable; removed with ⌫ /
 // double-click like a context link. Colour and the waiting look are NOT stored here — displayEdges
 // derives both from the endpoints every render (lib/edgeModel.ts `ropeVisual`).
-const ropeEdge = (id: string, source: string, target: string): Edge => ({
+const ropeEdge = (id: string, source: string, target: string, kind?: RopeKind): Edge => ({
   id,
   source,
   target,
-  type: 'circuit'
+  type: 'circuit',
+  // Lineage vs dependency (Restructure ranks by it). Left ABSENT when unknown — a pre-kind file —
+  // because stamping `opener` on restore would rewrite a legacy dep rope as lineage on the next save.
+  ...(kind ? { data: { kind } } : {})
 })
+
+/** The persisted shape of a live rope edge: `kind` rides `data`, so commit and merge keep it. */
+const ropeLink = (e: Edge): BridgeLink => {
+  const kind = (e.data as { kind?: RopeKind } | undefined)?.kind
+  return { id: e.id, source: e.source, target: e.target, ...(kind ? { kind } : {}) }
+}
+
+/** Default size of a new terminal/agent node — the factories' own `terminalNodeSize`, so the
+ *  placement engine clears the box the node will really occupy. */
+const newNodeSize = (): BoxSize => {
+  const s = terminalNodeSize()
+  return { w: s.width, h: s.height }
+}
 
 
 const minimapNodeColor = (n: Node): string =>
@@ -866,6 +905,15 @@ const minimapNodeColor = (n: Node): string =>
  *  reads as `not-resumable`. */
 const restartAgentIdOf = (n: Node | undefined): AgentId | undefined =>
   !n || n.type !== 'terminal' ? undefined : createdAgentId(n.data)
+
+/** `agentIdOf` (below) for a node already in hand, so a caller reading a snapshot of the canvas
+ *  never resolves the id against a different array. */
+const agentIdOfNode = (n: Node | undefined): AgentId | undefined =>
+  !n || n.type !== 'terminal'
+    ? undefined
+    : ((n.data.agentId as AgentId | undefined) ??
+      (((n.data.tags as string[]) ?? []).includes('claude') ? 'claude' : undefined) ??
+      useAgentStatus.getState().byId[n.id]?.agentId)
 
 /** Stable empty card list, so the closed board's memo never churns array identity. */
 const NO_KANBAN_SESSIONS: KanbanSession[] = []
@@ -1595,6 +1643,11 @@ export function Canvas() {
    *  WORKTREE_SSH_HINT). Reactive, so the menus rebuild when the user switches projects. */
   const isSshProject = !!activeSshServer
   nodesRef.current = nodes
+  // The context-link push reads the live canvas from a timer, so it takes the edges, the nodes and
+  // the project they belong to from ONE render: across a switch `nodesRef` and `nodesProjectIdRef`
+  // are re-pointed before the new edges land (see lib/contextLinkSync).
+  const liveLinkRef = useRef({ projectId: nodesProjectIdRef.current, edges: linkEdges, nodes })
+  liveLinkRef.current = { projectId: nodesProjectIdRef.current, edges: linkEdges, nodes }
   /**
    * ONE confirm dialog at a time — mirrored into a ref so the []-dep agent-control effect sees the
    * CURRENT dialogs (it closes over a stale `confirm`).
@@ -2478,10 +2531,10 @@ export function Canvas() {
     // A wait with no rope is a wait nothing on screen explains. Ropes for `--after` are written by
     // the verbs that arm a node, so an arming that predates them (persisted `pendingLaunch`, no
     // persisted rope) — or any future path that forgets one — is healed here on the next load.
-    const restoredRopes = (project.ropes ?? []).map((r) => ropeEdge(r.id, r.source, r.target))
+    const restoredRopes = (project.ropes ?? []).map((r) => ropeEdge(r.id, r.source, r.target, r.kind))
     setControlEdges([
       ...restoredRopes,
-      ...missingDepRopes(flow, restoredRopes).map((r) => ropeEdge(r.id, r.source, r.target))
+      ...missingDepRopes(flow, restoredRopes).map((r) => ropeEdge(r.id, r.source, r.target, r.kind))
     ])
     // Reset history for the newly loaded project.
     committedRef.current = flow
@@ -2675,7 +2728,7 @@ export function Canvas() {
           flowToNodeStates(nodesRef.current),
           viewportRef.current,
           linkEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target })),
-          controlEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target }))
+          controlEdgesRef.current.map(ropeLink)
         )
   }, [])
 
@@ -2891,11 +2944,7 @@ export function Canvas() {
         base: useProjects.getState().getProject(project.id),
         incoming: project,
         liveNodeIds: nodesRef.current.map((n) => n.id),
-        liveRopes: controlEdgesRef.current.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target
-        })),
+        liveRopes: controlEdgesRef.current.map(ropeLink),
         liveBridges: linkEdgesRef.current.map((e) => ({
           id: e.id,
           source: e.source,
@@ -2907,7 +2956,7 @@ export function Canvas() {
       // every edge on the canvas (displayEdges recomputes colour and the waiting look per edge)
       // for no change at all, and these arrive in bursts.
       if (plan.ropesChanged)
-        setControlEdges(plan.ropes.map((r) => ropeEdge(r.id, r.source, r.target)))
+        setControlEdges(plan.ropes.map((r) => ropeEdge(r.id, r.source, r.target, r.kind)))
       if (plan.bridgesChanged)
         setLinkEdges(plan.bridges.map((b) => ({ id: b.id, source: b.source, target: b.target })))
       // The store copy is our disk baseline, and the server has already written this file — so it
@@ -3301,7 +3350,7 @@ export function Canvas() {
     // nothing adds nothing, and a rope the step did not remove is never duplicated.
     setControlEdges((es) => {
       const add = missingDepRopes(prev, es)
-      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target))] : es
+      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target, r.kind))] : es
     })
     bumpDirty() // an undo is an edit: it must count toward the in-flight-save generation too
     bumpHist((v) => v + 1)
@@ -3321,7 +3370,7 @@ export function Canvas() {
     // nothing adds nothing, and a rope the step did not remove is never duplicated.
     setControlEdges((es) => {
       const add = missingDepRopes(next, es)
-      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target))] : es
+      return add.length ? [...es, ...add.map((r) => ropeEdge(r.id, r.source, r.target, r.kind))] : es
     })
     bumpDirty() // a redo is an edit: same reasoning as undo
     bumpHist((v) => v + 1)
@@ -3405,15 +3454,10 @@ export function Canvas() {
   // every local session carries the hook env (pty-manager defaults agentId to 'claude'), so
   // the managed hooks report who's actually running inside even when data.agentId was never
   // set at node creation.
-  const agentIdOf = useCallback((id: string): AgentId | undefined => {
-    const n = nodesRef.current.find((x) => x.id === id)
-    if (!n || n.type !== 'terminal') return undefined
-    return (
-      (n.data.agentId as AgentId | undefined) ??
-      (((n.data.tags as string[]) ?? []).includes('claude') ? 'claude' : undefined) ??
-      useAgentStatus.getState().byId[id]?.agentId
-    )
-  }, [])
+  const agentIdOf = useCallback(
+    (id: string): AgentId | undefined => agentIdOfNode(nodesRef.current.find((x) => x.id === id)),
+    []
+  )
 
   // Endpoint descriptor for classifyLink: node kind + whether it's a context-link-capable
   // agent session (claude/codex/gemini). Null when the node doesn't exist.
@@ -3586,24 +3630,47 @@ export function Canvas() {
     })
   }, [nodes])
 
-  // Rewrite link files when a linked node's session starts/changes: main resolves
-  // codex/gemini transcripts by sessionId, so a session that appears after the edge was
-  // drawn must trigger a rewrite. agentId is part of the signature for the same reason: a
-  // plain terminal's identity arrives from hooks after the fact, and the map entry gains
-  // its agentId/sessionId only once it's known. Primitive signature, not the byId map (see
-  // loopSig).
-  const linkSessionSig = useAgentStatus((s) => {
-    let sig = ''
-    for (const e of linkEdges) {
-      const a = s.byId[e.source]
-      const b = s.byId[e.target]
-      sig += `${a?.agentId ?? ''}:${a?.sessionId ?? ''}|${b?.agentId ?? ''}:${b?.sessionId ?? ''}|`
+  // Push the context-link map to main whenever anything it is built from changes: this canvas's
+  // edges and nodes (the effect below), every other project's stored bridges and every linked
+  // agent's identity (the sync subscribes to those two stores itself). See lib/contextLinkSync —
+  // a bridge written into a project that is not on screen used to reach main only by accident.
+  const linkSyncRef = useRef<ContextLinkSync | null>(null)
+  useEffect(() => {
+    const sync = startContextLinkSync({
+      live: () => {
+        const { projectId, edges, nodes: liveNodes } = liveLinkRef.current
+        const byId = new Map(liveNodes.map((n) => [n.id, n]))
+        return {
+          projectId,
+          edges: edges.filter((e) => byId.has(e.source) && byId.has(e.target)),
+          infoOf: (id) => {
+            const n = byId.get(id)
+            const sticky = n?.type === 'sticky'
+            const agentId = sticky ? undefined : agentIdOfNode(n)
+            return {
+              id,
+              title: (n?.data.title as string) || id,
+              cwd: (n?.data.cwd as string) || '',
+              note: sticky ? ((n?.data.text as string) ?? '') : undefined,
+              sticky,
+              agentId,
+              sessionId: agentId ? useAgentStatus.getState().byId[id]?.sessionId : undefined,
+              accountId: sticky ? undefined : ((n?.data.accountId as string) || undefined)
+            }
+          }
+        }
+      },
+      send: (map) => window.nodeTerminal.contextLink.setLinks(map)
+    })
+    linkSyncRef.current = sync
+    return () => {
+      sync.stop()
+      linkSyncRef.current = null
     }
-    return sig
-  })
+  }, [])
 
-  // Prune links whose endpoints were deleted, then push the link map to main (debounced) so
-  // it can rewrite the per-node link files the context CLI reads.
+  // Prune links whose endpoints were deleted; any other change to this canvas's edges or nodes is
+  // a reason to rebuild the map.
   useEffect(() => {
     const ids = new Set(nodes.map((n) => n.id))
     const valid = linkEdges.filter((e) => ids.has(e.source) && ids.has(e.target))
@@ -3611,38 +3678,8 @@ export function Canvas() {
       setLinkEdges(valid)
       return // re-runs with the pruned set
     }
-    const infoOf = (id: string) => {
-      const n = nodes.find((nn) => nn.id === id)
-      const sticky = n?.type === 'sticky'
-      const agentId = sticky ? undefined : agentIdOf(id)
-      return {
-        id,
-        title: (n?.data.title as string) || id,
-        cwd: (n?.data.cwd as string) || '',
-        note: sticky ? ((n?.data.text as string) ?? '') : undefined,
-        sticky,
-        agentId,
-        sessionId: agentId ? useAgentStatus.getState().byId[id]?.sessionId : undefined,
-        accountId: sticky ? undefined : ((n?.data.accountId as string) || undefined)
-      }
-    }
-    // Merge in the link maps of every OTHER project (from their serialized nodes + bridges):
-    // main clears all link files before writing the pushed map, so pushing only the active
-    // project's map would sever the links of background projects whose agents keep running.
-    const { projects, activeProjectId } = useProjects.getState()
-    const map = {
-      ...buildBackgroundLinkMaps(
-        projects,
-        activeProjectId,
-        (id) => useAgentStatus.getState().byId[id]?.sessionId,
-        (id) => useAgentStatus.getState().byId[id]?.agentId
-      ),
-      ...buildLinkMap(valid, infoOf)
-    }
-    const t = setTimeout(() => void window.nodeTerminal.contextLink.setLinks(map), 150)
-    return () => clearTimeout(t)
-    // linkSessionSig is read only as an effect trigger — infoOf re-reads sessionIds via getState().
-  }, [linkEdges, nodes, setLinkEdges, agentIdOf, linkSessionSig])
+    linkSyncRef.current?.invalidate()
+  }, [linkEdges, nodes, setLinkEdges])
 
   // Reflect Claude nodes with unread output as a macOS Dock badge count (across all projects).
   // Subscribes to the derived count (a primitive), not the byId map, for the same reason as
@@ -3787,29 +3824,29 @@ export function Canvas() {
   }, [screenToFlowPosition])
 
   /**
-   * A non-overlapping drop point for a NODE created without a cursor (dock / palette / kanban
-   * board) — otherwise every one lands on the view center and piles into a stack you only discover
-   * when you switch back to the canvas. Returns undefined only if the view isn't measured yet.
+   * Every persisted live node as a ROOT-space box — what the placement engine must not land on.
+   * Real, laid-out nodes only: ephemeral subagent/loop cards are skipped (not persisted, they
+   * vanish on their own — see useAgentNodes). `exclude` leaves out the frames the new node will be
+   * filed into (`ancestorFrameIds` of what it is spawned from).
+   */
+  const liveBoxes = useCallback((exclude?: ReadonlySet<string>): Box[] => {
+    const skip = new Set([...Object.keys(useAgentNodes.getState().byId), ...(exclude ?? [])])
+    return liveBoxesOf(nodesRef.current, newNodeSize(), skip)
+  }, [])
+
+  /**
+   * A CENTER point for a NODE created without a cursor (dock / palette / kanban board): the view
+   * center, nudged to the nearest clear spot — otherwise every one lands on the view center and
+   * piles into a stack you only discover when you switch back to the canvas. (The old version
+   * handed the CENTER to a top-left check, so it cleared a box half a node away from where the
+   * node landed.) Returns undefined only if the view isn't measured yet.
    */
   const emptyNodePos = useCallback((): { x: number; y: number } | undefined => {
     const preferred = viewCenter()
     if (!preferred) return undefined
-    const s = useSettings.getState().settings
-    const w = s.defaultNodeWidth || 640
-    const h = s.defaultNodeHeight || 440
-    // Real, laid-out nodes only (skip ephemeral subagent/loop cards, which aren't persisted and
-    // vanish on their own — see useAgentNodes).
-    const ephemeral = new Set(Object.keys(useAgentNodes.getState().byId))
-    const boxes = nodesRef.current
-      .filter((n) => !ephemeral.has(n.id))
-      .map((n) => ({
-        x: n.position.x,
-        y: n.position.y,
-        w: (n.measured?.width as number | undefined) ?? (n.width as number | undefined) ?? w,
-        h: (n.measured?.height as number | undefined) ?? (n.height as number | undefined) ?? h
-      }))
-    return freeSpot(boxes, preferred, { w, h })
-  }, [viewCenter])
+    const size = newNodeSize()
+    return centerOf(placeByHand(liveBoxes(), preferred, size), size)
+  }, [viewCenter, liveBoxes])
 
   /** The checkout a Source Control action refers to. The panel hands its ACTIVE SCOPE's cwd
    *  (main checkout or a bound worktree) with every relative path, so the diff/agent node it opens
@@ -3925,15 +3962,22 @@ export function Canvas() {
   }, [])
 
   /** Where a node spawned FROM another node (Duplicate / Branch / Transfer) goes when the action
-   *  carried no cursor position (⌘K, an agent CLI call): just right of its source.
-   *  Read in ABSOLUTE coordinates on purpose — a grouped node's `position` is relative to its
-   *  group frame, and using it raw threw the new node the group's own x/y away from the source. */
-  const besideNode = useCallback((source: CanvasNode): { x: number; y: number } => {
-    const p = absolutePosition(source as FocusableNode, nodesRef.current as FocusableNode[])
-    const width =
-      (source.measured?.width as number | undefined) ?? (source.width as number | undefined) ?? 600
-    return { x: p.x + width + 32, y: p.y }
-  }, [])
+   *  carried no cursor position (⌘K, an agent CLI call): right of its source, on the first clear
+   *  spot (the engine's dependent rule), sized as the node being placed. Returns an ABSOLUTE
+   *  top-left — what `placeSpawned` takes. Read in ABSOLUTE coordinates on purpose — a grouped
+   *  node's `position` is relative to its group frame, and using it raw threw the new node the
+   *  group's own x/y away from the source. */
+  const besideNode = useCallback(
+    (source: CanvasNode, placing: CanvasNode): { x: number; y: number } => {
+      const all = nodesRef.current
+      const src = liveBox(source, all, { w: 600, h: 400 })
+      // The source's own frames are not obstacles: landing inside one files the node into it
+      // (`placeSpawned` → `groupAtPoint`), as a duplicate of a framed node always did.
+      const existing = liveBoxes(ancestorFrameIds(all, source.id))
+      return placeDependent(existing, [src], liveBox(placing, all, newNodeSize()))
+    },
+    [liveBoxes]
+  )
 
   /** Put a spawned node at an ABSOLUTE canvas point — the point the user right-clicked, so the
    *  node appears where the menu was opened. Landing inside a group frame parents it into that
@@ -6622,7 +6666,7 @@ export function Canvas() {
       copy.selected = true
       // Where the user right-clicked when the action came from the node menu; beside the source
       // otherwise (the agent-CLI `branch` verb and the header action have no cursor).
-      const placed = placeSpawned(copy, opts?.at ?? besideNode(source))
+      const placed = placeSpawned(copy, opts?.at ?? besideNode(source, copy))
       setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), placed])
       markDirty()
       return { ok: true, newNodeId: placed.id }
@@ -6708,7 +6752,7 @@ export function Canvas() {
         model
       )
       node.selected = true
-      const placed = placeSpawned(node, at ?? besideNode(source))
+      const placed = placeSpawned(node, at ?? besideNode(source, node))
       setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), placed])
       markDirty()
     },
@@ -6814,31 +6858,44 @@ export function Canvas() {
     setNodes((ns) => ns.map((n) => ({ ...n, selected: true })))
   }, [setNodes])
 
-  // Pane-level "Tidy canvas": packs every top-level node (terminal, agent, sticky, editor, diff,
-  // group frame — a frame moves as one unit, its children ride along untouched) into a
-  // non-overlapping grid via the same `arrangeNodes` selection/canvas-control already use.
-  // `arrangeNodes` no-ops on a mixed-container id set (workspace.ts commonParentId), which is why
-  // only top-level ids (`!n.parentId`) are collected here — a populated group frame would
-  // otherwise silently block the whole action. Sorted by current (y, x) first so the packed grid
-  // roughly preserves the canvas's existing reading order instead of falling back to array/
-  // persistence order (which puts every group frame first).
+  // Pane-level "Restructure canvas" (the old "Tidy canvas": same command id `canvas.tidy`, same
+  // chord). Re-lays out every top-level UNIT — terminal, agent, sticky, editor, diff, or a group
+  // frame, which moves as one block with its children untouched — by the rope graph
+  // (lib/restructure.ts): lineage in rows centered under the opener, an `--after` dependent to the
+  // right of what it waits on, unconnected nodes as a grid below. With no ropes the result is the
+  // old tidy grid, translated. `radial` (palette / agent verb only) rings each generation around
+  // the root instead.
   const hasArrangeableNodes = useCallback((): boolean => {
     return nodesRef.current.filter((n) => !n.parentId).length >= 2
   }, [])
-  const arrangeAllNodes = useCallback(() => {
-    if (isOverlayViewOpen(useProjects.getState().activeProjectId)) return
-    const targets = nodesRef.current
-      .filter((n) => !n.parentId)
-      .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
-    // Fewer than 2 nodes: nothing to tidy — and running arrangeNodes anyway would still emit a
-    // fresh node array (a no-op position rewrite), triggering an undo entry + markDirty + a
-    // project.json write for a canvas that visibly didn't change.
-    if (targets.length < 2) return
-    const ids = targets.map((n) => n.id)
-    setNodes((ns) => arrangeNodes(ns, ids, { layout: 'grid' }))
-    markDirty()
-    fitAll()
-  }, [setNodes, markDirty, fitAll])
+  const arrangeAllNodes = useCallback(
+    (layout: RestructureLayout = 'rows') => {
+      if (isOverlayViewOpen(useProjects.getState().activeProjectId)) return
+      // Under 2 units there is nothing to lay out: restructureNodes hands back the SAME array, and
+      // setting it would still cost an undo entry + markDirty + a project.json write for a canvas
+      // that visibly didn't change.
+      const next = restructureNodes(nodesRef.current, controlEdgesRef.current.map(ropeLink), layout)
+      if (next === nodesRef.current) return
+      setNodes(next)
+      markDirty()
+      fitAll()
+    },
+    [setNodes, markDirty, fitAll]
+  )
+
+  /** Pin / unpin nodes or frames. Automatic layout (Restructure, arrange / align, frame fitting)
+   *  leaves a pinned item — and everything inside it — where it is (`isPinned`). Persisted as
+   *  `pinned: true`; dragging by hand still works. */
+  const setPinned = useCallback(
+    (ids: string[], on: boolean) => {
+      const set = new Set(ids)
+      setNodes((ns) =>
+        ns.map((n) => (set.has(n.id) ? { ...n, data: { ...n.data, pinned: on ? true : undefined } } : n))
+      )
+      markDirty()
+    },
+    [setNodes, markDirty]
+  )
 
   const toggleCollapseNodes = useCallback(
     (ids: string[]) => {
@@ -7917,6 +7974,22 @@ export function Canvas() {
               onClick: () => toggleCollapseNodes(ids)
             }
           ] as MenuItem[])),
+      ...(isHidden('pin', hidden)
+        ? []
+        : (() => {
+            // Every target pinned → the row unpins them; otherwise it pins them all.
+            const pinnedNow = ids.every(
+              (nid) => nodesRef.current.find((n) => n.id === nid)?.data.pinned === true
+            )
+            return [
+              {
+                label: pinnedNow ? 'Unpin' : 'Pin',
+                icon: <IconPin />,
+                ...(pinnedNow ? {} : { hint: 'Restructure, arrange and agents leave it where it is.' }),
+                onClick: () => setPinned(ids, !pinnedNow)
+              }
+            ] as MenuItem[]
+          })()),
       ...(ids.some((nid) => nodesRef.current.find((n) => n.id === nid)?.type === 'terminal')
         ? ([
             ...(isHidden('markdown-view', hidden)
@@ -8194,6 +8267,7 @@ export function Canvas() {
     transferConversation,
     agentIdOf,
     toggleCollapseNodes,
+    setPinned,
     toggleMarkdown,
     reloadTerminals,
     restartAgentNode,
@@ -8396,6 +8470,19 @@ export function Canvas() {
         ...(isHidden('colors', useSettings.getState().settings.hiddenNodeMenuItems)
           ? []
           : ([{ type: 'colors', onPick: (c) => setNodesColor([groupId], c) }] as MenuItem[])),
+        // Same `pin` id as the node menu row, so one Appearance toggle hides both.
+        ...(isHidden('pin', useSettings.getState().settings.hiddenNodeMenuItems)
+          ? []
+          : (() => {
+              const pinnedNow = nodesRef.current.find((n) => n.id === groupId)?.data.pinned === true
+              return [
+                {
+                  label: pinnedNow ? 'Unpin frame' : 'Pin frame',
+                  icon: <IconPin />,
+                  onClick: () => setPinned([groupId], !pinnedNow)
+                }
+              ] as MenuItem[]
+            })()),
         { type: 'separator' },
         ...(groupHasWorktree(groupId)
           ? []
@@ -8421,6 +8508,7 @@ export function Canvas() {
     },
     [
       setNodesColor,
+      setPinned,
       ungroup,
       groupHasWorktree,
       openWorktreeDialog,
@@ -8516,7 +8604,10 @@ export function Canvas() {
   const onPaneContextMenu = useCallback(
     (e: MouseEvent | React.MouseEvent) => {
       e.preventDefault()
-      const at = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      // Centered on the cursor, nudged to the nearest clear spot: `at` is the CENTER every add
+      // entry hands its factory, so a right-click beside a node no longer drops one on top of it.
+      const cursor = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const at = centerOf(placeByHand(liveBoxes(), cursor, newNodeSize()), newNodeSize())
       const screenPos = { x: e.clientX, y: e.clientY }
       // Split the canonical content list around the agent block: the pane menu shows terminal,
       // THEN agents, THEN the rest (remote, browser, …, worktree). The spec is still the single
@@ -8545,7 +8636,7 @@ export function Canvas() {
           // Hidden below 2 top-level nodes — same reasoning as restart-idle-agents just below:
           // with 0 or 1 node the action can only be a visual no-op that still writes project.json.
           ...(hasArrangeableNodes()
-            ? [{ label: 'Tidy canvas', icon: <IconGrid />, onClick: arrangeAllNodes } as MenuItem]
+            ? [{ label: 'Restructure canvas', icon: <IconGrid />, onClick: () => arrangeAllNodes() } as MenuItem]
             : []),
           // Project-wide: restart every idle agent CLI in place (new model pickup). Hidden on a
           // canvas with no restartable agent node — there it could only ever report "0 restarted".
@@ -8564,6 +8655,7 @@ export function Canvas() {
     },
     [
       screenToFlowPosition,
+      liveBoxes,
       agentCreationItems,
       addHandlers,
       addCtx,
@@ -9093,7 +9185,7 @@ export function Canvas() {
       })
       const placed = src.parentId ? parentInto(node, src.parentId) : node
       setNodes((ns) => [...ns, placed])
-      setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id)])
+      setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id, 'opener')])
       markDirty()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -9133,7 +9225,9 @@ export function Canvas() {
       // Set by the OFF-CANVAS branch below (`answersOffCanvas`): the verb runs against the owning
       // project's SERIALIZED nodes because that project is not on screen. It stays undefined on
       // every other path, which is what makes the on-screen behaviour byte-identical.
-      let offCanvas: { project: Project; closed: boolean; created: string[] } | undefined
+      let offCanvas:
+        | { project: Project; closed: boolean; created: string[]; source: CanvasNodeState }
+        | undefined
       const reply = (r: { ok: boolean; message?: string; result?: unknown; error?: string }) => {
         // Say WHERE it went, once, in both voices. The verb bodies already say WHAT they made, so
         // none of them has to know about routing: the clause is appended here and the human strip
@@ -9448,7 +9542,9 @@ export function Canvas() {
             const w = (node.width as number) ?? 640
             const h = (node.height as number) ?? 440
             if (i === 0) tgBase = nextFreePosition(tgPlacedNodes, { width: w, height: h })
-            node.position = { x: tgBase.x + i * (w + 60) - w / 2, y: tgBase.y - h / 2 }
+            // One row below the lowest node: clear of everything by construction, since every
+            // other node ends above the row's top edge (`nextFreePosition` → the engine's `placeLoose`).
+            node.position = { x: tgBase.x + i * (w + PLACEMENT_GAP) - w / 2, y: tgBase.y - h / 2 }
             tgMade.push(node)
           }
           const tgIds = tgMade.map((n) => n.id)
@@ -9782,16 +9878,36 @@ export function Canvas() {
                   useSettings.getState().settings.claudeAccounts
                 )
             const coldMode = coldTerminal ? undefined : projectPermissionMode(owner, coldAgentId)
-            const coldExistingInGroup = coldGroup.groupId
-              ? coldGroupChildCount(coldNodes, coldGroup.groupId)
-              : 0
+            // The engine's rules over the STORED nodes: siblings this call places are reserved (the
+            // store is written after the loop), an `--after` dependent goes right of its deps, and a
+            // `--group` child takes the first slot no current child occupies (frame-relative).
+            const coldSize = newNodeSize()
+            const coldReserved: Box[] = []
+            const coldDeps = coldAfterIds.flatMap((id) => {
+              const dep = coldNodes.find((n) => n.id === id)
+              return dep ? [dep] : []
+            })
+            const coldKids: Box[] = coldGroup.groupId
+              ? coldNodes
+                  .filter((n) => n.parentId === coldGroup.groupId)
+                  .map((n) => ({
+                    x: n.position.x,
+                    y: n.position.y,
+                    w: n.size?.width ?? 600,
+                    h: n.size?.height ?? 400
+                  }))
+              : []
             const coldMade: CanvasNode[] = []
             for (let i = 0; i < coldCount; i++) {
               const built = coldTerminal
                 ? createTerminalNode(
                     coldNodes.length + i,
                     coldCwd,
-                    coldPlaceBelow(coldNodes, coldSrcNode, i),
+                    coldPlaceBelow(coldNodes, coldSrcNode, i, {
+                      reserved: coldReserved,
+                      size: coldSize,
+                      deps: coldDeps
+                    }),
                     args.cmd,
                     coldSsh
                   )
@@ -9799,7 +9915,11 @@ export function Canvas() {
                     coldAgentId,
                     coldNodes.length + i,
                     coldCwd,
-                    coldPlaceBelow(coldNodes, coldSrcNode, i),
+                    coldPlaceBelow(coldNodes, coldSrcNode, i, {
+                      reserved: coldReserved,
+                      size: coldSize,
+                      deps: coldDeps
+                    }),
                     args.prompt,
                     coldSsh,
                     coldAccount,
@@ -9820,23 +9940,28 @@ export function Canvas() {
                       data: { ...armed.data, pendingLaunch: { ...held, after: coldAfterIds } }
                     }
                   : armed
+              const coldNodeSize = { w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }
               if (coldGroup.groupId) {
-                const w = (node.width as number) ?? 600
-                const h = (node.height as number) ?? 400
-                node.position = groupSlot(coldExistingInGroup + i, w, h)
+                const slot = placeInFrame(coldKids, coldNodeSize)
+                coldKids.push({ ...slot, ...coldNodeSize })
+                node.position = slot
                 node.parentId = coldGroup.groupId
                 node.extent = 'parent'
+              } else {
+                coldReserved.push({ ...node.position, ...coldNodeSize })
               }
               coldMade.push(node)
             }
-            // Grow the frame BEFORE the children land, exactly as `addGrouped` does — `extent:
-            // 'parent'` clamps a child that falls outside it.
+            // Grow the frame to hold every child BEFORE the children land — `extent: 'parent'`
+            // clamps a child that falls outside it. Sized from the slots actually taken (plus the
+            // frame's padding), not from a child count that assumed every child sat in its slot.
             if (coldGroup.groupId) {
               const frame = owner.nodes.find((n) => n.id === coldGroup.groupId)
-              if (frame) {
-                const w = (coldMade[0]?.width as number) ?? 600
-                const h = (coldMade[0]?.height as number) ?? 400
-                const need = groupSizeFor(coldExistingInGroup + coldCount, w, h)
+              if (frame && coldKids.length) {
+                const need = {
+                  width: Math.max(...coldKids.map((k) => k.x + k.w)) + GROUP_PAD_X,
+                  height: Math.max(...coldKids.map((k) => k.y + k.h)) + GROUP_PAD_X
+                }
                 coldStore.applyNodeMutation(owner.id, {
                   op: 'upsert',
                   node: {
@@ -9847,6 +9972,38 @@ export function Canvas() {
                     }
                   }
                 })
+              }
+            }
+            // A source inside a frame keeps its LINEAGE children inside that frame, as on the live
+            // canvas: each filed in where `coldPlaceBelow` put it, the frame chain grown to hold it,
+            // frames written first. An `--after` dependent joins the frame ITS DEPS live in instead,
+            // and a `--group` child already went into the frame it named.
+            if (!coldGroup.groupId) {
+              const filed = coldFileIntoFrame(
+                coldNodes,
+                coldSrcNode,
+                coldMade.map((n) => ({
+                  ...n.position,
+                  w: (n.width as number) ?? 600,
+                  h: (n.height as number) ?? 400
+                })),
+                { deps: coldDeps }
+              )
+              if (filed.frameId) {
+                coldMade.forEach((node, i) => {
+                  node.position = filed.positions[i]
+                  node.parentId = filed.frameId
+                  node.extent = 'parent'
+                })
+              }
+              for (const grown of filed.frames) {
+                const frame = owner.nodes.find((n) => n.id === grown.id)
+                if (frame) {
+                  coldStore.applyNodeMutation(owner.id, {
+                    op: 'upsert',
+                    node: { ...frame, size: grown.size }
+                  })
+                }
               }
             }
             for (const node of coldMade) {
@@ -9865,7 +10022,8 @@ export function Canvas() {
             const coldRopes = coldIds.map((id) => ({
               id: `ctrl-${sourceNodeId}-${id}`,
               source: sourceNodeId,
-              target: id
+              target: id,
+              kind: 'opener' as const
             }))
             const coldEndpoint = (id: string): LinkEndpoint | null => {
               if (coldIds.includes(id)) {
@@ -9945,7 +10103,7 @@ export function Canvas() {
               reply({ ok: false, error: 'source node is not a control-capable agent' })
               return
             }
-            offCanvas = { project: owner, closed: route.kind === 'reopen', created: [] }
+            offCanvas = { project: owner, closed: route.kind === 'reopen', created: [], source: ocSrc }
             // The body below reads the source for its title, cwd and placement geometry. Hydrate
             // the ONE stored node rather than hand-rolling a partial: `nodeStatesToFlow` is what
             // the project load itself uses, so the shape cannot drift from a live node's. It has
@@ -10018,19 +10176,43 @@ export function Canvas() {
       // flow-in), mirroring how subagent/loop nodes attach — so they read as "hanging off" the
       // conversation instead of landing on top of unrelated nodes. `placeBelow` returns a node
       // centerpoint; `i` fans multiple nodes out horizontally so they don't stack.
-      const srcW = src.measured?.width ?? (src.width as number) ?? 600
-      const srcH = src.measured?.height ?? (src.height as number) ?? 400
-      // src.position is group-relative when the agent sits inside a group frame — resolve the
-      // absolute position first so placements land below the agent regardless of grouping.
-      const srcGroup = src.parentId ? nodesRef.current.find((n) => n.id === src.parentId) : undefined
-      const srcAbs = {
-        x: src.position.x + (srcGroup?.position.x ?? 0),
-        y: src.position.y + (srcGroup?.position.y ?? 0)
+      // Placement for the nodes this call opens — the shared engine, in ROOT space (a source inside
+      // a frame is resolved through the whole parent chain). Opener → child goes BELOW the source,
+      // fanned right; a node armed `--after` goes RIGHT of its deps (`livePlaceOpened`). The frames
+      // of the container it joins are not obstacles: `addAndConnect` files it in and grows them
+      // (`withOpenedNode`) — the SOURCE's frame for a lineage child, its DEPS' for a dependent.
+      // `reserved` holds the siblings this same call has placed — `setNodes` is async, so nodesRef
+      // does not show them yet.
+      const srcBox = liveBox(src, nodesRef.current, { w: 600, h: 400 })
+      const srcFrames = ancestorFrameIds(nodesRef.current, src.id)
+      const reserved: Box[] = []
+      const obstacles = (): Box[] => [...liveBoxes(srcFrames), ...reserved]
+      /** CENTER for the i-th node of an `open-*` call, reserved so its siblings clear it. */
+      const placeNext = (i: number, after?: string[]): { x: number; y: number } => {
+        const size = newNodeSize()
+        const skip = new Set(Object.keys(useAgentNodes.getState().byId))
+        const topLeft = livePlaceOpened(nodesRef.current, src, after ?? [], size, i, { reserved, skip })
+        reserved.push({ ...topLeft, ...size })
+        return centerOf(topLeft, size)
       }
-      const belowY = srcAbs.y + srcH + 80
-      const placeBelow = (i = 0) => ({ x: srcAbs.x + srcW / 2 + i * 460, y: belowY + 210 })
+      /** CENTER of the i-th clear child slot below the source, NOT reserved: single-node opens, the
+       *  display verbs, and the members of a panel/team grid that is re-packed right after. Off
+       *  canvas it is placed over the source's OWN project (`placeBelowSource`), not this canvas. */
+      const placeBelow = (i = 0): { x: number; y: number } =>
+        placeBelowSource(nodesRef.current, src, newNodeSize(), i, {
+          reserved,
+          skip: new Set(Object.keys(useAgentNodes.getState().byId)),
+          ...(offCanvas
+            ? {
+                offCanvas: {
+                  nodes: offCanvas.project.nodes as unknown as ColdNode[],
+                  source: offCanvas.source as unknown as ColdNode
+                }
+              }
+            : {})
+        })
       const connect = (newId: string) =>
-        setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${newId}`, sourceNodeId, newId)])
+        setControlEdges((es) => [...es, ropeEdge(`ctrl-${sourceNodeId}-${newId}`, sourceNodeId, newId, 'opener')])
       // `--after` is a rope too: dep → armed node, drawn dashed while the node waits and solid once
       // it has launched (displayEdges derives that from pendingLaunch). The opener's own rope is
       // skipped here — it already exists, and ropeVisual renders it waiting when the node waits on
@@ -10039,7 +10221,7 @@ export function Canvas() {
       const ropeDeps = (ids: string[], after: string[] | undefined): void => {
         if (!after?.length) return
         const ropes = ids.flatMap((nid) =>
-          after.filter((dep) => dep !== sourceNodeId).map((dep) => ropeEdge(`ctrl-${dep}-${nid}`, dep, nid))
+          after.filter((dep) => dep !== sourceNodeId).map((dep) => ropeEdge(`ctrl-${dep}-${nid}`, dep, nid, 'dep'))
         )
         if (ropes.length) setControlEdges((es) => [...es, ...ropes])
       }
@@ -10073,45 +10255,68 @@ export function Canvas() {
       }
       // Append a freshly-created node, draw its connecting edge, and mark the canvas dirty so it
       // persists. Returns the new node id. A node opened by a grouped agent joins that group
-      // (parentInto converts back to group-relative coords), so the control fan-out stays inside
-      // the frame and moves with it.
-      const addAndConnect = (node: CanvasNode) => {
-        // A node that arrives ALREADY parented (open-agent --group placed it into a frame with
-        // relative coords) must pass through untouched — re-running parentInto would read its
-        // relative position as absolute and land it off-frame.
-        const placed = node.parentId ? node : src.parentId ? parentInto(node, src.parentId) : node
+      // (`withOpenedNode` live, `coldFileIntoFrame` off canvas), so the control fan-out stays
+      // inside the frame and moves with it. A node that arrives ALREADY parented (open-agent
+      // --group placed it into a frame with relative coords) passes through untouched — re-filing
+      // it would read its relative position as absolute and land it off-frame.
+      const addAndConnect = (node: CanvasNode, after: readonly string[] = []) => {
         if (offCanvas) {
           // The staged twin of the three lines below, and the whole of the off-canvas write. The
           // live setters all address the ACTIVE canvas, which is some other project's here — they
           // would put the node in front of the wrong person and dirty the wrong file.
           // `applyNodeMutation` + `appendCanvasLinks` are the store paths a peer mutation and the
           // cold open already take, and `writeDisk` is what persists them.
+          // A framed source's child goes into that frame by the COLD rule: the frame is in this
+          // project's store, not on screen. Grown frames are written before the child.
           const ocStore = useProjects.getState()
+          const filed = node.parentId
+            ? undefined
+            : coldFileIntoFrame(
+                offCanvas.project.nodes as unknown as ColdNode[],
+                offCanvas.source as unknown as ColdNode,
+                [{ ...node.position, w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }]
+              )
+          const placed = filed?.frameId
+            ? { ...node, parentId: filed.frameId, extent: 'parent' as const, position: filed.positions[0] }
+            : node
+          for (const grown of filed?.frames ?? []) {
+            const frame = offCanvas.project.nodes.find((n) => n.id === grown.id)
+            if (frame) {
+              ocStore.applyNodeMutation(offCanvas.project.id, {
+                op: 'upsert',
+                node: { ...frame, size: grown.size }
+              })
+            }
+          }
           ocStore.applyNodeMutation(offCanvas.project.id, {
             op: 'upsert',
             node: flowToNodeStates([placed])[0]
           })
           ocStore.appendCanvasLinks(offCanvas.project.id, {
-            ropes: [ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id)]
+            ropes: [ropeLink(ropeEdge(`ctrl-${sourceNodeId}-${placed.id}`, sourceNodeId, placed.id, 'opener'))]
           })
           void writeDisk()
           offCanvas.created.push(placed.id)
           return placed.id
         }
-        setNodes((ns) => [...ns, placed])
-        connect(placed.id)
+        // A LINEAGE child is filed into the source's frame against the frame as it is when the
+        // update applies, and the frame chain grown in the SAME transform: `extent: 'parent'` clamps
+        // a child that lands past the frame's edge, which put it straight back onto its source. A
+        // node placed beside `--after` deps joins THEIR frame the same way (`openedFrameId`).
+        const frameId = openedFrameId(nodesRef.current, src, after)
+        setNodes((ns) => withOpenedNode(ns, node, frameId, snapGridNow()))
+        connect(node.id)
         markDirty()
-        return placed.id
+        return node.id
       }
       // The colour index every factory takes. Off canvas the live array holds another project's
       // nodes, so counting it would colour by a number that has nothing to do with where the node
       // lands. One name for the two sources, so no verb body has to ask which it is on.
       const nodeCount = () => (offCanvas ? offCanvas.project.nodes.length : nodesRef.current.length)
-      // Grid slots INSIDE a group frame (open-agent --group): 2 columns of terminal-sized
-      // cells under the header. Pure geometry — the frame is grown to fit before children land.
-      // `groupSlot`/`groupSizeFor` live in lib/coldOpen so the COLD path (an open answered out of a
-      // non-active project's serialized nodes) lands children on the identical grid; two copies of
-      // this arithmetic would be two layouts.
+      // Grid slots INSIDE a group frame (open-agent --group): 2 columns of terminal-sized cells
+      // under the header, first free slot first (`placeInFrame`). The geometry lives in
+      // @shared/placement so the COLD path (an open answered out of a non-active project's
+      // serialized nodes) lands children on the identical grid; two copies would be two layouts.
       // Validate `--group` (open-terminal / open-claude / open-agent): must name an existing
       // group frame. Returns its id, or null with the error already replied.
       const resolveIntoGroup = (): string | null | undefined => {
@@ -10204,36 +10409,30 @@ export function Canvas() {
       // clamp children landing outside it), then drop each node into the next grid slot
       // after the existing children. Shared by the terminal and agent open verbs.
       const addGrouped = (groupId: string, count: number, make: (i: number) => CanvasNode): string[] => {
-        const existing = nodesRef.current.filter((nd) => nd.parentId === groupId).length
+        // The first grid slot no CURRENT child occupies (frame-relative boxes), so a child the user
+        // moved is never landed on — the old `groupSlot(count + i)` assumed every child sat in its slot.
+        const kids: Box[] = nodesRef.current
+          .filter((nd) => nd.parentId === groupId)
+          .map((nd) => ({
+            x: nd.position.x,
+            y: nd.position.y,
+            w: (nd.measured?.width as number | undefined) ?? (nd.width as number | undefined) ?? 600,
+            h: (nd.measured?.height as number | undefined) ?? (nd.height as number | undefined) ?? 400
+          }))
         const ids: string[] = []
         for (let i = 0; i < count; i++) {
           const node = make(i)
-          const w = (node.width as number) ?? 600
-          const h = (node.height as number) ?? 400
-          if (i === 0) {
-            const need = groupSizeFor(existing + count, w, h)
-            setNodes((ns) =>
-              ns.map((nd) =>
-                nd.id === groupId
-                  ? {
-                      ...nd,
-                      width: Math.max((nd.width as number) ?? 0, need.width),
-                      height: Math.max((nd.height as number) ?? 0, need.height),
-                      style: {
-                        ...nd.style,
-                        width: Math.max((nd.width as number) ?? 0, need.width),
-                        height: Math.max((nd.height as number) ?? 0, need.height)
-                      }
-                    }
-                  : nd
-              )
-            )
-          }
-          node.position = groupSlot(existing + i, w, h)
+          const size = { w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }
+          const slot = placeInFrame(kids, size)
+          kids.push({ ...slot, ...size })
+          node.position = slot
           node.parentId = groupId
           node.extent = 'parent'
           ids.push(addAndConnect(node))
         }
+        // Hug the frame around its children in the same batch the children land in (a count-based
+        // size was wrong whenever a child had been moved or resized). A missing frame is a no-op.
+        setNodes((ns) => fitGroupToChildren(ns, groupId, snapGridNow()))
         return ids
       }
 
@@ -10314,7 +10513,7 @@ export function Canvas() {
                 createTerminalNode(
                   nodesRef.current.length + i,
                   termCwd,
-                  placeBelow(i),
+                  placeNext(i, after),
                   args.cmd,
                   sshFor(termCwd)
                 ),
@@ -10327,7 +10526,7 @@ export function Canvas() {
             }
             const ids = intoGroupId
               ? addGrouped(intoGroupId, count, make)
-              : Array.from({ length: count }, (_, i) => addAndConnect(make(i)))
+              : Array.from({ length: count }, (_, i) => addAndConnect(make(i), after ?? []))
             ropeDeps(ids, after)
             reply({
               ok: true,
@@ -10449,7 +10648,7 @@ export function Canvas() {
                   agentId,
                   nodesRef.current.length + i,
                   agentCwd,
-                  placeBelow(i),
+                  placeNext(i, after),
                   promptLaunch.prompt,
                   sshFor(agentCwd),
                   account,
@@ -10472,7 +10671,7 @@ export function Canvas() {
             }
             const ids = intoGroupId
               ? addGrouped(intoGroupId, count, make)
-              : Array.from({ length: count }, (_, i) => addAndConnect(make(i)))
+              : Array.from({ length: count }, (_, i) => addAndConnect(make(i), after ?? []))
             ropeDeps(ids, after)
             // Context-link the new session(s) back to the opener (same rationale as spawn-team:
             // the fan-out needs a fan-in). The nodes were added via setNodes in this tick, so
@@ -10743,7 +10942,45 @@ export function Canvas() {
             setNodes(next)
             markDirty()
             const how = verb === 'arrange' ? `as ${layout}` : `to ${edge}`
-            reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${ids.length} node(s) ${how}`, result: { count: ids.length, container } })
+            // Pinned members (or members of a pinned frame) were left where they are — say so.
+            const pinnedIds = ids.filter((id) => {
+              const nd = live.find((x) => x.id === id)
+              return !!nd && isPinned(nd, live)
+            })
+            const count = ids.length - pinnedIds.length
+            const note = pinnedIds.length ? ` (${pinnedIds.length} pinned, left in place)` : ''
+            reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${count} node(s) ${how}${note}`, result: { count, container, pinned: pinnedIds } })
+            return
+          }
+          case 'restructure': {
+            // The user's "Restructure canvas" for an agent. Like `arrange`, it moves nodes but not
+            // the user's camera — an agent does not get to reframe the view.
+            if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) {
+              reply({ ok: false, error: 'restructure: the kanban board is open — close it first' })
+              return
+            }
+            const layout: RestructureLayout = args.layout === 'radial' ? 'radial' : 'rows'
+            const live = nodesRef.current as CanvasNode[]
+            const ropesNow = controlEdgesRef.current.map(ropeLink)
+            const ranked = rankUnits(live, ropesNow)
+            const units = ranked.rows.flat().length + ranked.loose.length
+            const result = { units, layout, rows: ranked.rows.length, loose: ranked.loose.length }
+            const next = restructureNodes(live, ropesNow, layout)
+            if (next === live) {
+              reply({ ok: true, message: 'restructure: fewer than 2 top-level nodes — nothing to lay out', result })
+              return
+            }
+            setNodes(next)
+            markDirty()
+            const tiers =
+              layout === 'radial' ? `${Math.max(0, ranked.rows.length - 1)} ring(s)` : `${ranked.rows.length} row(s)`
+            reply({
+              ok: true,
+              message:
+                `restructured ${units} unit(s) in ${tiers}` +
+                (ranked.loose.length ? ` + ${ranked.loose.length} loose` : ''),
+              result
+            })
             return
           }
           case 'link': {
@@ -10893,7 +11130,12 @@ export function Canvas() {
               : null
             const panelIds = [...reviewerIds, ...(judge ? [judge.id] : [])]
             let next: CanvasNode[] = [...live, ...reviewers, ...(judge ? [judge] : [])]
-            next = arrangeNodes(next, panelIds, { layout: 'grid', origin: placeBelow(0) })
+            // `origin` is a TOP-LEFT: the first clear child slot below the source (the old call
+            // passed placeBelow's CENTER straight through, half a node off).
+            next = arrangeNodes(next, panelIds, {
+              layout: 'grid',
+              origin: placeChild(obstacles(), srcBox, newNodeSize(), 0)
+            })
             const vGroupCount = next.filter((nd) => nd.type === 'group').length
             const existingGroupIds = new Set(
               next.filter((node) => node.type === 'group').map((node) => node.id)
@@ -11034,7 +11276,11 @@ export function Canvas() {
             const memberIds = members.map((m) => m.id)
             // One computed array: append → arrange in a grid below the conductor → wrap in a group.
             let next: CanvasNode[] = [...live, ...members]
-            next = arrangeNodes(next, memberIds, { layout: 'grid', origin: placeBelow(0) })
+            // `origin` is a TOP-LEFT: the first clear child slot below the conductor.
+            next = arrangeNodes(next, memberIds, {
+              layout: 'grid',
+              origin: placeChild(obstacles(), srcBox, newNodeSize(), 0)
+            })
             const groupCount = next.filter((nd) => nd.type === 'group').length
             const existingGroupIds = new Set(
               next.filter((node) => node.type === 'group').map((node) => node.id)
@@ -11339,6 +11585,26 @@ export function Canvas() {
               message: `colored ${colored.length} node(s) ${color}${note}`,
               result: { colored, skipped, color }
             })
+            return
+          }
+          case 'pin': {
+            // Pin / unpin ONE node or frame (the user's node-menu row, for an agent). A pinned item
+            // and everything inside it is left in place by Restructure, arrange / align and frame
+            // fitting (`isPinned`). Subagent/loop cards are not persisted, so a pin would vanish.
+            const id = (args.node ?? '').trim()
+            const target = nodesRef.current.find((node) => node.id === id)
+            if (!target || target.type === 'subagent' || target.type === 'loop') {
+              reply({ ok: false, error: `pin: --node names no pinnable node (${id})` })
+              return
+            }
+            const on = args.set === 'on'
+            setNodes((nodes) =>
+              nodes.map((node) =>
+                node.id === id ? { ...node, data: { ...node.data, pinned: on ? true : undefined } } : node
+              )
+            )
+            markDirty()
+            reply({ ok: true, message: `${on ? 'pinned' : 'unpinned'} ${id}`, result: { id, pinned: on } })
             return
           }
           case 'sticky': {
@@ -13442,10 +13708,18 @@ export function Canvas() {
         ? [
             {
               id: 'arrange-all',
-              label: 'Tidy canvas',
-              hint: 'arrange grid layout organize clean up',
+              label: 'Restructure canvas',
+              // The old name stays searchable: this row replaced "Tidy canvas".
+              hint: 'tidy arrange grid layout organize clean up lineage',
               icon: <IconGrid />,
-              run: arrangeAllNodes
+              run: () => arrangeAllNodes()
+            } as Command,
+            {
+              id: 'arrange-all-radial',
+              label: 'Restructure canvas (radial)',
+              hint: 'tidy arrange ring fan radial layout lineage',
+              icon: <IconGrid />,
+              run: () => arrangeAllNodes('radial')
             } as Command
           ]
         : []),

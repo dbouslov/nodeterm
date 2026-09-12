@@ -18,6 +18,7 @@ export function routeAll(req: RouteRequest, previous?: RoutedGraph, moved?: Read
   const ports = portsFor({ nodes: req.nodes, edges: live })
   const routes = new Map<string, Route>()
   let fallbacks = 0
+  let widenings = 0
 
   if (previous && moved && moved.size) {
     const movedBoxes = [...moved].map((id) => req.nodes.get(id)).filter((b): b is NonNullable<typeof b> => !!b)
@@ -30,9 +31,10 @@ export function routeAll(req: RouteRequest, previous?: RoutedGraph, moved?: Read
       if (!p) continue
       const r = routeOne(e, req, p)
       if (r.fallback) fallbacks++
+      if (r.widened) widenings++
       routes.set(e.id, r)
     }
-    return { routes, fallbacks }
+    return { routes, fallbacks, widenings }
   }
 
   for (const e of live) {
@@ -40,6 +42,7 @@ export function routeAll(req: RouteRequest, previous?: RoutedGraph, moved?: Read
     if (!p) continue
     const r = routeOne(e, req, p)
     if (r.fallback) fallbacks++
+    if (r.widened) widenings++
     routes.set(e.id, r)
   }
   const obstacleCache = new Map<string, ReturnType<typeof obstaclesFor>>()
@@ -57,5 +60,5 @@ export function routeAll(req: RouteRequest, previous?: RoutedGraph, moved?: Read
     }
     return o
   }
-  return { routes: nudge(routes, live, obstaclesOf), fallbacks }
+  return { routes: nudge(routes, live, obstaclesOf), fallbacks, widenings }
 }

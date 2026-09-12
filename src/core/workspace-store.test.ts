@@ -131,7 +131,7 @@ describe('v2 → v3 migration', () => {
 // the upgrade drops it (the connection breaks), and the next save erases it from disk and
 // propagates the deletion to every teammate via `rev`. Silently.
 describe('inline (cwd-less) project kanban shape guard', () => {
-  const writeInlineIndex = async (kanban: unknown): Promise<void> => {
+  const writeInlineIndex = async (kanban: unknown, extra: Record<string, unknown> = {}): Promise<void> => {
     await fs.writeFile(
       path.join(userData, 'workspace.json'),
       JSON.stringify({
@@ -144,13 +144,28 @@ describe('inline (cwd-less) project kanban shape guard', () => {
             color: '#7aa2f7',
             project: {
               id: 'p1', name: 'inline', color: '#7aa2f7', viewport: { x: 0, y: 0, zoom: 1 },
-              nodes: [], kanban
+              nodes: [], kanban, ...extra
             }
           }
         ]
       })
     )
   }
+
+  it('drops a bad rope kind on an inline project and keeps the rope (same rule as fileToProject)', async () => {
+    await writeInlineIndex(undefined, {
+      ropes: [
+        { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' },
+        { id: 'ctrl-a-c', source: 'a', target: 'c', kind: 'sibling' },
+        { id: 7, source: 'a', target: 'd' }
+      ]
+    })
+    const loaded = await new WorkspaceStore().load()
+    expect(loaded.projects[0].ropes).toEqual([
+      { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' },
+      { id: 'ctrl-a-c', source: 'a', target: 'c' }
+    ])
+  })
 
   it('drops a v1-shaped kanban on an inline project (degrades to fresh default, no crash)', async () => {
     await writeInlineIndex({ columns: [], cards: [] })

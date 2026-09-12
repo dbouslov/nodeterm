@@ -1,13 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  coldGroupChildCount,
+  coldFileIntoFrame,
   coldGroupCwd,
   coldOpenMessage,
   coldPlaceBelow,
   coldResolveAfter,
   coldResolveGroup,
-  groupSizeFor,
-  groupSlot,
   offCanvasNoticeText,
   offCanvasReplyClause,
   storedAgentIdOf,
@@ -158,8 +156,10 @@ describe('coldResolveAfter', () => {
 describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometry', () => {
   it('centers below the source and fans siblings right', () => {
     const src = N('src', { position: { x: 100, y: 200 }, size: { width: 600, height: 400 } })
-    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 400, y: 890 })
-    expect(coldPlaceBelow([src], src, 1)).toEqual({ x: 860, y: 890 })
+    // top-left (100, 200 + 400 + ROW_GAP 80), a 600×400 node → center (+300, +200); siblings step
+    // one node width + PLACEMENT_GAP (640) to the right.
+    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 400, y: 880 })
+    expect(coldPlaceBelow([src], src, 1)).toEqual({ x: 1040, y: 880 })
   })
 
   it('resolves a grouped source to ROOT space', () => {
@@ -171,36 +171,95 @@ describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometr
       position: { x: 10, y: 20 },
       size: { width: 600, height: 400 }
     })
-    expect(coldPlaceBelow([frame, src], src, 0)).toEqual({ x: 1310, y: 1710 })
+    expect(coldPlaceBelow([frame, src], src, 0)).toEqual({ x: 1310, y: 1700 })
   })
 
   it('falls back to the default node size when none is persisted', () => {
     const src = N('src', { position: { x: 0, y: 0 } })
-    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 300, y: 690 })
+    expect(coldPlaceBelow([src], src, 0)).toEqual({ x: 300, y: 680 })
+  })
+
+  it('does not stack two siblings when the first is passed back as reserved', () => {
+    const src = N('src', { position: { x: 0, y: 0 }, size: { width: 600, height: 400 } })
+    const a = coldPlaceBelow([src], src, 0)
+    const b = coldPlaceBelow([src], src, 0, { reserved: [{ x: a.x - 300, y: a.y - 200, w: 600, h: 400 }] })
+    expect(b).not.toEqual(a)
+    expect(b.x).toBeGreaterThan(a.x)
+  })
+
+  it('an --after dependent goes RIGHT of its dep, the live rule (waiting on the opener stays below)', () => {
+    const src = N('src', { position: { x: 0, y: 0 }, size: { width: 600, height: 400 } })
+    const dep = N('dep', { position: { x: 0, y: 1000 }, size: { width: 600, height: 400 } })
+    // top-left (600 + PLACEMENT_GAP 40, 1000), a 600×400 node → center (+300, +200)
+    expect(coldPlaceBelow([src, dep], src, 0, { deps: [dep] })).toEqual({ x: 940, y: 1200 })
+    expect(coldPlaceBelow([src, dep], src, 0, { deps: [src] })).toEqual(coldPlaceBelow([src, dep], src, 0))
+  })
+
+  it('an --after dependent of a framed source: the frame IS an obstacle (it stays top-level beside its dep)', () => {
+    const g = N('g', { kind: 'group', position: { x: 1000, y: 1000 }, size: { width: 1400, height: 1200 } })
+    const src = N('src', { parentId: 'g', position: { x: 24, y: 56 }, size: { width: 600, height: 400 } })
+    const dep = N('dep', { position: { x: 300, y: 1100 }, size: { width: 600, height: 400 } })
+    // Right of dep (940, 1100) runs into the frame: three cells right, past its edge. CENTER = +300, +200.
+    expect(coldPlaceBelow([g, src, dep], src, 0, { deps: [dep] })).toEqual({ x: 940 + 3 * 640 + 300, y: 1300 })
   })
 })
 
-describe('group grid geometry (shared with the live addGrouped path)', () => {
-  it('lays children out in two columns under the frame header', () => {
-    expect(groupSlot(0, 600, 400)).toEqual({ x: 24, y: 56 })
-    expect(groupSlot(1, 600, 400)).toEqual({ x: 648, y: 56 })
-    expect(groupSlot(2, 600, 400)).toEqual({ x: 24, y: 480 })
+describe('coldFileIntoFrame — an opened node joins the frame its anchor lives in', () => {
+  // A frame hugging its source; the node placed below the source (ROOT space, 1056 + 400 + ROW_GAP
+  // 80) is past the frame's bottom edge, where extent:'parent' would clamp it onto the source.
+  const g = N('g', { kind: 'group', position: { x: 1000, y: 1000 }, size: { width: 648, height: 510 } })
+  const src = N('src', { parentId: 'g', position: { x: 24, y: 56 }, size: { width: 600, height: 400 } })
+  const placed = { x: 1024, y: 1536, w: 600, h: 400 }
+
+  it('files each placed node into the frame, frame-relative, and grows the frame right and down to hold it', () => {
+    const r = coldFileIntoFrame([g, src], src, [placed])
+    expect(r.frameId).toBe('g')
+    expect(r.positions).toEqual([{ x: 24, y: 536 }])
+    // Grow-only, never moved (the cold --group rule): the farthest child edge + GROUP_PAD_X (24).
+    expect(r.frames).toEqual([{ id: 'g', size: { width: 648, height: 536 + 400 + 24 } }])
   })
 
-  it('sizes the frame to hold N children', () => {
-    expect(groupSizeFor(1, 600, 400)).toEqual({ width: 648, height: 480 })
-    expect(groupSizeFor(3, 600, 400)).toEqual({ width: 1272, height: 904 })
+  it('grows every frame up the chain', () => {
+    const outer = N('outer', { kind: 'group', position: { x: 900, y: 900 }, size: { width: 800, height: 660 } })
+    const inner = { ...g, parentId: 'outer', position: { x: 100, y: 100 } } // root (1000, 1000), as before
+    const r = coldFileIntoFrame([outer, inner, src], src, [placed])
+    expect(r.positions).toEqual([{ x: 24, y: 536 }])
+    expect(r.frames).toEqual([
+      { id: 'g', size: { width: 648, height: 960 } },
+      { id: 'outer', size: { width: 800, height: 100 + 960 + 24 } }
+    ])
   })
 
-  it('counts only DIRECT children of the frame', () => {
-    const nodes = [
-      N('g'),
-      N('a', { parentId: 'g' }),
-      N('b', { parentId: 'g' }),
-      N('c', { parentId: 'other' }),
-      N('d')
-    ]
-    expect(coldGroupChildCount(nodes, 'g')).toBe(2)
+  it('files nothing beside a TOP-LEVEL --after dep; waiting on the source itself is still lineage', () => {
+    const dep = N('dep', { position: { x: 0, y: 0 } })
+    expect(coldFileIntoFrame([g, src, dep], src, [placed], { deps: [dep] })).toEqual({
+      positions: [{ x: 1024, y: 1536 }],
+      frames: []
+    })
+    expect(coldFileIntoFrame([g, src, dep], src, [placed], { deps: [src] }).frameId).toBe('g')
+  })
+
+  it('files a node placed beside an --after dep into the DEP’s frame, never the source’s', () => {
+    // The dep rides in its own frame, far from the source's: the node goes right of the dep
+    // (`coldPlaceBelow`), joins that frame, and grows it to the right.
+    const other = N('other', { kind: 'group', position: { x: 4000, y: 0 }, size: { width: 800, height: 700 } })
+    const dep = N('dep', { parentId: 'other', position: { x: 24, y: 56 }, size: { width: 600, height: 400 } })
+    const beside = { x: 4664, y: 56, w: 600, h: 400 } // root space: right of the dep (4024 + 600 + 40)
+    const r = coldFileIntoFrame([g, src, other, dep], src, [beside], { deps: [dep] })
+    expect(r.frameId).toBe('other')
+    expect(r.positions).toEqual([{ x: 664, y: 56 }])
+    expect(r.frames).toEqual([{ id: 'other', size: { width: 664 + 600 + 24, height: 700 } }])
+  })
+
+  it('files nothing for a top-level source, or one whose frame is gone', () => {
+    const loose = N('loose', { position: { x: 0, y: 0 } })
+    const orphan = N('orphan', { parentId: 'gone', position: { x: 0, y: 0 } })
+    for (const s of [loose, orphan]) {
+      expect(coldFileIntoFrame([loose, orphan], s, [placed])).toEqual({
+        positions: [{ x: 1024, y: 1536 }],
+        frames: []
+      })
+    }
   })
 })
 

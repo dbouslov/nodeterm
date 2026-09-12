@@ -12,6 +12,7 @@ import {
 } from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
 import { applyAnnotation, parseAnnotateArgs } from '../shared/node-annotation'
+import { containerJoinedBy, framesJoinedBy, placeOpened, type Box } from '../shared/placement'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
   AGENT_CONFIG,
@@ -125,8 +126,6 @@ const TERMINAL_COLS = 120
 const TERMINAL_ROWS = 36
 const TERMINAL_SIZE = { width: 640, height: 440 }
 const STICKY_SIZE = { width: 240, height: 200 }
-const H_GAP = 80
-const V_GAP = 36
 const GROUP_PAD = 28
 const GROUP_HEADER = 34
 const AFTER_RETRY_MS = 500
@@ -209,44 +208,45 @@ function absolutePosition(project: Project, node: CanvasNodeState): { x: number;
   return { x, y }
 }
 
-function placeRight(
+function nodeBox(project: Project, node: CanvasNodeState): Box {
+  const p = absolutePosition(project, node)
+  return {
+    x: p.x,
+    y: p.y,
+    w: Math.max(1, node.size?.width || TERMINAL_SIZE.width),
+    h: Math.max(1, node.size?.height || TERMINAL_SIZE.height)
+  }
+}
+
+/**
+ * Where a node this factory opens lands — the shared engine's `placeOpened`, the desktop's own
+ * rule, over the project's stored nodes plus the nodes this same call already made (`reserved`,
+ * not in `project.nodes` yet): RIGHT of its `--after` deps (`deps`, resolved to stored nodes),
+ * else BELOW the source as sibling `reserved.length`. This factory used to scan a 3-row column to
+ * the RIGHT of the source, so one verb laid out two ways depending on the edition.
+ */
+export function placeNode(
   project: Project,
   source: CanvasNodeState,
   size: { width: number; height: number },
-  reserved: readonly CanvasNodeState[] = []
+  reserved: readonly CanvasNodeState[] = [],
+  deps: readonly CanvasNodeState[] = []
 ): { x: number; y: number } {
-  const origin = absolutePosition(project, source)
-  const sourceWidth = source.size?.width || TERMINAL_SIZE.width
-  const occupied = [...project.nodes, ...reserved].map((node) => {
-    const position = absolutePosition(project, node)
-    return {
-      x: position.x,
-      y: position.y,
-      width: Math.max(1, node.size?.width || TERMINAL_SIZE.width),
-      height: Math.max(1, node.size?.height || TERMINAL_SIZE.height)
-    }
-  })
-
-  // Keep the existing compact three-row grid, but scan it rather than assuming this request's
-  // local index is globally free. Repeated requests therefore continue into the first available
-  // row/column instead of returning to slot zero and stacking nodes on top of one another.
-  for (let slot = 0; ; slot++) {
-    const column = Math.floor(slot / 3)
-    const row = slot % 3
-    const candidate = {
-      x: origin.x + sourceWidth + H_GAP + column * (size.width + H_GAP),
-      y: origin.y + row * (size.height + V_GAP),
-      width: size.width,
-      height: size.height
-    }
-    const collides = occupied.some((rect) =>
-      candidate.x < rect.x + rect.width &&
-      candidate.x + candidate.width > rect.x &&
-      candidate.y < rect.y + rect.height &&
-      candidate.y + candidate.height > rect.y
-    )
-    if (!collides) return { x: candidate.x, y: candidate.y }
-  }
+  // The frames of the container this node is filed into are not obstacles for it, because that
+  // container grows to hold it: the SOURCE's own frames for a lineage child, its DEPS' for a
+  // dependent, none for a node that stays top-level (`framesJoinedBy`, the desktop's rule).
+  const depBoxes = deps.map((dep) => nodeBox(project, dep))
+  const frames = framesJoinedBy(project.nodes, source.id, deps)
+  const existing = [...project.nodes.filter((node) => !frames.has(node.id)), ...reserved].map((node) =>
+    nodeBox(project, node)
+  )
+  return placeOpened(
+    existing,
+    nodeBox(project, source),
+    depBoxes,
+    { w: size.width, h: size.height },
+    reserved.length
+  )
 }
 
 function addEdge(list: BridgeLink[], source: string, target: string, prefix: string): void {
@@ -310,6 +310,19 @@ function groupsFirst(nodes: CanvasNodeState[]): CanvasNodeState[] {
   return [...groups, ...nodes.filter((node) => node.kind !== 'group')]
 }
 
+/** Whether a stored node is pinned, or sits inside a pinned frame. Only a literal `true` counts. */
+function pinnedInProject(nodes: readonly CanvasNodeState[], node: CanvasNodeState): boolean {
+  const seen = new Set<string>()
+  let cur: CanvasNodeState | undefined = node
+  while (cur && !seen.has(cur.id)) {
+    if (cur.pinned === true) return true
+    seen.add(cur.id)
+    const parentId: string | undefined = cur.parentId
+    cur = parentId ? nodes.find((candidate) => candidate.id === parentId) : undefined
+  }
+  return false
+}
+
 /** Re-fit one persisted group around its direct children without moving them in parent space. */
 function fitGroupToChildren(
   nodes: CanvasNodeState[],
@@ -319,6 +332,15 @@ function fitGroupToChildren(
   if (!group || group.kind !== 'group') return nodes
   const children = nodes.filter((node) => node.parentId === groupId)
   if (!children.length) return nodes
+  // A pinned frame (or one inside a pinned frame) never moves and never shrinks — it grows in
+  // place, right and down. The desktop's rule (`fitGroupToChildren`, renderer/state/workspace).
+  if (pinnedInProject(nodes, group)) {
+    const size = {
+      width: Math.max(group.size.width, ...children.map((c) => c.position.x + c.size.width + GROUP_PAD)),
+      height: Math.max(group.size.height, ...children.map((c) => c.position.y + c.size.height + GROUP_PAD))
+    }
+    return nodes.map((node) => (node.id === groupId ? { ...node, size } : node))
+  }
   const absoluteX = (child: CanvasNodeState): number => group.position.x + child.position.x
   const absoluteY = (child: CanvasNodeState): number => group.position.y + child.position.y
   const minX = Math.min(...children.map(absoluteX))
@@ -1152,6 +1174,24 @@ export class HeadlessNodeFactory {
 
       const count = parseCount(args.count, verb === 'open-terminal' ? TERMINAL_LIMIT : AGENT_LIMIT)
       const created: CanvasNodeState[] = []
+      // `--after` deps that are stored nodes: the node goes RIGHT of them (the desktop's rule).
+      // Waiting on the opener itself is still lineage, so that one stays below the opener.
+      const afterNodes = after
+        .filter((depId) => depId !== source.node.id)
+        .flatMap((depId) => target.nodes.filter((candidate) => candidate.id === depId))
+      // A source inside a frame keeps its LINEAGE children inside that frame (the desktop's rule):
+      // each is placed below the source in ROOT space, filed into the frame, and the frame chain is
+      // re-fitted once every node of this call is in. A dependent joins the frame ITS DEPS live in
+      // instead (`containerJoinedBy`) — never the source's just because the source is there.
+      // Lineage only in the source's own project: a `--project` target does not hold the source's
+      // frame, while the deps are resolved from `target`, so theirs always is.
+      const intoFrameId =
+        afterNodes.length || target === source.project
+          ? containerJoinedBy(target.nodes, source.node.id, afterNodes)
+          : undefined
+      const intoFrame = intoFrameId
+        ? target.nodes.find((node) => node.id === intoFrameId && node.kind === 'group')
+        : undefined
       const commands = new Map<string, string>()
       const ropes = [...(target.ropes ?? [])]
       const bridges = [...(target.bridges ?? [])]
@@ -1217,10 +1257,13 @@ export class HeadlessNodeFactory {
               ...(awaitWorking.length ? { awaitWorking: [...awaitWorking] } : {})
             }
           : undefined
+        const at = placeNode(target, source.node, nodeSize, created, afterNodes)
+        const origin = intoFrame ? absolutePosition(target, intoFrame) : { x: 0, y: 0 }
         const node: CanvasNodeState = {
           id,
           kind: 'terminal',
-          position: placeRight(target, source.node, nodeSize, created),
+          position: { x: at.x - origin.x, y: at.y - origin.y },
+          ...(intoFrame ? { parentId: intoFrame.id } : {}),
           size: { ...nodeSize },
           title,
           ...(verb === 'open-agent' ? { titleAuto: true } : {}),
@@ -1255,14 +1298,19 @@ export class HeadlessNodeFactory {
         }
       }
 
+      // Grow the source's frame chain around what landed in it — once, after every node of this
+      // call is in, so no sibling was converted against a frame origin a fit then moved. A fit
+      // rewrites the frame (and re-anchors its children), so everything it changed is published.
+      const prior = new Set(target.nodes)
       target.nodes.push(...created)
+      if (intoFrame) target.nodes = fitAncestorChain(target.nodes, intoFrame.id)
       target.ropes = ropes
       target.bridges = bridges
       await this.deps.workspaceStore.save(workspace)
       for (const node of created) {
         this.ownership.record(node.id, { sourceNodeId, projectId: target.id })
       }
-      this.publish(target, created)
+      this.publish(target, target.nodes.filter((node) => !prior.has(node)))
 
       const failed: string[] = []
       for (const node of created) {
@@ -1325,10 +1373,17 @@ export class HeadlessNodeFactory {
       if ('id' in resolved) node = source.project.nodes.find((candidate) => candidate.id === resolved.id)
       else if (parsed.create) {
         created = true
+        // Into the source's frame, like an opened node (the desktop files a note the same way).
+        const frame = source.project.nodes.find(
+          (candidate) => candidate.id === source.node.parentId && candidate.kind === 'group'
+        )
+        const at = placeNode(source.project, source.node, STICKY_SIZE)
+        const origin = frame ? absolutePosition(source.project, frame) : { x: 0, y: 0 }
         node = {
           id: nextId('sticky'),
           kind: 'sticky',
-          position: placeRight(source.project, source.node, STICKY_SIZE),
+          position: { x: at.x - origin.x, y: at.y - origin.y },
+          ...(frame ? { parentId: frame.id } : {}),
           size: { ...STICKY_SIZE },
           title: oneLine(parsed.ref) || 'Note',
           color: '#ffd60a',
@@ -1355,11 +1410,22 @@ export class HeadlessNodeFactory {
       node.text = write.text
       node.textUpdatedAt = (this.deps.now ?? Date.now)()
       node.textUpdatedBy = source.node.title || source.node.id
+      // A new note filed into its source's frame grows that frame chain. Fitted only now, after the
+      // text is on the node: a fit replaces the node objects it touches, so everything it changed
+      // (the frame, its re-anchored children) is published along with the note.
+      const prior = new Set(source.project.nodes)
+      const noteId = node.id
+      if (created && node.parentId) {
+        source.project.nodes = fitAncestorChain(source.project.nodes, node.parentId)
+      }
+      const changed = source.project.nodes.filter(
+        (candidate) => !prior.has(candidate) || candidate.id === noteId
+      )
       await this.deps.workspaceStore.save(workspace)
       if (created) {
         this.ownership.record(node.id, { sourceNodeId, projectId: source.project.id })
       }
-      this.publish(source.project, [node])
+      this.publish(source.project, changed)
       return {
         ok: true,
         message: `${created ? 'created' : 'updated'} sticky ${node.id} (${write.mode})`,

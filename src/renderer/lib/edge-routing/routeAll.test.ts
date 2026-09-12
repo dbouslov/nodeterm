@@ -15,6 +15,19 @@ describe('routeAll', () => {
     expect([...g.routes.keys()].sort()).toEqual(['ab', 'cd'])
     expect(g.fallbacks).toBe(0)
   })
+  // A search that fails inside its window re-runs over the whole canvas, which costs far more than
+  // the windowed search: on the old perf canvas one widened search was 15 ms of a 29 ms drag pass.
+  // perf.test.ts holds this count at zero on a spaced canvas, so it has to count. Here a wall
+  // taller than the window stands between the two ends: nothing inside the window gets past it,
+  // and the whole-canvas search goes round its end.
+  it('counts a search that had to widen past its window', () => {
+    const wall: RouteNode = { id: 'w', x: 300, y: -1000, width: 100, height: 2100, isFrame: false }
+    const g = routeAll(mk([n('a', 0, 0), n('b', 600, 0), wall], [{ id: 'ab', source: 'a', target: 'b', kind: 'context' }]))
+    const r = g.routes.get('ab')!
+    expect(r.fallback).toBe(false)
+    expect(r.widened).toBe(true)
+    expect(g.widenings).toBe(1)
+  })
   // A routed edge may never pass through a node's body, and that includes the nodes its search
   // never saw: the obstacle list is filtered to the search window, so a route that leaves the
   // window is in territory where nothing is registered as an obstacle. Asked over 120 random

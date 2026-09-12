@@ -107,6 +107,20 @@ lane unaffected.
   white, take `SYSTEM_NODE_COLOR_SWATCHES` instead, with the contrast reason in a comment. Deep
   version, including the measured numbers: CLAUDE.md § Node colors.
 
+- **Placing a new node? Call `@shared/placement`, never a local `{x, y}` rule.** Every path that
+  creates a node (hand, dock, agent verb, cold open, headless server) goes through the one engine
+  in `src/shared/placement/` — the eight independent rules it replaced are how nodes came to spawn
+  on top of each other. When one call opens several nodes, reserve what you place (append its box
+  to `existing`) before placing the next. A node opened FROM a node inside a frame is filed into
+  that frame, which grows to hold it — unless it waits on `--after` deps, in which case it goes
+  beside them, into THEIR frame (`containerJoinedBy` decides the container once; top level when the
+  deps are top-level or disagree). The live, cold and headless paths must agree on where it lands,
+  and `test/acceptance/placement-parity.test.ts` fails when they do not. Moving EXISTING
+  nodes is `lib/restructure.ts`'s job and happens only on the explicit Restructure action — and
+  anything that moves existing nodes automatically must skip pinned ones (`isPinned`,
+  `renderer/state/workspace.ts`): the user pinned
+  them so layout would leave them alone. Deep version: CLAUDE.md § Canvas interaction & panels.
+
 - **Every loosening of a security gate must be a SETTING the user can see and revoke.** A "don't
   ask again" that lives only in a dialog is a permission granted once and never findable again. The
   canvas-control destructive confirm is the pattern to copy (`@shared/control-confirm`): the dialog
@@ -465,7 +479,10 @@ edge.** Never set `sourceHandle`/`targetHandle`, and never put `style` or `marke
 object — the look comes from `renderer/lib/edgeKinds.ts` at render time, so a new kind is one row
 in that table (and one legend row), not a new colour at a call site. The path comes from the pure
 router in `renderer/lib/edge-routing/`; if you need an edge to avoid something new, it is an
-obstacle rule there, not a React change. And do not add a second edge family for a
+obstacle rule there, not a React change. Its CI perf pins are counts, not timings (no widened
+search, no fallback on a spaced canvas); after changing the router, also run
+`PERF=1 npx vitest run src/renderer/lib/edge-routing` for the wall-clock pins. And do not add a
+second edge family for a
 relation a rope already carries: `--after` is a **rope** whose dashed "⏳ waits for" look is DERIVED
 from the target's `pendingLaunch` (`renderer/lib/edgeModel.ts`), and the context bridge it also
 writes stays hidden underneath it. One `open-claude --after` used to land three edges on one node.

@@ -12,7 +12,7 @@ import {
 import {
   PROJECT_DIR, PROJECT_FILE, fileToProject, inlineProjectFileRelPath, isInlineProjectFileId,
   projectToFile, resolveNodes, sameProjectContent,
-  sanitizeLoadedClosedSessions, sanitizeNodeTriggers, serializeProjectFile, splitWorkspace,
+  sanitizeLoadedClosedSessions, sanitizeNodeTriggers, sanitizeRopes, serializeProjectFile, splitWorkspace,
   validKanban,
   type IndexEntryV3, type ProjectFileV1, type WorkspaceIndexV3
 } from './workspace-files'
@@ -309,9 +309,14 @@ export class WorkspaceStore {
         // Inline projects are stored verbatim in the index (no fileToProject pass), so apply the
         // same kanban shape guard here — a v1/hand-edited board would otherwise crash the render —
         // and the same trigger shape rule (workspace.json is hand-editable input too).
-        // `rest` drops BOTH guarded fields; each is added back below only if it passes its guard.
-        const { kanban, closedSessions, ...rest } = e.project
-        const base = validKanban(kanban) ? { ...rest, kanban } : rest
+        // `rest` drops every guarded field; each is added back below only if it passes its guard.
+        // `ropes` gets fileToProject's rule: a bad rope `kind` is dropped, the rope kept.
+        const { kanban, closedSessions, ropes, ...rest } = e.project
+        const safeRopes = sanitizeRopes(ropes)
+        const base = {
+          ...(validKanban(kanban) ? { ...rest, kanban } : rest),
+          ...(safeRopes ? { ropes: safeRopes } : {})
+        }
         // Same treatment for `closedSessions` as the ref'd-project entries above, and for the
         // same reason: a malformed value here reaches `mergeClosedHistory`, which iterates it (a
         // non-array throws and takes the whole sidebar render down) and hands each entry's node
