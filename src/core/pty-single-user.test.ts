@@ -265,6 +265,39 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
     fs.rmSync(cwd, { recursive: true, force: true })
   })
 
+  // nodeterm relaunched with `open` from inside a Claude Code session inherited that session's
+  // environment, and every agent it then spawned started with "Transcript saving is off, inherited
+  // CLAUDE_CODE_CHILD_SESSION marker" — holding the launcher's session id and messaging token too
+  // (2026-09-11). A pane starts its own session; it is never a child of the app's launcher.
+  it.each([
+    ['tmux', () => tmuxManager()],
+    ['plain shell', () => manager()]
+  ])('never hands a %s pane the Claude Code session the APP was launched from', async (_kind, make) => {
+    const injected: Record<string, string> = {
+      CLAUDECODE: '1',
+      CLAUDE_CODE_CHILD_SESSION: '1',
+      CLAUDE_CODE_SESSION_ID: 'launcher-session',
+      CLAUDE_CODE_MESSAGING_TOKEN: 'launcher-token',
+      CLAUDE_PID: '19105',
+      GIT_EDITOR: 'true'
+    }
+    const saved = Object.fromEntries(Object.keys(injected).map((k) => [k, process.env[k]]))
+    Object.assign(process.env, injected)
+    try {
+      await make()
+      await create(80, 24)
+      const { env, args } = spawnArgs[0]
+      for (const k of Object.keys(injected)) expect(env[k], k).toBeUndefined()
+      expect(args.join(' ')).not.toContain('launcher-')
+      expect(env.TERM).toBe('xterm-256color')
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it('injects the shared gateway into both the PTY and its tmux session environment', async () => {
     const inherited = process.env.NODETERM_TEST_GATEWAY_KEY
     process.env.NODETERM_TEST_GATEWAY_KEY = 'vk-secret'

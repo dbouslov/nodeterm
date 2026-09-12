@@ -10,13 +10,21 @@
 // Also proven: the remote prologue (`remoteSessionEnvPrologue` via `remoteTmuxPtyArgs`) run
 // through a real /bin/sh — the staged file is sourced into the tmux client's env, deleted, and
 // its values land in the pane; a file that never appears costs 2s and nothing else.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+//
+// And the removal half, through the real PtyManager: a listed name the creating client lacks is
+// REMOVED from the session, which is what keeps a tmux server started inside a Claude Code session
+// from handing that session to every pane it creates later.
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
-import { tmuxConf } from './pty-manager'
+import { PtyManager, tmuxConf } from './pty-manager'
 import { sessionEnvFileContent } from './remote-ssh/session-env'
 import { makeTmuxTmpdir } from './tmux-test-socket'
+import { initPlatform, resetPlatformForTests } from './platform'
+import { fakePlatform, type FakePlatform } from './platform-fake'
+import { IPC } from '../shared/ipc'
+import { DEFAULT_SETTINGS } from '../shared/types'
 
 /**
  * A private socket — never the live-session sockets, and never the SHARED `/tmp/tmux-<uid>/`
@@ -145,5 +153,146 @@ describe('the remote prologue, run through a real /bin/sh', () => {
     // 6 × 50ms wait budget, then the session still launched — without the env.
     expect(Date.now() - t0).toBeGreaterThanOrEqual(250)
     expect(await waitFor(out)).toBe('TOKEN=[]\n')
+  })
+})
+
+// ── A server started inside a Claude Code session, driven through the real PtyManager ─────────
+//
+// `stripClaudeSessionEnv` cleans the tmux CLIENT's env, but a pane's env starts from the SERVER's
+// global env — and a server started while nodeterm ran inside a Claude Code session keeps that
+// session there for as long as it lives (it outlives the app). A name `update-environment` does not
+// list comes from that global env whatever the creating client carries (measured on tmux 3.7b). A
+// name the client carries reaches the session only because create() lists every client-env name
+// (`customEnvMerged`) in `update-environment`, so the names the strip removes are exactly the ones
+// only that list reached: they must be listed on their own. Listing them is the #419 mechanism
+// (account-env.realtmux.test.ts); it reaches a RUNNING server through init's `source-file` and
+// `ensureUpdateEnvKeys`.
+//
+// The manager binds `-L node-terminal`, so the tmux it resolves is a shim that re-points every call
+// at this suite's private server (the SSH-shim idiom of tmux-paste.realtmux.test.ts). vi.mock is
+// hoisted file-wide; only this suite constructs a PtyManager.
+let shimTmux = ''
+vi.mock('./tmux-hint', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./tmux-hint')>()),
+  findFixedTmux: () => shimTmux
+}))
+// Pinned for the reasons pty-single-user.test.ts gives: the tmux backend (never a session host a
+// local build happens to have), a pty ceiling the developer's machine cannot exhaust, and no probe
+// of the developer's login-shell dotfiles (null = the inherited-PATH fallback).
+vi.mock('./session-host-backend', async () =>
+  (await import('./__fixtures__/no-session-host')).noSessionHost()
+)
+vi.mock('./pty-devices', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./pty-devices')>()),
+  readPtyDevices: () => ({ ceiling: 511, inUse: 8 })
+}))
+vi.mock('./exec-path', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./exec-path')>()),
+  resolveShellPath: () => Promise.resolve(null),
+  shellPathNow: () => null
+}))
+// The manager's node-pty spawn is REPLAYED, not faked: the same binary, argv and env it handed
+// node-pty, run with `-d` in place of the attach flags because the runner has no tty to attach.
+// tmux builds the session env at `new-session` from the creating client's env either way.
+vi.mock('node-pty', () => ({
+  spawn: (file: string, args: string[], opts: { cwd: string; env: Record<string, string> }) => {
+    const at = args.indexOf('new-session')
+    const detached = args.flatMap((a, i) =>
+      i === at ? [a, '-d'] : i > at && (a === '-A' || a === '-D') ? [] : [a]
+    )
+    execFileSync(file, detached, { cwd: opts.cwd, env: opts.env, stdio: 'ignore' })
+    const noop = (): void => {}
+    return { onData: noop, onExit: noop, write: noop, resize: noop, pause: noop, resume: noop, kill: noop, pid: 1 }
+  }
+}))
+
+describe('a tmux server started inside a Claude Code session', () => {
+  const CS_SOCKET = `nt-cstest-${process.pid}`
+  /** The launcher's tool-shell env (the measured set, claude-session-env.test.ts). One marker value,
+   *  so a leak is the SEEDED copy arriving: a runner that exports its own GIT_EDITOR, which a pane
+   *  is entitled to through its client, can never be mistaken for one. */
+  const LAUNCHER = [
+    'CLAUDECODE',
+    'CLAUDE_CODE_CHILD_SESSION',
+    'CLAUDE_CODE_SESSION_ID',
+    'CLAUDE_CODE_BRIDGE_SESSION_ID',
+    'CLAUDE_CODE_MESSAGING_SOCKET',
+    'CLAUDE_CODE_MESSAGING_TOKEN',
+    'CLAUDE_CODE_ENTRYPOINT',
+    'CLAUDE_CODE_EXECPATH',
+    'CLAUDE_PID',
+    'CLAUDE_CODE_SESSION_ATTENDED',
+    'CLAUDE_EFFORT',
+    'AI_AGENT',
+    'GIT_EDITOR',
+    'COREPACK_ENABLE_AUTO_PIN',
+    'NoDefaultCurrentDirectoryInExePath'
+  ]
+  const SEEDED = 'from-the-launcher'
+  let csTmp = ''
+  let realTmux = ''
+  let fake: FakePlatform
+
+  const privateEnv = (): NodeJS.ProcessEnv => ({ ...process.env, TMUX_TMPDIR: csTmp })
+
+  beforeAll(() => {
+    if (!tmuxOk) return
+    csTmp = makeTmuxTmpdir('ntcs-', CS_SOCKET)
+    realTmux = execFileSync('/bin/sh', ['-c', 'command -v tmux']).toString().trim()
+    shimTmux = path.join(csTmp, 'tmux')
+    fs.writeFileSync(
+      shimTmux,
+      `#!/bin/sh\nexport TMUX_TMPDIR='${csTmp}'\n[ "$1" = -L ] && shift 2\nexec '${realTmux}' -L ${CS_SOCKET} "$@"\n`,
+      { mode: 0o755 }
+    )
+    // Started by a client carrying the launcher's session, under a conf that lists none of the
+    // names: a server a pre-fix nodeterm started from a Claude Code tool shell.
+    execFileSync(
+      realTmux,
+      ['-L', CS_SOCKET, '-f', '/dev/null', 'new-session', '-d', '-s', 'launcher', 'sleep', '600'],
+      {
+        env: { ...privateEnv(), ...Object.fromEntries(LAUNCHER.map((n) => [n, SEEDED])) },
+        stdio: 'ignore'
+      }
+    )
+    const userDataDir = path.join(csTmp, 'ud')
+    fs.mkdirSync(userDataDir)
+    fake = fakePlatform({ userDataDir })
+    initPlatform(fake)
+  })
+
+  afterAll(() => {
+    if (!tmuxOk) return
+    resetPlatformForTests()
+    try {
+      execFileSync(realTmux, ['-L', CS_SOCKET, 'kill-server'], { env: privateEnv(), stdio: 'ignore' })
+    } catch {
+      /* already gone */
+    }
+    fs.rmSync(csTmp, { recursive: true, force: true })
+  })
+
+  it('a pane the manager creates on it carries none of the launcher session', async () => {
+    if (!tmuxOk) return
+    // The seed is real: the server's GLOBAL env holds the launcher's session.
+    const globalEnv = execFileSync(realTmux, ['-L', CS_SOCKET, 'show-environment', '-g'], {
+      env: privateEnv()
+    }).toString()
+    expect(globalEnv).toContain(`CLAUDE_CODE_CHILD_SESSION=${SEEDED}`)
+
+    const m = new PtyManager()
+    m.init(() => DEFAULT_SETTINGS)
+    m.registerIpc()
+    const out = path.join(csTmp, 'pane-env')
+    await fake.handlers[IPC.ptyCreate](1, {
+      cols: 80,
+      rows: 24,
+      persistKey: 'cs-1',
+      shell: '/bin/sh',
+      shellArgs: ['-c', `env > ${out}.part && mv ${out}.part ${out}`]
+    })
+    const paneEnv = (await waitFor(out)).split('\n')
+    expect(paneEnv).toContain('COLORTERM=truecolor') // the manager's own `-e`: this IS its pane
+    expect(LAUNCHER.filter((n) => paneEnv.includes(`${n}=${SEEDED}`))).toEqual([])
   })
 })

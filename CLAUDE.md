@@ -762,6 +762,18 @@ unreachable there by construction; a Linux host is expected to have its own. Und
 `electron-vite dev` the last candidate resolves against `process.cwd()`, which is where
 `scripts/build-tmux.mjs` writes its artifact. If tmux is unavailable from all three,
 `PtyManager` still falls back to a plain shell; `TMUX`/`TMUX_PANE` are stripped from the child env to avoid nesting refusal.
+**So is a Claude Code session the app was launched from** (`core/claude-session-env.ts`): an
+`open` or `npm run dev` typed into a Claude Code tool shell hands nodeterm that session's identity,
+and the pane env is built from `process.env`, so every agent spawned afterwards inherited
+`CLAUDE_CODE_CHILD_SESSION=1`, started with "Transcript saving is off" and wrote no transcript
+(2026-09-11) — plus the launcher's messaging socket and token. The identity names are always
+dropped; generic tool-shell settings (`GIT_EDITOR=true`, `AI_AGENT`, …) only when `CLAUDECODE` is
+set, since a user may set those on purpose. The list is MEASURED (tool-shell env minus the `claude`
+process's own), never a `CLAUDE_*` prefix: that would also strip `CLAUDE_CONFIG_DIR` and
+`CLAUDE_CODE_USE_BEDROCK`. Both groups are also listed in `update-environment`
+(`ACCOUNT_SCOPE_UPDATE_ENV`): a tmux server started while the app ran inside a Claude Code session
+keeps that session in its global env and outlives the app, and tmux removes a name the creating
+client lacks only when the name is listed (#419's mechanism; `session-env.realtmux.test.ts`).
 
 ### Cold restore (machine reboot)
 

@@ -76,6 +76,7 @@ import { effectiveSize, type PtySize } from './pty-size'
 import { machOArch, archMismatch } from './macho-arch'
 import { writeScrollback, readScrollback, deleteScrollback } from './scrollback-store'
 import { claudeConfigDirFor } from './claude-config-dir'
+import { CLAUDE_SESSION_ENV, CLAUDE_TOOL_SHELL_ENV, stripClaudeSessionEnv } from './claude-session-env'
 import { findExecutableSync, findInPathString, resolveShellPath, shellPathNow } from './exec-path'
 import {
   AUTH_ENV_STRIP,
@@ -264,15 +265,19 @@ function runWithStdin(file: string, args: readonly string[], input: string): Pro
  * the client lacks it (measured in session-env.realtmux.test.ts, seeded-server case included).
  * The auth-strip names ride along for the same reason: deleting them from the client env alone
  * never touched a seeded server's global copy, so a managed-OAuth node could still run on an
- * inherited API key. LOCAL conf only — see `tmuxUpdateEnvironmentLine` for why the remote conf
- * must not get these.
+ * inherited API key. So do the Claude Code session names (`claude-session-env.ts`): a server
+ * started while nodeterm ran inside a Claude Code session kept handing that session to every new
+ * pane, whatever the client-side strip removed. LOCAL conf only — see `tmuxUpdateEnvironmentLine`
+ * for why the remote conf must not get these.
  */
 export const ACCOUNT_SCOPE_UPDATE_ENV: readonly string[] = [
   'CLAUDE_CONFIG_DIR',
   ...AUTH_ENV_STRIP,
   'CODEX_HOME',
   'NODETERM_CODEX_ACCOUNT_ID',
-  ...CODEX_AUTH_ENV_STRIP
+  ...CODEX_AUTH_ENV_STRIP,
+  ...CLAUDE_SESSION_ENV,
+  ...CLAUDE_TOOL_SHELL_ENV
 ]
 
 // LEAD-PANE WIDTH (issue #119): `leadPaneWidth` (settings.tmuxLeadPaneWidth) is OPT-IN and 0 by
@@ -2666,6 +2671,9 @@ export class PtyManager {
     delete env.NODETERM_SERVER_PASSWORD
     delete env.TMUX
     delete env.TMUX_PANE
+    // Same reasoning for a Claude Code session the APP was launched from: an agent in a pane starts
+    // its own session, and one that inherits CLAUDE_CODE_CHILD_SESSION writes no transcript.
+    stripClaudeSessionEnv(env)
 
     // A GUI app launched from Finder/Dock inherits only a minimal PATH, so spawned terminals
     // couldn't find tools in /usr/local/bin, Homebrew, ~/.local/bin, nvm, bun, etc. (the classic
