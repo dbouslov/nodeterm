@@ -1955,6 +1955,19 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   `list` answers print through `listRowText`. Server Edition: `HeadlessNodeFactory.minimize`,
   creator-owned, flips the persisted `collapsed` only (`size.height` already is the height to
   restore).
+  **`retire --successor <id>`** (2026-09-12) — a retiring chat hands its place to a session it
+  opened, then closes itself: the successor takes the caller's exact position, width, height and
+  parent frame, and its kanban slot (column and place, Ungrouped included) — pure `planRetire` in
+  `renderer/lib/retire.ts`. The caller is the verified source (`STRICT_CONTROL_VERBS`, its own
+  sentence `RETIRE_CONTROL_REFUSAL`), and MAIN refuses before forwarding unless the caller's own
+  verified `open-terminal`/`open-claude`/`open-agent` reply created the successor THIS run
+  (`OpenerLedger`, `core/retire-verb.ts` — never project.json or the opener rope; empty after a
+  restart). The ledger is keyed by node id, not pane: a park (`ptyKill`) and its re-mount
+  (`ptyCreate`) never touch it; only `ptyDestroy` ends a proof. No confirm dialog (the caller
+  closes only itself), and the renderer replies BEFORE `deleteNodes([caller])`. Touched frames
+  refit as `move` refits them, except a pinned frame, which keeps its position and children and
+  only shrinks back to hug them (`shrinkPinnedGroupToChildren`). It travels like `move` (it needs
+  measured sizes). Server Edition: named refusal (not in `SERVER_V1_VERBS`).
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim

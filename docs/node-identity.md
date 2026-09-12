@@ -196,6 +196,7 @@ The bearer is required everywhere; this table is about the *node* token on top o
 | `/control/list` | Accepted unless the node is latched | 403 | Tolerant: leaks canvas shape, changes nothing. |
 | `/control/<mutation>` | Warned during the window, refused after the cutoff, refused immediately if latched | 403 | Refusal happens **before** the handler. `write`/`close` still ask the human. |
 | `/control/browser` | **Refused** immediately — no window, no cutoff to wait for | 403 | Strict from the day it existed via `STRICT_CONTROL_VERBS`, checked **before** both the `override` escape and the dated window, so `hookIdentityStrict: false` does not soften it. Identity is only the first gate: the per-project switch (off by default) and in-memory ledger ownership still apply after it. |
+| `/control/retire` | **Refused** immediately — no window, no cutoff to wait for | 403 | Strict from the day it existed via `STRICT_CONTROL_VERBS`, answered `Retire refused.`. Identity is only the first gate: main then requires that the caller's own verified open call created the successor this app run (in-memory `OpenerLedger`, `src/core/retire-verb.ts`). |
 | `/codex-thread/{start,bind}` | **Refused** (403) | 403 | Strict from the day they existed — no upgrade population to protect. |
 | `/codex-thread/fallback` | **Always accepted** | 403 | It reports a DEGRADE and grants nothing; refusing it would silence it in exactly the tokenless case it exists for. |
 
