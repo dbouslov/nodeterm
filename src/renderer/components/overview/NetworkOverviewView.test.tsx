@@ -156,6 +156,20 @@ describe('NetworkOverviewView', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  it('once the palette over it is gone, the next Escape closes the overview once', () => {
+    // ⌘K, Esc, Esc. The palette unmounts with focus inside it, so focus falls to <body>, outside
+    // the overlay; the overview is the top layer again and must still hear Escape.
+    const { onClose, openOver } = mount()
+    const closePalette = vi.fn()
+    openOver(<CommandPalette commands={[]} onClose={closePalette} />)
+    pressEscape()
+    expect(closePalette).toHaveBeenCalledTimes(1)
+    openOver(null)
+    expect(document.activeElement).toBe(document.body)
+    pressEscape()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   // Spec §3: fitView on mount AND on project change. React Flow's `fitView` prop fits once per
   // mount, so a project switch under an open overview kept the previous project's framing. jsdom
   // cannot measure nodes, so no fit is observable here: the switch must bring a fresh React Flow
@@ -185,8 +199,14 @@ describe('NetworkOverviewView', () => {
     expect(first).not.toBeNull()
     show('a', [...input.nodes, node('late')])
     expect(flow()).toBe(first)
+    // A card the keyboard reached (React Flow nodes are tabbable) goes with the old React Flow, so
+    // focus would fall to <body>: the overlay takes it back.
+    const card = host.querySelector<HTMLElement>('.react-flow__node')!
+    card.focus()
+    expect(document.activeElement).toBe(card)
     show('b', [node('other')])
     expect(flow()).not.toBeNull()
     expect(flow()).not.toBe(first)
+    expect(document.activeElement).toBe(host.querySelector('.overview-overlay'))
   })
 })

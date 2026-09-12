@@ -58,28 +58,30 @@ export function NetworkOverviewView({
   const findings = useMemo(() => buildFindings(input), [input])
 
   // Take the keyboard off the canvas underneath: a terminal still focused there would eat Escape
-  // (xterm sends ESC to the agent CLI and cancels the event) and every keystroke after it.
+  // (xterm sends ESC to the agent CLI and cancels the event) and every keystroke after it. Again on
+  // a project switch: the keyed React Flow below remounts, and a card that had focus goes with it.
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     rootRef.current?.focus()
-  }, [])
+  }, [projectId])
   const graph = useMemo(() => buildOverviewGraph(input, colorOf, findings), [input, findings])
 
-  // On the overlay, not window (spec §5: Escape closes the overview only when it is the top layer).
-  // The ⌘K palette, the Shortcuts panel and every ConfirmDialog portal to <body>, outside it, so the
-  // Escape that closes one of them never reaches this listener. Accepted cost: once focus leaves the
-  // overview, Escape does nothing here.
+  // Only an Escape aimed at the overlay or at <body> (spec §5: Escape closes the overview only when
+  // it is the top layer). The ⌘K palette, the Shortcuts panel and every ConfirmDialog portal to
+  // <body>, outside the overlay, so the Escape that closes one of them is not ours; once one unmounts,
+  // focus falls to <body> and the next Escape is.
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
     const onKey = (e: KeyboardEvent) => {
       // Something inside the overview that already answered this Escape keeps it open.
       if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (e.target !== document.body && !(e.target instanceof Node && el.contains(e.target))) return
       e.preventDefault()
       onClose()
     }
-    el.addEventListener('keydown', onKey)
-    return () => el.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
   const onNodeClick: NodeMouseHandler = useCallback((_e, n) => onGoToNode(n.id), [onGoToNode])
