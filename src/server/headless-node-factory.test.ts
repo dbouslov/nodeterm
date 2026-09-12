@@ -476,6 +476,35 @@ describe('HeadlessNodeFactory', () => {
     expect(published).toEqual([])
   })
 
+  it('annotate refuses a node the caller created in another project', async () => {
+    const workspace = await store.load({ sideline: false })
+    const otherDir = path.join(dataDir, 'other-project')
+    fs.mkdirSync(otherDir, { recursive: true })
+    workspace.projects.push({
+      id: 'project-2',
+      name: 'Other',
+      color: '#32d74b',
+      cwd: otherDir,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [terminal('term-other-project', 'Elsewhere', 'claude')],
+      bridges: [],
+      ropes: []
+    })
+    await store.save(workspace)
+    // Owned, so only the project check stands between the caller and a foreign project's node.
+    ownership.record('term-other-project', { sourceNodeId: 'term-source', projectId: 'project-2' })
+    const before = await store.load({ sideline: false })
+
+    await expect(
+      factory.annotate('term-source', { node: 'term-other-project', role: 'stolen' })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('annotate-project-refused')
+    })
+    expect(await store.load({ sideline: false })).toEqual(before)
+    expect(published).toEqual([])
+  })
+
   it('refuses to close an owned frame if doing so would reparent an unowned child', async () => {
     const opened = await factory.openTerminal('term-source', {}, true)
     const ownedId = (opened.result as { id: string }).id
