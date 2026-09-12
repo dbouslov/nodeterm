@@ -394,6 +394,26 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
       expect(reply.message, verb).toContain('do not retry')
     }
   })
+
+  it('refuses snapshot on both handlers, naming why: there is no window on this host to capture', async () => {
+    const a = actions()
+    const reply = await createServerEditionControlHandler(a)({
+      verb: 'snapshot',
+      nodeId: 'term-source',
+      args: {},
+      verified: true
+    })
+    expect(reply).toMatchObject({ ok: false, error: CONTROL_UNSUPPORTED_ERROR })
+    expect(reply.message).toContain('do not retry')
+    expect(reply.message).toContain('no window')
+    for (const action of Object.values(a)) expect(action).not.toHaveBeenCalled()
+    // The feature-off handler says the same; the window clause belongs to snapshot alone.
+    expect(controlUnsupportedMessage('snapshot')).toContain('no window')
+    expect(controlUnsupportedMessage('snapshot')).not.toContain(BROWSER_UNSUPPORTED_CLAUSE)
+    for (const verb of ['browser', 'list', 'snapshots']) {
+      expect(controlUnsupportedMessage(verb), verb).not.toContain('no window')
+    }
+  })
 })
 
 /**

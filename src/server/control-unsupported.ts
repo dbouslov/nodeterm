@@ -41,13 +41,27 @@ export const BROWSER_UNSUPPORTED_CLAUSE =
   'tab, which this server has no debugger for.'
 
 /**
+ * `snapshot` is structural for the same reason: it captures the desktop app's own window
+ * (`webContents.capturePage`), and a canvas on this edition renders in the VIEWER's browser tab.
+ */
+export const SNAPSHOT_UNSUPPORTED_CLAUSE =
+  'There is no snapshot on this edition: the canvas renders in your own browser tab, and this ' +
+  'server has no window to capture it from.'
+
+/** The structural reason a verb can never work on this edition, for the verbs that have one. */
+function editionClause(verb: string): string {
+  if (verb === 'browser') return ` ${BROWSER_UNSUPPORTED_CLAUSE}`
+  if (verb === 'snapshot') return ` ${SNAPSHOT_UNSUPPORTED_CLAUSE}`
+  return ''
+}
+
+/**
  * One line, always — control replies are rendered as a single line by the shim, and a multi-line
  * body buries whichever half the reader stops at. The machine name is repeated inside the prose so
  * the text/plain dialect (which carries no `error` field) still names the refusal.
  */
 export function controlUnsupportedMessage(verb: string): string {
-  const why = verb === 'browser' ? ` ${BROWSER_UNSUPPORTED_CLAUSE}` : ''
-  return `${CONTROL_UNSUPPORTED_ERROR}: ${CONTROL_UNSUPPORTED_SENTENCE}${why}`
+  return `${CONTROL_UNSUPPORTED_ERROR}: ${CONTROL_UNSUPPORTED_SENTENCE}${editionClause(verb)}`
 }
 
 /**
@@ -120,10 +134,9 @@ const SERVER_V1_VERBS: ReadonlySet<string> = new Set([
 
 /** A permanent, verb-specific refusal used only while canvas control itself is enabled. */
 export function unsupportedServerVerbMessage(verb: string): string {
-  const why = verb === 'browser' ? ` ${BROWSER_UNSUPPORTED_CLAUSE}` : ''
   return (
     `${CONTROL_UNSUPPORTED_ERROR}: The "${verb}" canvas-control verb is not supported by ` +
-    `nodeterm Server Edition v1. This is not a temporary failure — do not retry.${why}`
+    `nodeterm Server Edition v1. This is not a temporary failure — do not retry.${editionClause(verb)}`
   )
 }
 
