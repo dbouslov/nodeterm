@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { createHash } from 'node:crypto'
 import { routeAll } from './index'
-import type { RouteEdge, RouteNode, RouteRequest } from './types'
+import type { Route, RouteEdge, RouteNode, RouteRequest } from './types'
 
 function canvas(nodes: number, edges: number, frames: number): RouteRequest {
   let seed = 42
@@ -40,6 +41,14 @@ describe('routing cost pins (deterministic; spec Section 6)', () => {
     expect(g.routes.size).toBe(req.edges.length)
     expect(g.widenings).toBe(0)
     expect(g.fallbacks).toBe(0)
+  })
+  // A blocked port moving to another side of its node (route.ts) runs only where the edge was about
+  // to fall back, so no route this canvas finds may move. The digest is of every route's ports and
+  // corners, taken from the router before that change; a change that means to move routes updates it.
+  it('full pass on the spaced canvas: the route set is exactly the pinned one', () => {
+    const ser = ([id, r]: [string, Route]) => `${id}=${r.fallback ? 'F ' : ''}${r.ports.map((p) => `${p.side}@${p.x},${p.y}`).join(';')}|${r.points.map((p) => `${p.x},${p.y}`).join(' ')}`
+    const digest = createHash('sha256').update([...routeAll(spaced(120, 200)).routes].map(ser).join('\n')).digest('hex')
+    expect(digest).toBe('5cec7695e71cbc02acc1c8d57c2b11f6d77b62ff8a31e08ef2c8fc7564544477')
   })
   it('drag pass (one node moved) on the same canvas: no widened search, no fallback', () => {
     const req = spaced(120, 200)

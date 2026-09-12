@@ -2,7 +2,7 @@
 // route per edge, then nudging over all routes. Incremental (a drag): only edges touching a moved
 // node, or whose current route's bbox meets a moved node's box, are re-routed; the rest keep
 // identity, and nudging is skipped for the re-routed set — bundles reform on the full pass that
-// runs when the drag ends.
+// runs when the drag ends. So is a boxed-in port's move to another side (route.ts `detour`).
 import { inflate, intersects, obstaclesFor } from './obstacles'
 import { portsFor } from './ports'
 import { routeOne } from './route'
@@ -29,7 +29,7 @@ export function routeAll(req: RouteRequest, previous?: RoutedGraph, moved?: Read
       if (prev && !touches && !crosses) { routes.set(e.id, prev); continue }
       const p = ports.get(e.id)
       if (!p) continue
-      const r = routeOne(e, req, p)
+      const r = routeOne(e, req, p, false)
       if (r.fallback) fallbacks++
       if (r.widened) widenings++
       routes.set(e.id, r)

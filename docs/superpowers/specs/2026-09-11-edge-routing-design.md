@@ -24,7 +24,9 @@ only on demand).
    this" survives.
 2. **Every family goes orthogonal.** One router, one look. The Network Overview's second React
    Flow instance inherits it unchanged. Context bridges keep left/right ports so they still meet
-   the drag handles.
+   the drag handles. Exception (2026-09-12): when a port is boxed in (it or its stub lies inside
+   a neighbour's margin) that end leaves by another free side of its node instead of falling back
+   (3.5). Hand-placed notes sit that close: a row 12 px apart sent every note edge behind them.
 3. **Frames are obstacles for foreign edges.** An edge into a member enters through the frame
    border and routes inside around sibling members. A line never crosses a frame it does not
    touch. (Frames never collapse in this app; `collapsed` exists on terminal nodes only, so the
@@ -247,7 +249,8 @@ vertices inside them.
 
 Only obstacles intersecting the search window (the bounding box of the two endpoints padded by
 `WINDOW_PAD`) enter the graph. If A* fails inside the window, the window widens once to the whole
-canvas; if it fails again the edge gets the fallback (3.5).
+canvas; if it fails again, or a port is boxed in, a blocked end first tries the other sides of its
+node, then the edge gets the fallback (3.5).
 
 ### 3.3 Visibility graph (`visibility.ts`)
 
@@ -267,6 +270,15 @@ enforce this). Ties break on lower vertex index so the result is deterministic. 
 corner list only.
 
 ### 3.5 Fallback
+
+Before it, a side change (2026-09-12). A port that is boxed in (it or the end of its stub lies
+strictly inside an obstacle's margin or the other endpoint) cannot be left, so that end moves to
+the midpoint of the first free side of its node (the preferred side first, then the side facing the
+other end most) for one search, in the near window only. Only an edge about to fall back reaches
+this step, so no route the ordinary search finds changes; `perf.test.ts` pins the spaced canvas's
+route set by digest. A drag pass skips the step (on a crowded canvas that one search mostly fails,
+and paying for it doubled the drag pass); the full pass when the drag ends takes it. What remains
+is the fallback proper:
 
 A plain three-segment orthogonal path between the same two ports (out along the source normal,
 across the midline, in along the target normal), with no avoidance. Pure, so the routing module

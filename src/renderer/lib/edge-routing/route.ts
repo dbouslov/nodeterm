@@ -1,11 +1,12 @@
 // A* over the visibility graph (spec 3.4) with the two direction constraints: the first step
 // leaves along the source port's outward normal, the last arrives along the target port's inward
 // normal. Cost = Manhattan length + BEND_COST per turn; the heuristic is Manhattan distance.
-// Failure inside the window widens once to the whole canvas; failure again ⇒ the fallback
-// three-segment path (spec 3.5), so an edge is never left undrawn.
+// Failure inside the window widens once to the whole canvas; failure again ⇒ a blocked end tries
+// its node's other sides, then the fallback three-segment path (spec 3.5), so an edge is never
+// left undrawn.
 import { containsStrict, obstaclesFor, windowFor } from './obstacles'
 import { buildGraph, type Graph } from './visibility'
-import { BEND_COST, WINDOW_PAD, outward, type Box, type Point, type Port, type Route, type RouteEdge, type RouteRequest } from './types'
+import { BEND_COST, PORT_STUB, WINDOW_PAD, centre, outward, type Box, type Point, type Port, type Route, type RouteEdge, type RouteRequest, type Side } from './types'
 
 type Dir = 0 | 1 | 2 | 3 // right, down, left, up
 const dirOf = (from: Point, to: Point): Dir => (to.x > from.x ? 0 : to.x < from.x ? 2 : to.y > from.y ? 1 : 3)
@@ -148,19 +149,49 @@ export function labelPointOf(points: Point[]): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
 }
 
-export function routeOne(edge: RouteEdge, req: RouteRequest, ports: [Port, Port]): Route {
+/** A port is offered only when neither it nor the end of its stub lies strictly inside a solid. */
+function usable(p: Port, solids: Box[]): boolean {
+  const o = outward(p.side)
+  const stub = { x: p.x + o.x * PORT_STUB, y: p.y + o.y * PORT_STUB }
+  return !solids.some((s) => containsStrict(s, p) || containsStrict(s, stub))
+}
+
+const SIDES: Side[] = ['top', 'right', 'bottom', 'left']
+
+function portOn(b: Box, side: Side): Port {
+  const c = centre(b)
+  switch (side) {
+    case 'top': return { x: c.x, y: b.y, side }
+    case 'right': return { x: b.x + b.width, y: c.y, side }
+    case 'bottom': return { x: c.x, y: b.y + b.height, side }
+    case 'left': return { x: b.x, y: c.y, side }
+  }
+}
+
+/** Where one end leaves from: its own port while usable; otherwise the midpoint of the first usable
+ *  side of its node, the preferred side first, then the side facing the other end most. */
+function portToUse(port: Port, own: Box, other: Box, solids: Box[]): Port | undefined {
+  if (usable(port, solids)) return port
+  const c = centre(own), t = centre(other)
+  const facing = (s: Side) => { const o = outward(s); return o.x * (t.x - c.x) + o.y * (t.y - c.y) }
+  const others = SIDES.filter((s) => s !== port.side).sort((p, q) => facing(q) - facing(p))
+  return [port.side, ...others].map((s) => portOn(own, s)).find((p) => usable(p, solids))
+}
+
+export function routeOne(edge: RouteEdge, req: RouteRequest, ports: [Port, Port], detour = true): Route {
   const a = req.nodes.get(edge.source)!
   const b = req.nodes.get(edge.target)!
   const endpoints: [Box, Box] = [a, b]
-  const attempt = (window: Box, blocked: Box[]): Point[] | null =>
-    astar(buildGraph(blocked, ports, endpoints, window), ports[0], ports[1])
+  const attempt = (window: Box, blocked: Box[], at: [Port, Port] = ports): Point[] | null =>
+    astar(buildGraph(blocked, at, endpoints, window), at[0], at[1])
   const near = windowFor(a, b, WINDOW_PAD)
   const nearBlocked = obstaclesFor(edge, req, near)
   // A port strictly inside another node's margin (or inside the other endpoint) can be neither
   // left nor reached, so A* would exhaust the graph — twice, with the widening — before giving
   // up. Measured on the perf canvases and 1,700 random ones: every such search failed and no
-  // successful route had one, so it goes straight to the fallback. The obstacle that holds a port
-  // always meets the window, so the window's list is enough to decide.
+  // successful route had one, so it is never searched from: the edge goes straight to the side
+  // change below. The obstacle that holds a port always meets the window, so the window's list is
+  // enough to decide.
   const portBlocked = ports.some((p) => [...nearBlocked, a, b].some((s) => containsStrict(s, p)))
   let points = portBlocked ? null : attempt(near, nearBlocked)
   const widened = !points && !portBlocked
@@ -171,7 +202,23 @@ export function routeOne(edge: RouteEdge, req: RouteRequest, ports: [Port, Port]
     const wide = windowFor(all, all, WINDOW_PAD)
     points = attempt(wide, obstaclesFor(edge, req, wide))
   }
+  // Hand-placed notes sit closer than the margin: on a real canvas a row 12 px apart put every
+  // note edge's left/right port inside a neighbour's margin, and all of them were drawn as the
+  // fallback, behind the neighbours. So before falling back, a blocked end moves to the next usable
+  // side of its node, for ONE search in the near window. Only an edge about to fall back gets here,
+  // so every route found above is exactly what it was. On a crowded canvas that search mostly
+  // fails, and paying for it doubled a drag pass, so a drag pass passes `detour` false and leaves
+  // the move to the full pass when the drag ends.
+  let used = ports
+  if (!points && detour) {
+    const solids = [...nearBlocked, a, b]
+    const s = portToUse(ports[0], a, b, solids), t = portToUse(ports[1], b, a, solids)
+    if (s && t && (s !== ports[0] || t !== ports[1])) {
+      points = attempt(near, nearBlocked, [s, t])
+      if (points) used = [s, t]
+    }
+  }
   const fallback = !points
   const pts = points ?? fallbackPoints(ports)
-  return { points: pts, ports, fallback, widened, labelAt: labelPointOf(pts), bbox: bboxOfPoints(pts) }
+  return { points: pts, ports: used, fallback, widened, labelAt: labelPointOf(pts), bbox: bboxOfPoints(pts) }
 }

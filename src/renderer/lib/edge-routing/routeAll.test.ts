@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { routeAll } from './index'
-import { outward, type Point, type Port, type RouteEdge, type RouteNode, type RouteRequest } from './types'
+import { inflate, segmentEnters } from './obstacles'
+import { OBSTACLE_MARGIN, outward, type Point, type Port, type RouteEdge, type RouteNode, type RouteRequest } from './types'
 
 const n = (id: string, x: number, y: number): RouteNode => ({ id, x, y, width: 200, height: 100, isFrame: false })
+const box = (id: string, x: number, y: number, width: number, height: number): RouteNode => ({ id, x, y, width, height, isFrame: false })
 const mk = (nodes: RouteNode[], edges: RouteEdge[]): RouteRequest => ({ nodes: new Map(nodes.map((v) => [v.id, v])), edges })
 
 describe('routeAll', () => {
@@ -34,21 +36,46 @@ describe('routeAll', () => {
     expect(d.routes.get('ab')).not.toBe(r)
     expect(d.widenings).toBe(1)
   })
-  // A port inside another node's margin goes to the fallback with no search, so it counts as a
-  // fallback and not as a widening. Here `x` sits 10 px right of `a`, and its 16 px margin covers
-  // `a`'s right-side port, before the drag and after it.
+  // A port inside another node's margin is never searched from, and when no other side of its node
+  // is free either the edge goes to the fallback with no search, so it counts as a fallback and not
+  // as a widening. Here `a` has a neighbour 8 px off each side, whose 16 px margin covers that
+  // side's port, before the drag and after it.
   it('counts a fallback, on the full pass and on a drag pass', () => {
-    const x = n('x', 210, 0)
-    const req = mk([n('a', 0, 0), n('b', 600, 0), x], [{ id: 'ab', source: 'a', target: 'b', kind: 'context' }])
+    const walls = [n('left', -208, 0), n('right', 208, 0), n('above', 0, -108), n('below', 0, 108)]
+    const req = mk([n('a', 0, 0), n('b', 1000, 0), ...walls], [{ id: 'ab', source: 'a', target: 'b', kind: 'context' }])
     const g = routeAll(req)
     expect(g.routes.get('ab')!.fallback).toBe(true)
     expect(g.routes.get('ab')!.widened).toBe(false)
     expect(g.fallbacks).toBe(1)
-    const d = routeAll(mk([n('a', 0, 10), n('b', 600, 0), x], req.edges), g, new Set(['a']))
+    const d = routeAll(mk([n('a', 0, 2), n('b', 1000, 0), ...walls], req.edges), g, new Set(['a']))
     expect(d.routes.get('ab')).not.toBe(g.routes.get('ab'))
     expect(d.routes.get('ab')!.fallback).toBe(true)
     expect(d.fallbacks).toBe(1)
     expect(d.widenings).toBe(0)
+  })
+  // Sticky notes laid out by hand sit closer than the margin: on a real canvas a row of three was
+  // 12 px apart, so a note edge's left/right port lay inside its neighbour's margin, the edge took
+  // the no-avoidance fallback, and it was drawn behind the neighbours. Another side of the same
+  // node was free the whole time.
+  it('a port boxed in by a neighbour nearer than the margin leaves by another side, not the fallback', () => {
+    const p = box('p', 0, 0, 200, 300), q = box('q', 212, 0, 200, 300)
+    const g = routeAll(mk([p, q, box('r', 424, 0, 200, 300), box('t', -700, -800, 640, 440)], [{ id: 'rt', source: 'r', target: 't', kind: 'note' }]))
+    const r = g.routes.get('rt')!
+    expect(r.fallback).toBe(false)
+    const bad: string[] = []
+    for (let i = 0; i + 1 < r.points.length; i++) {
+      for (const b of [p, q]) if (segmentEnters(inflate(b, OBSTACLE_MARGIN), r.points[i], r.points[i + 1])) bad.push(`segment ${i} enters ${b.id}'s margin`)
+    }
+    expect(bad).toEqual([])
+  })
+  // That move costs a search, which on a crowded canvas mostly fails and doubled the drag pass, so a
+  // drag pass leaves a boxed-in port to the fallback and the full pass when the drag ends moves it.
+  it('a drag pass leaves a boxed-in port to the fallback; the full pass after the drop moves it', () => {
+    const row = (ry: number) => [box('p', 0, 0, 200, 300), box('q', 212, 0, 200, 300), box('r', 424, ry, 200, 300), box('t', -700, -800, 640, 440)]
+    const edges: RouteEdge[] = [{ id: 'rt', source: 'r', target: 't', kind: 'note' }]
+    const d = routeAll(mk(row(4), edges), routeAll(mk(row(0), edges)), new Set(['r']))
+    expect(d.routes.get('rt')!.fallback).toBe(true)
+    expect(routeAll(mk(row(4), edges)).routes.get('rt')!.fallback).toBe(false)
   })
   // A routed edge may never pass through a node's body, and that includes the nodes its search
   // never saw: the obstacle list is filtered to the search window, so a route that leaves the
