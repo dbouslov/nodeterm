@@ -74,6 +74,8 @@ describe('useActiveOverview', () => {
     })
     mount()
     const active = latest()!
+    // The overview's graph is keyed by it: a project switch must refit (spec §3).
+    expect(active.projectId).toBe('p2')
     expect(active.projectName).toBe('Research')
     expect(active.projectColor).toBe('#0a84ff')
     expect(active.input.nodes.map((n) => n.id)).toEqual(['a', 'b'])

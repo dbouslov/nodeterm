@@ -62,6 +62,7 @@ function mount(onClose = vi.fn(), onGoToNode = vi.fn()) {
       root!.render(
         <>
           <NetworkOverviewView
+            projectId="research"
             projectName="Research"
             projectColor="#0a84ff"
             input={input}
@@ -153,5 +154,39 @@ describe('NetworkOverviewView', () => {
     pressEscape()
     expect(cancel).toHaveBeenCalledTimes(1)
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  // Spec §3: fitView on mount AND on project change. React Flow's `fitView` prop fits once per
+  // mount, so a project switch under an open overview kept the previous project's framing. jsdom
+  // cannot measure nodes, so no fit is observable here: the switch must bring a fresh React Flow
+  // (which fits on mount), and a same-project update must not (it would reset the user's pan and
+  // zoom on every status event).
+  it('gives the graph a fresh React Flow, so a fresh fit, only when the project changes', () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const show = (projectId: string, nodes: CanvasNodeState[]) =>
+      act(() =>
+        root!.render(
+          <NetworkOverviewView
+            projectId={projectId}
+            projectName={projectId}
+            projectColor="#0a84ff"
+            input={{ ...input, nodes, bridges: [], statusById: {} }}
+            onClose={vi.fn()}
+            onGoToNode={vi.fn()}
+          />
+        )
+      )
+    const flow = () => host.querySelector('.react-flow')
+
+    root = createRoot(host)
+    show('a', input.nodes)
+    const first = flow()
+    expect(first).not.toBeNull()
+    show('a', [...input.nodes, node('late')])
+    expect(flow()).toBe(first)
+    show('b', [node('other')])
+    expect(flow()).not.toBeNull()
+    expect(flow()).not.toBe(first)
   })
 })

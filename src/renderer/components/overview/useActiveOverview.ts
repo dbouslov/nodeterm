@@ -10,6 +10,7 @@ import { useProjects } from '../../state/projects'
 import { useSettings } from '../../state/settings'
 
 export interface ActiveOverview {
+  projectId: string
   projectName: string
   projectColor: string
   input: OverviewInput
@@ -33,6 +34,7 @@ export function useActiveOverview(): ActiveOverview | null {
     () =>
       project
         ? {
+            projectId: project.id,
             projectName: project.name,
             projectColor: project.color,
             input: {

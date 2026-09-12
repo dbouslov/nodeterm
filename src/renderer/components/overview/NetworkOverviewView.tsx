@@ -11,6 +11,7 @@ import { relativeTime } from '../../lib/relativeTime'
 import { overviewNodeTypes } from './OverviewNodes'
 
 export interface NetworkOverviewViewProps {
+  projectId: string
   projectName: string
   projectColor: string
   input: OverviewInput
@@ -44,7 +45,14 @@ function FindingRow({ f, now, onGo }: { f: Finding; now: number; onGo(id: string
   )
 }
 
-export function NetworkOverviewView({ projectName, projectColor, input, onClose, onGoToNode }: NetworkOverviewViewProps) {
+export function NetworkOverviewView({
+  projectId,
+  projectName,
+  projectColor,
+  input,
+  onClose,
+  onGoToNode
+}: NetworkOverviewViewProps) {
   // Transient on purpose (spec §3): the sidebar reopens with the overview.
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const findings = useMemo(() => buildFindings(input), [input])
@@ -98,8 +106,9 @@ export function NetworkOverviewView({ projectName, projectColor, input, onClose,
       </div>
       <div className="overview-body">
         <div className="overview-graph">
-          {/* Its own provider: without one, <ReactFlow> would join the MAIN canvas's store. */}
-          <ReactFlowProvider>
+          {/* Its own provider: without one, <ReactFlow> would join the MAIN canvas's store. Keyed by
+              project: `fitView` fits once per mount, and a project switch must fit again (spec §3). */}
+          <ReactFlowProvider key={projectId}>
             <ReactFlow
               id={OVERVIEW_FLOW_ID}
               nodes={graph.nodes}
