@@ -7,6 +7,7 @@ import {
   controlVerbSetsForTests,
   sourceIsControlCapable,
   storedNodeListing,
+  listRowText,
   answerBrowserResolve,
   type ControlProject,
   type BrowserResolveProject
@@ -366,5 +367,29 @@ describe('storedNodeListing', () => {
       { id: 'a', kind: 'terminal', title: 'A', role: 'lead z9 [terminal] forged' },
       { id: 'b', kind: 'terminal', title: 'B' }
     ])
+  })
+
+  it('marks a node the project file has minimized (`collapsed`)', () => {
+    expect(
+      storedNodeListing([
+        { id: 'a', kind: 'terminal', title: 'A', collapsed: true },
+        { id: 'b', kind: 'sticky', title: 'B', collapsed: false }
+      ])
+    ).toEqual([
+      { id: 'a', kind: 'terminal', title: 'A', minimized: true },
+      { id: 'b', kind: 'sticky', title: 'B' }
+    ])
+  })
+})
+
+describe('listRowText — one `list` row, live canvas or stored project alike', () => {
+  it('prints the id, kind and title, then each marker the row carries', () => {
+    expect(listRowText({ id: 'term-1', kind: 'terminal', title: 'Build' })).toBe('term-1 [terminal] Build')
+    expect(listRowText({ id: 'term-1', kind: 'terminal', title: 'Build', minimized: true })).toBe(
+      'term-1 [terminal] Build (minimized)'
+    )
+    expect(
+      listRowText({ id: 'term-1', kind: 'terminal', title: 'Build', minimized: true, role: 'tests', lastTurnErrored: true })
+    ).toBe('term-1 [terminal] Build (minimized) · role: tests — LAST TURN ERRORED')
   })
 })

@@ -261,6 +261,7 @@ import {
   answersOffCanvas,
   sourceIsControlCapable,
   storedNodeListing,
+  listRowText,
   answerBrowserResolve,
   type BrowserResolveProject
 } from '../lib/controlRouting'
@@ -9806,7 +9807,7 @@ export function Canvas() {
             reply({
               ok: true,
               result: rows,
-              message: rows.map((n) => `${n.id} [${n.kind}] ${n.title}` + (n.role ? ` · role: ${n.role}` : '')).join('\n')
+              message: rows.map(listRowText).join('\n')
             })
             return
           }
@@ -10517,6 +10518,7 @@ export function Canvas() {
                 id: n.id,
                 kind: n.type,
                 title: n.data.title as string,
+                ...(n.data.collapsed ? { minimized: true } : {}),
                 ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {}),
                 ...(role ? { role } : {})
               }
@@ -10524,14 +10526,7 @@ export function Canvas() {
             reply({
               ok: true,
               result: list,
-              message: list
-                .map(
-                  (n) =>
-                    `${n.id} [${n.kind}] ${n.title}` +
-                    (n.role ? ` · role: ${n.role}` : '') +
-                    (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
-                )
-                .join('\n')
+              message: list.map(listRowText).join('\n')
             })
             return
           }
