@@ -315,6 +315,23 @@ describe('parseControlRequest', () => {
     }
   })
 
+  it('snapshot takes no required flag, and --frame/--out each need a value', () => {
+    expect(parseControlRequest('snapshot', {})).toEqual({ verb: 'snapshot', args: {} })
+    expect(parseControlRequest('snapshot', { frame: 'g1', out: 'shots/a.png' })).toEqual({
+      verb: 'snapshot',
+      args: { frame: 'g1', out: 'shots/a.png' }
+    })
+    // The shim sends a valueless flag as an empty string; guessing "whole canvas" or "default
+    // path" for it would answer a question the caller did not ask.
+    expect(parseControlRequest('snapshot', { frame: '' })).toEqual({
+      error: 'snapshot: --frame needs a group id'
+    })
+    expect(parseControlRequest('snapshot', { out: ' ' })).toEqual({
+      error: 'snapshot: --out needs a path'
+    })
+    expect(isDestructiveVerb('snapshot')).toBe(false)
+  })
+
   it('sticky requires --node plus exactly one of --text/--append, and is not destructive', () => {
     expect(parseControlRequest('sticky', {})).toEqual({ error: 'sticky requires --node <id|title>' })
     expect(parseControlRequest('sticky', { node: 'n1' })).toEqual({

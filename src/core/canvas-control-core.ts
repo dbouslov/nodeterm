@@ -137,6 +137,7 @@ export type ControlVerb =
   | 'annotate'
   | 'browser'
   | 'open-project'
+  | 'snapshot'
 
 export interface ControlCommand {
   verb: ControlVerb
@@ -177,6 +178,7 @@ const VERBS: ControlVerb[] = [
   'sticky',
   'annotate',
   'browser',
+  'snapshot',
   // Issue #338 PR 1: registered in the model (parse + gates + the grant ledger run in main), but
   // INERT until PR 2 adds the renderer dispatch case — today the renderer's `default:` answers
   // `unknown verb: open-project`. Deliberately undocumented in the skill/instructions bodies until
@@ -287,6 +289,15 @@ export function parseControlRequest(
   // (src/core/project-grants.ts) — the caller's path is hostile input and this presence check is
   // only the polite half.
   if (v === 'open-project' && !args.cwd) return { error: 'open-project requires --cwd <abs-path>' }
+  // `snapshot` requires nothing, but a flag it takes must carry a value (the shim sends a valueless
+  // flag as ''). The rest — the frame exists and is a group, the `--out` jail, the window is on
+  // screen — is decided where that state lives: main (window, jail) and the renderer (frame).
+  if (v === 'snapshot' && args.frame !== undefined && !args.frame.trim()) {
+    return { error: 'snapshot: --frame needs a group id' }
+  }
+  if (v === 'snapshot' && args.out !== undefined && !args.out.trim()) {
+    return { error: 'snapshot: --out needs a path' }
+  }
   return { verb: v, args }
 }
 
