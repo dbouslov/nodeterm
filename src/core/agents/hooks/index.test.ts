@@ -26,14 +26,29 @@ vi.mock('../../exec-path', async (orig) => ({
 }))
 
 let home: string
+let realHome: string | undefined
+let realProfile: string | undefined
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-home-probe-'))
   vi.spyOn(os, 'homedir').mockReturnValue(home)
+  // The spy reaches only `os.homedir()` callers. The installers that write per-machine files —
+  // `install-helper.ts`'s `~/.nodeterm/agent-hooks`, the claude/gemini/codex settings — import
+  // `{ homedir }` by name, which the spy never sees, so this suite rewrote the developer's live hook
+  // scripts with its own temp dir embedded (measured 2026-09-11). `homedir()` honours $HOME on POSIX
+  // and USERPROFILE on Windows, so both point at the fixture.
+  realHome = process.env.HOME
+  realProfile = process.env.USERPROFILE
+  process.env.HOME = home
+  process.env.USERPROFILE = home
   initPlatform(fakePlatform({ userDataDir: home }))
   _resetGrokHomeProbeForTests()
 })
 afterEach(() => {
+  if (realHome === undefined) delete process.env.HOME
+  else process.env.HOME = realHome
+  if (realProfile === undefined) delete process.env.USERPROFILE
+  else process.env.USERPROFILE = realProfile
   _resetGrokHomeProbeForTests()
   resetPlatformForTests()
   vi.restoreAllMocks()
