@@ -583,12 +583,13 @@ import {
   CLOSE_BULK_MAX
 } from '../lib/closeTargets'
 import { canvasSyncTarget } from './collab-sync'
+import { menuMinimizeRow, minimizeIds, minimizeReply, planMinimize } from '@shared/minimize'
 import {
   applyCanvasMutation,
   applyMutationToFlow,
   agentLaunchOverride,
   claudeLaunchCommand,
-  COLLAPSED_HEIGHT,
+  setCollapsed,
   alignNodes,
   arrangeNodes,
   commonParentId,
@@ -6962,24 +6963,11 @@ export function Canvas() {
     [setNodes, markDirty]
   )
 
-  const toggleCollapseNodes = useCallback(
-    (ids: string[]) => {
-      const set = new Set(ids)
-      setNodes((ns) =>
-        ns.map((n) => {
-          if (!set.has(n.id)) return n
-          const next = !n.data.collapsed
-          const expandedHeight =
-            (n.data.expandedHeight as number) ?? n.measured?.height ?? (n.height as number) ?? 300
-          const height = next ? COLLAPSED_HEIGHT : expandedHeight
-          return {
-            ...n,
-            height,
-            style: { ...n.style, height },
-            data: { ...n.data, collapsed: next, expandedHeight }
-          }
-        })
-      )
+  /** Minimize nodes to their title bar (`on`) or restore them: the node menu's Minimize / Restore
+   *  row. `setCollapsed` keeps each node's height to come back to. */
+  const setMinimized = useCallback(
+    (ids: string[], on: boolean) => {
+      setNodes((ns) => setCollapsed(ns, ids, on))
       markDirty()
     },
     [setNodes, markDirty]
@@ -8032,13 +8020,25 @@ export function Canvas() {
         : []),
       ...(isHidden('collapse', hidden)
         ? []
-        : ([
-            {
-              label: 'Collapse / Expand',
-              icon: <IconCollapse />,
-              onClick: () => toggleCollapseNodes(ids)
-            }
-          ] as MenuItem[])),
+        : (() => {
+            // Restores when every target is minimized, else minimizes them all (@shared/minimize).
+            // Group frames are left out, and a frames-only selection gets no row.
+            const row = menuMinimizeRow(
+              ids.flatMap((nid) => {
+                const n = nodesRef.current.find((node) => node.id === nid)
+                return n ? [{ id: n.id, kind: n.type ?? 'terminal', collapsed: !!n.data.collapsed }] : []
+              })
+            )
+            return row
+              ? ([
+                  {
+                    label: row.on ? 'Minimize' : 'Restore',
+                    icon: <IconCollapse />,
+                    onClick: () => setMinimized(row.ids, row.on)
+                  }
+                ] as MenuItem[])
+              : []
+          })()),
       ...(isHidden('pin', hidden)
         ? []
         : (() => {
@@ -8331,7 +8331,7 @@ export function Canvas() {
     branchClaude,
     transferConversation,
     agentIdOf,
-    toggleCollapseNodes,
+    setMinimized,
     setPinned,
     toggleMarkdown,
     reloadTerminals,
@@ -11670,6 +11670,31 @@ export function Canvas() {
             )
             markDirty()
             reply({ ok: true, message: `${on ? 'pinned' : 'unpinned'} ${id}`, result: { id, pinned: on } })
+            return
+          }
+          case 'minimize': {
+            // Shrink nodes to their title bar, or restore them (`--set off`): how a lead parks idle
+            // and finished stations. Non-destructive like `rename`, so no dialog. The whole list is
+            // resolved before anything changes (@shared/minimize): one bad id refuses all of it.
+            const on = args.set !== 'off'
+            const plan = planMinimize(
+              minimizeIds(args.node),
+              on,
+              nodesRef.current.map((n) => ({ id: n.id, kind: n.type ?? 'terminal', collapsed: !!n.data.collapsed }))
+            )
+            if (!plan.ok) {
+              reply({ ok: false, error: plan.error })
+              return
+            }
+            if (plan.change.length) {
+              setNodes((nodes) => setCollapsed(nodes, plan.change, on))
+              markDirty()
+            }
+            reply({
+              ok: true,
+              message: minimizeReply(on, plan.change, plan.already),
+              result: { minimized: on, changed: plan.change, unchanged: plan.already }
+            })
             return
           }
           case 'sticky': {
