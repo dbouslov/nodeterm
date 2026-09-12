@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { act } from 'react'
+import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { CanvasNodeState } from '@shared/types'
 import type { OverviewInput } from '../../lib/networkOverview'
+import { CommandPalette } from '../CommandPalette'
+import { ConfirmDialog } from '../ConfirmDialog'
 import { NetworkOverviewView } from './NetworkOverviewView'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -53,18 +55,34 @@ function mount(onClose = vi.fn(), onGoToNode = vi.fn()) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
-  act(() =>
-    root!.render(
-      <NetworkOverviewView
-        projectName="Research"
-        projectColor="#0a84ff"
-        input={input}
-        onClose={onClose}
-        onGoToNode={onGoToNode}
-      />
+  // `over` is something Canvas opens ABOVE the overview later (the palette, a ConfirmDialog): same
+  // tree, mounted after it, portalled to <body> by the component itself.
+  const render = (over: ReactNode = null) =>
+    act(() =>
+      root!.render(
+        <>
+          <NetworkOverviewView
+            projectName="Research"
+            projectColor="#0a84ff"
+            input={input}
+            onClose={onClose}
+            onGoToNode={onGoToNode}
+          />
+          {over}
+        </>
+      )
     )
-  )
-  return { host, onClose, onGoToNode }
+  render()
+  return { host, onClose, onGoToNode, openOver: render }
+}
+
+/** A real keypress goes where focus is. */
+function pressEscape() {
+  act(() => {
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    )
+  })
 }
 
 describe('NetworkOverviewView', () => {
@@ -89,9 +107,8 @@ describe('NetworkOverviewView', () => {
     const { host, onClose, onGoToNode } = mount()
     act(() => host.querySelector<HTMLElement>('[data-node-id="hub"]')!.click())
     expect(onGoToNode).toHaveBeenCalledWith('hub')
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    })
+    expect(host.querySelector('.overview-overlay')!.contains(document.activeElement)).toBe(true)
+    pressEscape()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -107,12 +124,34 @@ describe('NetworkOverviewView', () => {
   })
 
   it('an Escape something else already handled does not close it', () => {
-    const { onClose } = mount()
+    const { host, onClose } = mount()
     act(() => {
-      const e = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+      const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
       e.preventDefault()
-      window.dispatchEvent(e)
+      host.querySelector('.overview-overlay')!.dispatchEvent(e)
     })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  // Spec §5: Escape closes the overview only when it is the top layer. One Escape must not close
+  // both the thing above it and the overview.
+  it('an Escape in the ⌘K palette over it closes only the palette', () => {
+    const { onClose, openOver } = mount()
+    const closePalette = vi.fn()
+    openOver(<CommandPalette commands={[]} onClose={closePalette} />)
+    expect(document.activeElement!.classList.contains('palette__input')).toBe(true)
+    pressEscape()
+    expect(closePalette).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('an Escape in a ConfirmDialog over it closes only the dialog', () => {
+    const { onClose, openOver } = mount()
+    const cancel = vi.fn()
+    openOver(<ConfirmDialog message="Delete it?" onConfirm={vi.fn()} onCancel={cancel} />)
+    expect(document.querySelector('.confirm')!.contains(document.activeElement)).toBe(true)
+    pressEscape()
+    expect(cancel).toHaveBeenCalledTimes(1)
     expect(onClose).not.toHaveBeenCalled()
   })
 })

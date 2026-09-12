@@ -57,15 +57,21 @@ export function NetworkOverviewView({ projectName, projectColor, input, onClose,
   }, [])
   const graph = useMemo(() => buildOverviewGraph(input, colorOf, findings), [input, findings])
 
+  // On the overlay, not window (spec §5: Escape closes the overview only when it is the top layer).
+  // The ⌘K palette, the Shortcuts panel and every ConfirmDialog portal to <body>, outside it, so the
+  // Escape that closes one of them never reaches this listener. Accepted cost: once focus leaves the
+  // overview, Escape does nothing here.
   useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
     const onKey = (e: KeyboardEvent) => {
-      // A dialog above the overview that already answered this Escape keeps the overview open.
+      // Something inside the overview that already answered this Escape keeps it open.
       if (e.key !== 'Escape' || e.defaultPrevented) return
       e.preventDefault()
       onClose()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    el.addEventListener('keydown', onKey)
+    return () => el.removeEventListener('keydown', onKey)
   }, [onClose])
 
   const onNodeClick: NodeMouseHandler = useCallback((_e, n) => onGoToNode(n.id), [onGoToNode])
