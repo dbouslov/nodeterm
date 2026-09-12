@@ -2141,13 +2141,16 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   store-answered like `list`, so off canvas it hydrates the owning project's nodes with
   `nodeStatesToFlow` instead of travelling.
   **`close --compact`** (2026-09, pure in `renderer/lib/closeCompact.ts`) tidies the frames a close
-  leaves a hole in: each unpinned frame that held a closed node re-lays out its survivors with
+  leaves a hole in: each frame that held a closed node re-lays out its survivors with
   `arrangeNodes`' grid, in reading order, at the column count and origin it had BEFORE the close
   (rows: sorted by top, a child joins the row while its top is above the middle of the row's first
   child; columns = the longest row), then `fitGroupToChildren`; each ancestor whose child frame
-  changed size repeats it, and the top level is never re-laid out. Pinning is inherited
-  (`isPinned`), so a pinned frame and everything inside it are untouched and the walk can never
-  meet one on the way up; an emptied frame stays for the caller to `ungroup`. Canvas plans off
+  changed size repeats it, and the top level is never re-laid out (a frame that hugged its
+  children keeps its top-left; a hand-enlarged one is pulled in, as `arrange` does). A frame that
+  is pinned (itself or by an ancestor — `isPinned`) or HOLDS a surviving pinned node stays as is,
+  and the walk up stops at the first such frame: `arrangeNodes` keeps a pinned member in place but
+  starts the rest at the first slot, so re-packing around one stacks a node on it. An emptied
+  frame stays for the caller to `ungroup`. Canvas plans off
   `nodesRef` inside `runClose` (so waived and confirmed closes compact, and a denied or expired one
   never reaches it) and applies in a `setNodes` updater queued after `deleteNodes`' own. A resized
   frame drops its stale `measured` (as `placeNodeInRect` does), or the frame above it is laid out

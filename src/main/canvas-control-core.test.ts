@@ -554,10 +554,11 @@ describe('parseControlRequest', () => {
       expect(body).toMatch(/`arrange`\s+grid/)
       expect(body).toMatch(/column\s+count/)
       // What it does NOT do is what a caller would otherwise assume, or fear.
-      expect(body).toMatch(/pinned frame, and everything\s+inside one, is left/)
+      expect(body).toMatch(/top level is never re-laid out/)
+      expect(body).toMatch(/pinned frame, everything inside one,\s+and a frame\s+holding a pinned node are left as is/)
       expect(body).toMatch(/emptied stays, empty/)
       expect(body).toMatch(/denied or expired close moves nothing/)
-      expect(body).toContain('Server Edition refuses `--compact`')
+      expect(body).toMatch(/Server Edition\s+refuses `--compact`/)
     }
   })
 

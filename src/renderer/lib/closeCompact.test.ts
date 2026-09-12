@@ -111,7 +111,24 @@ describe('close --compact', () => {
     const { plan, after, out } = closeCompact(before, ['b'])
     expect(plan).toMatchObject({ frames: [], pinned: ['g'], emptied: [] })
     expect(out).toBe(after)
-    expect(compactNote(plan)).toBe(' — compact: left pinned g as is')
+    expect(compactNote(plan)).toBe(' — compact: left g as is (pinned, or holds a pinned node)')
+  })
+
+  it('leaves a frame that holds a pinned node as is — re-packing would stack the rest on it', () => {
+    // `arrangeNodes` keeps a pinned member in place and starts the rest at the first slot: b
+    // would land exactly on a pinned a.
+    const before = twoByTwo().map((x) => (x.id === 'a' ? pin(x) : x))
+    const { plan, after, out } = closeCompact(before, ['d'])
+    expect(plan).toMatchObject({ frames: [], pinned: ['g'] })
+    expect(out).toBe(after)
+  })
+
+  it('closing the pinned node itself frees its frame to re-pack', () => {
+    const before = twoByTwo().map((x) => (x.id === 'b' ? pin(x) : x))
+    const { plan, out } = closeCompact(before, ['b'])
+    expect(plan).toMatchObject({ frames: ['g'], pinned: [] })
+    expect(at(out, 'c').position).toEqual({ x: 168, y: 62 })
+    expect(at(out, 'd').position).toEqual({ x: 28, y: 152 })
   })
 
   // T ⊃ { F ⊃ {a, b, c, d} (2 columns), s under F }, all measured as on the live canvas.
@@ -138,9 +155,20 @@ describe('close --compact', () => {
     expect(box(at(out, 'T'))).toEqual({ x: 0, y: 0, width: 352, height: 320 })
   })
 
-  it('stops at the first pinned frame: nothing inside it, and nothing above it, moves', () => {
-    // Pinning is inherited — F sits in a pinned frame, so F is pinned too, and the walk that
-    // would have reached T never starts.
+  it('the walk stops at the first enclosing frame that stays as is', () => {
+    // T holds a pinned node p, so T stays as is: F still re-packs and shrinks, but T is not
+    // re-laid out around it — s keeps its spot and T its size.
+    const before = measured([...nested(), pin(n('p', 168, 332, 'T'))])
+    const { plan, out } = closeCompact(before, ['c', 'd'])
+    expect(plan.frames).toEqual(['F'])
+    expect(box(at(out, 'F'))).toEqual({ x: 28, y: 62, width: 296, height: 140 })
+    expect(at(out, 's').position).toEqual({ x: 28, y: 332 })
+    expect(at(out, 'p').position).toEqual({ x: 168, y: 332 })
+    expect(box(at(out, 'T'))).toEqual({ x: 0, y: 0, width: 352, height: 410 })
+  })
+
+  it('a frame inside a pinned frame is pinned too: nothing moves at any level', () => {
+    // Pinning is inherited (`isPinned`), so F is pinned by T and the walk never starts.
     const before = nested().map((x) => (x.id === 'T' ? pin(x) : x))
     const { plan, after, out } = closeCompact(before, ['c', 'd'])
     expect(plan).toMatchObject({ frames: [], pinned: ['F'] })

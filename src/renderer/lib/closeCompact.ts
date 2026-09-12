@@ -6,14 +6,18 @@
 // oversized. `--compact` does that right after the close, in the same decision.
 //
 // THE RULES (decided; each is pinned in closeCompact.test.ts):
-// 1. Each frame that held a closed node, unless pinned, re-lays out its remaining children with
-//    `arrangeNodes`' grid (the `arrange` verb's grid, default gap included), in reading order, at
-//    the frame's column count, then hugs them (`fitGroupToChildren`).
-// 2. Each enclosing frame whose child frame changed size gets the same, up the chain. The top
-//    level is never re-laid out. There is no pin check on the way up: pinning is inherited
-//    (`isPinned` — a frame carries its children), so a frame that is not pinned has no pinned
-//    ancestor, and the walk "stops at the first pinned frame" by never starting under one.
+// 1. Each frame that held a closed node, unless it stays as is (below), re-lays out its remaining
+//    children with `arrangeNodes`' grid (the `arrange` verb's grid, default gap included), in
+//    reading order, at the frame's column count, and is re-fitted to them (`fitGroupToChildren`).
+// 2. Each enclosing frame whose child frame changed size gets the same, up the chain, stopping at
+//    the first frame that stays as is. The top level is never re-laid out.
 // 3. A frame the close emptied stays where it is, empty. Ungrouping it is the caller's call.
+//
+// A FRAME STAYS AS IS when it is pinned — itself or by an ancestor (`isPinned`: a frame carries
+// its children) — or holds a pinned node. The second is the pin contract's point rather than its
+// letter: `arrangeNodes` leaves a pinned member where it is and starts the rest at the first slot,
+// so re-packing around one would stack a node on top of it. Only nodes that SURVIVE the close
+// count, so closing the pinned node itself frees its frame to re-pack.
 //
 // THE GRID A FRAME KEEPS is the one it had BEFORE the close, which is why this is a plan read off
 // the canvas as the close found it and applied to the canvas the delete left:
@@ -23,7 +27,8 @@
 //   reads back exactly; a hand-placed one tolerates up to half a node of vertical drift. Closing a
 //   2-column frame's whole right column therefore leaves 2 columns, not 1.
 // - origin: the top-left of the children before the close, so closing a frame's top row pulls the
-//   rest up instead of letting the frame's top edge follow them down.
+//   rest up. A frame that hugged its children — as `group`, `arrange` and `move` leave one — keeps
+//   its top-left corner; a hand-enlarged one is pulled in to hug them, as `arrange` does.
 //
 // PURE, like `closeTargets.ts`: the Canvas dispatch plans before `deleteNodes` and applies in a
 // `setNodes` updater after it.
@@ -59,10 +64,16 @@ export function readingRows(nodes: readonly CanvasNode[]): CanvasNode[][] {
   return rows.map((row) => row.sort((a, b) => a.position.x - b.position.x))
 }
 
+/** Whether compaction leaves `frame` as is (the header's rule). `nodes` = the survivors. */
+function staysAsIs(frame: CanvasNode, nodes: readonly CanvasNode[]): boolean {
+  return isPinned(frame, nodes) || nodes.some((n) => n.parentId === frame.id && n.data?.pinned === true)
+}
+
 export interface CompactPlan {
   /** Frames that held a closed node and keep at least one child: re-packed. */
   frames: string[]
-  /** Frames that held a closed node but are pinned, or sit inside a pinned frame: untouched. */
+  /** Frames that held a closed node but stay as is: pinned, inside a pinned frame, or holding a
+   *  pinned node. */
   pinned: string[]
   /** Frames every child of which was closed: left where they are, empty. */
   emptied: string[]
@@ -74,6 +85,7 @@ export interface CompactPlan {
 export function planCompaction(before: readonly CanvasNode[], closedIds: readonly string[]): CompactPlan {
   const closed = new Set(closedIds)
   const byId = new Map(before.map((n) => [n.id, n]))
+  const survivors = before.filter((n) => !closed.has(n.id))
   const plan: CompactPlan = { frames: [], pinned: [], emptied: [], before }
   const seen = new Set<string>()
   for (const id of closedIds) {
@@ -83,8 +95,8 @@ export function planCompaction(before: readonly CanvasNode[], closedIds: readonl
     seen.add(parentId)
     const frame = byId.get(parentId)
     if (!frame || frame.type !== 'group') continue
-    if (isPinned(frame, before)) plan.pinned.push(parentId)
-    else if (before.some((n) => n.parentId === parentId && !closed.has(n.id))) plan.frames.push(parentId)
+    if (staysAsIs(frame, survivors)) plan.pinned.push(parentId)
+    else if (survivors.some((n) => n.parentId === parentId)) plan.frames.push(parentId)
     else plan.emptied.push(parentId)
   }
   return plan
@@ -137,16 +149,16 @@ export function applyCompaction(after: CanvasNode[], plan: CompactPlan, grid = 0
     // frame one level up would otherwise be laid out around this frame's OLD size.
     next = next.map((n) => (n.id === id ? { ...n, measured: undefined } : n))
     const parent = frame.parentId ? next.find((n) => n.id === frame.parentId) : undefined
-    if (parent?.type === 'group') pending.add(parent.id)
+    if (parent?.type === 'group' && !staysAsIs(parent, next)) pending.add(parent.id)
   }
   return next
 }
 
-/** The reply's account of what `--compact` did. */
+/** The reply's account of what `--compact` did with each frame that held a closed node. */
 export function compactNote(plan: CompactPlan): string {
   const parts = [
     plan.frames.length ? `re-packed ${plan.frames.join(', ')}` : '',
-    plan.pinned.length ? `left pinned ${plan.pinned.join(', ')} as is` : '',
+    plan.pinned.length ? `left ${plan.pinned.join(', ')} as is (pinned, or holds a pinned node)` : '',
     plan.emptied.length ? `left ${plan.emptied.join(', ')} empty (ungroup it)` : ''
   ].filter(Boolean)
   return ` — compact: ${parts.length ? parts.join('; ') : 'no frame held these nodes'}`
