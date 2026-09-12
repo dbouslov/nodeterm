@@ -112,9 +112,10 @@ lane unaffected.
   in `src/shared/placement/` — the eight independent rules it replaced are how nodes came to spawn
   on top of each other. When one call opens several nodes, reserve what you place (append its box
   to `existing`) before placing the next. A node opened FROM a node inside a frame is filed into
-  that frame, which grows to hold it — unless it waits on `--after` deps, in which case it stays
-  top-level beside them. The live, cold and headless paths must agree on where it lands, and
-  `test/acceptance/placement-parity.test.ts` fails when they do not. Moving EXISTING
+  that frame, which grows to hold it — unless it waits on `--after` deps, in which case it goes
+  beside them, into THEIR frame (`containerJoinedBy` decides the container once; top level when the
+  deps are top-level or disagree). The live, cold and headless paths must agree on where it lands,
+  and `test/acceptance/placement-parity.test.ts` fails when they do not. Moving EXISTING
   nodes is `lib/restructure.ts`'s job and happens only on the explicit Restructure action — and
   anything that moves existing nodes automatically must skip pinned ones (`isPinned`,
   `renderer/state/workspace.ts`): the user pinned

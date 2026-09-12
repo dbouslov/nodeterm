@@ -11,7 +11,7 @@ import {
   type NodeColor
 } from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
-import { framesJoinedBy, placeOpened, type Box } from '../shared/placement'
+import { containerJoinedBy, framesJoinedBy, placeOpened, type Box } from '../shared/placement'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
   AGENT_CONFIG,
@@ -231,11 +231,11 @@ export function placeNode(
   reserved: readonly CanvasNodeState[] = [],
   deps: readonly CanvasNodeState[] = []
 ): { x: number; y: number } {
-  // The source's own frames are not obstacles for a lineage child, which is filed into the
-  // innermost one (it grows to hold it); a dependent stays top-level beside its deps and clears
-  // every frame (`framesJoinedBy`, the desktop's rule).
+  // The frames of the container this node is filed into are not obstacles for it, because that
+  // container grows to hold it: the SOURCE's own frames for a lineage child, its DEPS' for a
+  // dependent, none for a node that stays top-level (`framesJoinedBy`, the desktop's rule).
   const depBoxes = deps.map((dep) => nodeBox(project, dep))
-  const frames = framesJoinedBy(project.nodes, source.id, depBoxes)
+  const frames = framesJoinedBy(project.nodes, source.id, deps)
   const existing = [...project.nodes.filter((node) => !frames.has(node.id)), ...reserved].map((node) =>
     nodeBox(project, node)
   )
@@ -1132,12 +1132,17 @@ export class HeadlessNodeFactory {
         .flatMap((depId) => target.nodes.filter((candidate) => candidate.id === depId))
       // A source inside a frame keeps its LINEAGE children inside that frame (the desktop's rule):
       // each is placed below the source in ROOT space, filed into the frame, and the frame chain is
-      // re-fitted once every node of this call is in. A dependent stays top-level beside its deps.
-      // Only in the source's own project — a `--project` target does not hold that frame.
-      const srcFrame =
-        target === source.project && !afterNodes.length
-          ? target.nodes.find((node) => node.id === source.node.parentId && node.kind === 'group')
+      // re-fitted once every node of this call is in. A dependent joins the frame ITS DEPS live in
+      // instead (`containerJoinedBy`) — never the source's just because the source is there.
+      // Lineage only in the source's own project: a `--project` target does not hold the source's
+      // frame, while the deps are resolved from `target`, so theirs always is.
+      const intoFrameId =
+        afterNodes.length || target === source.project
+          ? containerJoinedBy(target.nodes, source.node.id, afterNodes)
           : undefined
+      const intoFrame = intoFrameId
+        ? target.nodes.find((node) => node.id === intoFrameId && node.kind === 'group')
+        : undefined
       const commands = new Map<string, string>()
       const ropes = [...(target.ropes ?? [])]
       const bridges = [...(target.bridges ?? [])]
@@ -1204,12 +1209,12 @@ export class HeadlessNodeFactory {
             }
           : undefined
         const at = placeNode(target, source.node, nodeSize, created, afterNodes)
-        const origin = srcFrame ? absolutePosition(target, srcFrame) : { x: 0, y: 0 }
+        const origin = intoFrame ? absolutePosition(target, intoFrame) : { x: 0, y: 0 }
         const node: CanvasNodeState = {
           id,
           kind: 'terminal',
           position: { x: at.x - origin.x, y: at.y - origin.y },
-          ...(srcFrame ? { parentId: srcFrame.id } : {}),
+          ...(intoFrame ? { parentId: intoFrame.id } : {}),
           size: { ...nodeSize },
           title,
           ...(verb === 'open-agent' ? { titleAuto: true } : {}),
@@ -1249,7 +1254,7 @@ export class HeadlessNodeFactory {
       // rewrites the frame (and re-anchors its children), so everything it changed is published.
       const prior = new Set(target.nodes)
       target.nodes.push(...created)
-      if (srcFrame) target.nodes = fitAncestorChain(target.nodes, srcFrame.id)
+      if (intoFrame) target.nodes = fitAncestorChain(target.nodes, intoFrame.id)
       target.ropes = ropes
       target.bridges = bridges
       await this.deps.workspaceStore.save(workspace)

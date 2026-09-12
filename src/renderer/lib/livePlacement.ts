@@ -1,14 +1,22 @@
 // WHERE AN AGENT-OPENED NODE GOES ON THE LIVE CANVAS — the live leg of the rule the cold open
 // (`coldOpen.ts`) and the Server Edition's headless factory follow too: below the source (right of
-// its `--after` deps), and a source inside a frame keeps what it opens inside that frame, which
-// grows to hold it. Pure, because the control dispatch that uses it lives inside Canvas's IPC
-// listener with no unit seam: Canvas passes `nodesRef.current` and applies the result with
-// `setNodes`.
+// its `--after` deps), and the node joins the frame its anchor lives in — its source's frame for a
+// lineage child, its deps' for a dependent — which grows to hold it. Pure, because the control
+// dispatch that uses it lives inside Canvas's IPC listener with no unit seam: Canvas passes
+// `nodesRef.current` and applies the result with `setNodes`.
 
 import { absolutePosition, type FocusableNode } from './nodeFocus'
 import { coldPlaceBelow, type ColdNode } from './coldOpen'
 import { addSelectionToGroup, type CanvasNode } from '../state/workspace'
-import { centerOf, framesJoinedBy, placeOpened, type Box, type Point, type Size } from '@shared/placement'
+import {
+  centerOf,
+  containerJoinedBy,
+  framesJoinedBy,
+  placeOpened,
+  type Box,
+  type Point,
+  type Size
+} from '@shared/placement'
 
 /** A live node as the placement engine sees it: ROOT-space position (a frame child's stored
  *  position is frame-relative), then measured size, else stored size, else `dflt`. */
@@ -25,32 +33,32 @@ export function liveBoxesOf(all: readonly CanvasNode[], dflt: Size, skip?: Reado
 
 /** The `--after` deps a node opened from `src` is placed beside: the live nodes `after` names,
  *  minus the source itself (waiting on the opener is still lineage, so that node stays below). */
-function liveDeps(all: readonly CanvasNode[], src: CanvasNode, after: readonly string[], dflt: Size): Box[] {
-  return after
-    .filter((d) => d !== src.id)
-    .flatMap((d) => all.filter((n) => n.id === d))
-    .map((n) => liveBox(n, all, dflt))
+function liveDeps(all: readonly CanvasNode[], src: CanvasNode, after: readonly string[]): CanvasNode[] {
+  return after.filter((d) => d !== src.id).flatMap((d) => all.filter((n) => n.id === d))
 }
 
 /**
  * The frame an opened node is filed into (`withOpenedNode`): the source's innermost frame for a
- * LINEAGE child; none for a node placed beside `--after` deps — it stays top-level beside them.
+ * LINEAGE child; for a node placed beside `--after` deps, the frame those DEPS live in, so it
+ * lands beside them inside it (`containerJoinedBy`) — top level when they are top-level or do not
+ * agree on one container.
  */
 export function openedFrameId(
   all: readonly CanvasNode[],
   src: CanvasNode,
   after: readonly string[]
 ): string | undefined {
-  return liveDeps(all, src, after, { w: 0, h: 0 }).length ? undefined : src.parentId
+  return containerJoinedBy(all, src.id, liveDeps(all, src, after))
 }
 
 /**
  * Top-left (ROOT space) of the `index`-th node an agent opens from `src` — the control dispatch's
- * `placeNext`. `placeOpened` over every live node except `skip` (ephemeral cards) and, for a
- * LINEAGE child, the SOURCE'S OWN FRAMES (`framesJoinedBy`), plus `reserved` (siblings this call
- * already placed: `setNodes` is async, so the live array does not show them yet). A lineage child
- * is filed into the innermost frame (`withOpenedNode`), so the frames are not obstacles for it;
- * their other children are. A node beside `--after` deps stays top-level and clears every frame.
+ * `placeNext`. `placeOpened` over every live node except `skip` (ephemeral cards) and the frames of
+ * the container it will be filed into (`framesJoinedBy`: the SOURCE'S for a lineage child, its
+ * DEPS' for a dependent), plus `reserved` (siblings this call already placed: `setNodes` is async,
+ * so the live array does not show them yet). The node is filed into that container
+ * (`withOpenedNode`), which grows to hold it, so its frames are not obstacles for it; their other
+ * children are. A node with no container stays top-level and clears every frame.
  */
 export function livePlaceOpened(
   all: readonly CanvasNode[],
@@ -60,12 +68,12 @@ export function livePlaceOpened(
   index: number,
   opts: { reserved?: readonly Box[]; skip?: ReadonlySet<string> } = {}
 ): Point {
-  const deps = liveDeps(all, src, after, size)
-  const skip = new Set([...(opts.skip ?? []), ...framesJoinedBy(all, src.id, deps)])
+  const depNodes = liveDeps(all, src, after)
+  const skip = new Set([...(opts.skip ?? []), ...framesJoinedBy(all, src.id, depNodes)])
   return placeOpened(
     [...liveBoxesOf(all, size, skip), ...(opts.reserved ?? [])],
     liveBox(src, all, { w: 600, h: 400 }),
-    deps,
+    depNodes.map((n) => liveBox(n, all, size)),
     size,
     index
   )

@@ -264,7 +264,7 @@ import {
   type BrowserResolveProject
 } from '../lib/controlRouting'
 import {
-  coldFileIntoSourceFrame,
+  coldFileIntoFrame,
   coldGroupCwd,
   coldOpenMessage,
   coldPlaceBelow,
@@ -9912,10 +9912,10 @@ export function Canvas() {
             }
             // A source inside a frame keeps its LINEAGE children inside that frame, as on the live
             // canvas: each filed in where `coldPlaceBelow` put it, the frame chain grown to hold it,
-            // frames written first. An `--after` dependent stays top-level beside its deps, and a
-            // `--group` child already went into the frame it named.
+            // frames written first. An `--after` dependent joins the frame ITS DEPS live in instead,
+            // and a `--group` child already went into the frame it named.
             if (!coldGroup.groupId) {
-              const filed = coldFileIntoSourceFrame(
+              const filed = coldFileIntoFrame(
                 coldNodes,
                 coldSrcNode,
                 coldMade.map((n) => ({
@@ -10114,9 +10114,9 @@ export function Canvas() {
       // centerpoint; `i` fans multiple nodes out horizontally so they don't stack.
       // Placement for the nodes this call opens — the shared engine, in ROOT space (a source inside
       // a frame is resolved through the whole parent chain). Opener → child goes BELOW the source,
-      // fanned right; a node armed `--after` goes RIGHT of its deps (`livePlaceOpened`). For a
-      // lineage child the source's own frames are not obstacles: `addAndConnect` files it into that
-      // frame and grows it (`withOpenedNode`); a dependent stays top-level beside its deps.
+      // fanned right; a node armed `--after` goes RIGHT of its deps (`livePlaceOpened`). The frames
+      // of the container it joins are not obstacles: `addAndConnect` files it in and grows them
+      // (`withOpenedNode`) — the SOURCE's frame for a lineage child, its DEPS' for a dependent.
       // `reserved` holds the siblings this same call has placed — `setNodes` is async, so nodesRef
       // does not show them yet.
       const srcBox = liveBox(src, nodesRef.current, { w: 600, h: 400 })
@@ -10191,7 +10191,7 @@ export function Canvas() {
       }
       // Append a freshly-created node, draw its connecting edge, and mark the canvas dirty so it
       // persists. Returns the new node id. A node opened by a grouped agent joins that group
-      // (`withOpenedNode` live, `coldFileIntoSourceFrame` off canvas), so the control fan-out stays
+      // (`withOpenedNode` live, `coldFileIntoFrame` off canvas), so the control fan-out stays
       // inside the frame and moves with it. A node that arrives ALREADY parented (open-agent
       // --group placed it into a frame with relative coords) passes through untouched — re-filing
       // it would read its relative position as absolute and land it off-frame.
@@ -10207,7 +10207,7 @@ export function Canvas() {
           const ocStore = useProjects.getState()
           const filed = node.parentId
             ? undefined
-            : coldFileIntoSourceFrame(
+            : coldFileIntoFrame(
                 offCanvas.project.nodes as unknown as ColdNode[],
                 offCanvas.source as unknown as ColdNode,
                 [{ ...node.position, w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }]
@@ -10238,7 +10238,7 @@ export function Canvas() {
         // A LINEAGE child is filed into the source's frame against the frame as it is when the
         // update applies, and the frame chain grown in the SAME transform: `extent: 'parent'` clamps
         // a child that lands past the frame's edge, which put it straight back onto its source. A
-        // node placed beside `--after` deps stays top-level next to them (`openedFrameId`).
+        // node placed beside `--after` deps joins THEIR frame the same way (`openedFrameId`).
         const frameId = openedFrameId(nodesRef.current, src, after)
         setNodes((ns) => withOpenedNode(ns, node, frameId, snapGridNow()))
         connect(node.id)

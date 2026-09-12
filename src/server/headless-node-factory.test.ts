@@ -1005,6 +1005,39 @@ describe('HeadlessNodeFactory', () => {
     expect(saved.find((node) => node.id === 'frame-1')!.size).toEqual({ width: 696, height: 530 })
   })
 
+  it('files a node opened --after a dep INSIDE the frame into THAT frame, beside the dep', async () => {
+    await frameTheSource()
+    // Move the dep into the source's frame (and widen the frame to hold it): the dependent is
+    // placed beside the DEP, so it joins the dep's container — here the same frame.
+    const workspace = await store.load({ sideline: false })
+    const nodes = workspace.projects[0].nodes
+    nodes.find((node) => node.id === 'frame-1')!.size = { width: 1372, height: 530 }
+    const dep = nodes.find((node) => node.id === 'term-upstream')!
+    dep.parentId = 'frame-1'
+    dep.position = { x: 708, y: 62 } // root (708, 1062), right of the source
+    await store.save(workspace)
+
+    const reply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume', after: 'term-upstream' },
+      true
+    )
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const dependent = saved.find((node) => node.id === id)!
+    const frame = saved.find((node) => node.id === 'frame-1')!
+    expect(dependent.parentId).toBe('frame-1')
+    // ROOT space: right of the dep (708 + 640 + 40), top-aligned with it.
+    expect({ x: frame.position.x + dependent.position.x, y: frame.position.y + dependent.position.y }).toEqual({
+      x: 1388,
+      y: 1062
+    })
+    // The frame grew to hold it, as it does for a lineage child.
+    expect(dependent.position.x + dependent.size!.width).toBeLessThanOrEqual(frame.size!.width)
+    expect(published.find((node) => node.id === 'frame-1')?.size).toEqual(frame.size)
+  })
+
   it.each([
     ['claude', "claude 'do work'"],
     ['codex', "codex 'do work' --ask-for-approval untrusted"],

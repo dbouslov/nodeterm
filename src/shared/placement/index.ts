@@ -122,18 +122,38 @@ export function ancestorFrameIds(
 }
 
 /**
- * The frames that are NOT obstacles for a node opened from `sourceId`, given the `--after` deps it
- * is placed beside: the source's own frames for a LINEAGE child (no deps: it goes below the source
- * and is filed into the innermost one, which grows to hold it); none for a dependent, which stays
- * top-level beside its deps and so must clear every frame. The one framed-source rule the live
- * dispatch, the cold open and the headless factory share (test/acceptance/placement-parity.test.ts).
+ * The frame an opened node is FILED INTO, or `undefined` for top level — the ONE anchor decision
+ * behind both the filing and the obstacle set (`framesJoinedBy`), so no path can answer it twice.
+ * A LINEAGE child (no `--after` deps other than the opener, which it still hangs below) joins its
+ * SOURCE's innermost frame. A dependent is placed beside its DEPS, so it joins THEIR container
+ * instead — never the source's frame just because the source happens to sit in one — and only
+ * when every dep agrees on one container: deps in different frames leave it top-level, where it
+ * clears them all. The one rule the live dispatch, the cold open and the headless factory share
+ * (test/acceptance/placement-parity.test.ts).
+ */
+export function containerJoinedBy(
+  nodes: readonly { id: string; parentId?: string }[],
+  sourceId: string,
+  deps: readonly { id: string }[]
+): string | undefined {
+  const anchors = deps.filter((d) => d.id !== sourceId)
+  if (!anchors.length) return nodes.find((n) => n.id === sourceId)?.parentId
+  const containers = new Set(anchors.map((d) => nodes.find((n) => n.id === d.id)?.parentId))
+  return containers.size === 1 ? [...containers][0] : undefined
+}
+
+/**
+ * The frames that are NOT obstacles for that node: the container it joins and every frame above it
+ * (it lands inside the innermost one, which grows to hold it — their OTHER children still are
+ * obstacles), or none at all for a node that stays top-level and so must clear every frame.
  */
 export function framesJoinedBy(
   nodes: readonly { id: string; parentId?: string }[],
   sourceId: string,
-  deps: readonly Box[]
+  deps: readonly { id: string }[]
 ): Set<string> {
-  return deps.length ? new Set() : ancestorFrameIds(nodes, sourceId)
+  const container = containerJoinedBy(nodes, sourceId, deps)
+  return container ? new Set([container, ...ancestorFrameIds(nodes, container)]) : new Set()
 }
 
 /** No anchor at all (cold open into another project): below the lowest box, aligned with the leftmost. */

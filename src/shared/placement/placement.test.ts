@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   freeSpot, freeSpotDirected, placeByHand, placeChild, placeDependent, placeLoose, placeInFrame, placeOpened,
-  groupSlot, centerOf, overlaps, PLACEMENT_GAP, ROW_GAP, GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP,
+  groupSlot, centerOf, overlaps, ancestorFrameIds, containerJoinedBy, framesJoinedBy,
+  PLACEMENT_GAP, ROW_GAP, GROUP_PAD_X, GROUP_PAD_TOP, GROUP_GAP,
   type Box
 } from './index'
 
@@ -99,6 +100,69 @@ describe('placeOpened — the one rule the live, cold and headless open paths al
   it('with deps is the dependent rule — dependency outranks lineage', () => {
     const dep = box(800, 100, 200, 100)
     expect(placeOpened([opener, dep], opener, [dep], size, 1)).toEqual({ x: 800 + 200 + PLACEMENT_GAP, y: 100 })
+  })
+})
+
+describe('containerJoinedBy — whose container an opened node joins', () => {
+  // outer > inner > src; `dep` rides in `other`, `loose` in nobody.
+  const scene = [
+    { id: 'outer' },
+    { id: 'inner', parentId: 'outer' },
+    { id: 'src', parentId: 'inner' },
+    { id: 'other' },
+    { id: 'dep', parentId: 'other' },
+    { id: 'dep2', parentId: 'other' },
+    { id: 'loose' }
+  ]
+  const joins = (sourceId: string, deps: string[]) =>
+    containerJoinedBy(scene, sourceId, deps.map((id) => ({ id })))
+
+  it('a lineage child joins its SOURCE’s innermost frame', () => {
+    expect(joins('src', [])).toBe('inner')
+    // Waiting on the opener itself is still lineage.
+    expect(joins('src', ['src'])).toBe('inner')
+    expect(joins('loose', [])).toBeUndefined()
+  })
+
+  it('an --after dependent joins its DEP’s container, not the source’s frame', () => {
+    expect(joins('src', ['dep'])).toBe('other')
+    // Several deps in the one container still agree on it.
+    expect(joins('src', ['dep', 'dep2'])).toBe('other')
+    // A top-level dep means top level, even from a framed source.
+    expect(joins('src', ['loose'])).toBeUndefined()
+  })
+
+  it('deps that do NOT agree on a container leave the node top-level', () => {
+    expect(joins('src', ['dep', 'loose'])).toBeUndefined()
+    expect(joins('src', ['dep', 'src'])).toBe('other') // the opener is not a dep
+  })
+})
+
+describe('framesJoinedBy — the frames that are NOT obstacles, derived from that container', () => {
+  const scene = [
+    { id: 'outer' },
+    { id: 'inner', parentId: 'outer' },
+    { id: 'src', parentId: 'inner' },
+    { id: 'other' },
+    { id: 'dep', parentId: 'other' },
+    { id: 'loose' }
+  ]
+  const skipped = (sourceId: string, deps: string[]) =>
+    [...framesJoinedBy(scene, sourceId, deps.map((id) => ({ id })))].sort()
+
+  it('for a lineage child: the container and every frame above it', () => {
+    expect(skipped('src', [])).toEqual(['inner', 'outer'])
+    expect(skipped('src', [])).toEqual([...ancestorFrameIds(scene, 'src')].sort())
+    expect(skipped('loose', [])).toEqual([])
+  })
+
+  it('for a dependent: the DEP’s chain, so the node can land inside it and grow it', () => {
+    expect(skipped('src', ['dep'])).toEqual(['other'])
+  })
+
+  it('for a dependent with no container: nothing — it must clear every frame', () => {
+    expect(skipped('src', ['loose'])).toEqual([])
+    expect(skipped('src', ['dep', 'loose'])).toEqual([])
   })
 })
 

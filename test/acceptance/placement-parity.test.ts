@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { livePlaceOpened, placeBelowSource } from '../../src/renderer/lib/livePlacement'
-import { coldPlaceBelow, type ColdNode } from '../../src/renderer/lib/coldOpen'
+import { livePlaceOpened, openedFrameId, placeBelowSource } from '../../src/renderer/lib/livePlacement'
+import { coldFileIntoFrame, coldPlaceBelow, type ColdNode } from '../../src/renderer/lib/coldOpen'
 import type { CanvasNode } from '../../src/renderer/state/workspace'
 import { placeNode } from '../../src/server/headless-node-factory'
 import type { CanvasNodeState, Project } from '../../src/shared/types'
@@ -165,6 +165,33 @@ describe('placement parity — live, cold and headless place an opened node iden
     expect(r.live).toEqual(at)
     expect(r.cold).toEqual(at)
     expect(r.headless).toEqual(at)
+  })
+
+  it('an --after dep INSIDE the source’s frame: the dependent lands inside that frame, beside the dep', () => {
+    // The dependent joins its DEP's container. Here the dep rides in the source's own frame, so
+    // the node lands beside it INSIDE the frame — reaching past the frame's right edge (2400),
+    // which grows for it rather than clamping the node back.
+    const scene: Spec[] = [
+      { id: 'g', x: 1000, y: 1000, w: 1400, h: 1200, group: true },
+      { id: 'src', x: 24, y: 56, parentId: 'g' },
+      { id: 'dep', x: 700, y: 56, parentId: 'g' } // root (1700, 1056)
+    ]
+    const r = allThree(scene, 'src', ['dep'])
+    const at = { x: 1700 + 600 + 40, y: 1056 }
+    expect(r.live).toEqual(at)
+    expect(r.cold).toEqual(at)
+    expect(r.headless).toEqual(at)
+    // And the same container on the two paths that expose one. The headless factory's filing is
+    // pinned on the real verb (src/server/headless-node-factory.test.ts, "--after a dep INSIDE
+    // the frame"), which the factory harness this test has no access to is needed for.
+    const live = liveNodes(scene)
+    expect(openedFrameId(live, live.find((n) => n.id === 'src')!, ['dep'])).toBe('g')
+    const cold = coldNodes(scene)
+    expect(
+      coldFileIntoFrame(cold, cold.find((n) => n.id === 'src')!, [{ ...at, ...SIZE }], {
+        deps: cold.filter((n) => n.id === 'dep')
+      }).frameId
+    ).toBe('g')
   })
 
   it('an --after dep just OUTSIDE the source’s frame: top-level beside it, clear of the frame, on all three paths', () => {

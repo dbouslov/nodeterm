@@ -81,6 +81,13 @@ describe('livePlaceOpened — what the control dispatch’s placeNext lands on',
     const left = node('left', 300, 1100)
     expect(livePlaceOpened([g, src, left], src, ['left'], SIZE, 0)).toEqual({ x: 940 + 3 * 640, y: 1100 })
   })
+
+  it('an --after dep INSIDE a frame: that frame is no obstacle, because the node joins it', () => {
+    // The dep sits right of the source in `g`; the slot right of the dep (2340, 1056) reaches past
+    // the frame's right edge (2400), and the frame grows for it instead of pushing the node out.
+    const dep = node('dep', 700, 56, 600, 400, 'g') // root (1700, 1056)
+    expect(livePlaceOpened([g, src, dep], src, ['dep'], SIZE, 0)).toEqual({ x: 2340, y: 1056 })
+  })
 })
 
 describe('openedFrameId — only a lineage child joins its source’s frame', () => {
@@ -93,8 +100,16 @@ describe('openedFrameId — only a lineage child joins its source’s frame', ()
     expect(openedFrameId([g, src, dep], src, ['src'])).toBe('g')
   })
 
-  it('a node placed beside an --after dep does not: it stays top-level next to its dep', () => {
+  it('a node placed beside a TOP-LEVEL --after dep does not: it stays top-level next to its dep', () => {
     expect(openedFrameId([g, src, dep], src, ['dep'])).toBeUndefined()
+  })
+
+  it('a dep INSIDE a frame takes the node into THAT frame — the dep’s container, never the source’s', () => {
+    const inside = node('inside', 700, 56, 600, 400, 'g')
+    expect(openedFrameId([g, src, inside], src, ['inside'])).toBe('g')
+    const other = frame('other', 4000, 0, 1400, 1200)
+    const far = node('far', 24, 56, 600, 400, 'other')
+    expect(openedFrameId([g, src, other, far], src, ['far'])).toBe('other')
   })
 
   it('a top-level source files nothing', () => {
