@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { routeAll } from './index'
-import type { Point, RouteEdge, RouteNode, RouteRequest } from './types'
+import { outward, type Point, type Port, type RouteEdge, type RouteNode, type RouteRequest } from './types'
 
 const n = (id: string, x: number, y: number): RouteNode => ({ id, x, y, width: 200, height: 100, isFrame: false })
 const mk = (nodes: RouteNode[], edges: RouteEdge[]): RouteRequest => ({ nodes: new Map(nodes.map((v) => [v.id, v])), edges })
@@ -74,6 +74,51 @@ describe('routeAll', () => {
     const g = routeAll(mk(ns, es))
     expect(g.routes.size).toBe(es.length)
     expect(g.fallbacks).toBe(0)
+  })
+  // Nudging offsets an interior run by CHANNEL_SPACING per member either side of its channel's
+  // middle — 24 px on a five-member channel, past the 20 px PORT_STUB — and the obstacle list it
+  // consulted left OUT the edge's own two nodes. The corner next to a stub was then carried onto or
+  // past its own node's border: the stub collapsed or pointed backwards, and the arrowhead, whose
+  // direction is the sign of the last segment, aimed away from the node it marks. Asked over small
+  // crowded canvases because both defects are rare and none of them look special: of the 1,100
+  // routes below, 72 ran a segment through their own node and 29 had a collapsed or reversed stub.
+  it('no nudged segment enters its own endpoint node and both stubs keep their port normal', () => {
+    const EPS = 0.5
+    const enters = (a: Point, b: Point, box: RouteNode): boolean =>
+      Math.min(a.x, b.x) < box.x + box.width - EPS && box.x + EPS < Math.max(a.x, b.x) &&
+      Math.min(a.y, b.y) < box.y + box.height - EPS && box.y + EPS < Math.max(a.y, b.y)
+    let seed = 3
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    const bad: string[] = []
+    for (let t = 0; t < 200; t++) {
+      const count = 4 + Math.floor(rnd() * 3)
+      const ns: RouteNode[] = []
+      for (let i = 0; i < count; i++) ns.push({ id: `n${i}`, x: Math.floor(rnd() * 900), y: Math.floor(rnd() * 700), width: 200, height: 100, isFrame: false })
+      const es: RouteEdge[] = []
+      for (let i = 0; i < count * 2; i++) {
+        const s = Math.floor(rnd() * count), d = Math.floor(rnd() * count)
+        if (s !== d) es.push({ id: `e${t}-${i}`, source: `n${s}`, target: `n${d}`, kind: i % 2 ? 'context' : 'rope', ropeKind: 'dep' })
+      }
+      const g = routeAll(mk(ns, es))
+      for (const e of es) {
+        const r = g.routes.get(e.id)
+        // The fallback path is the no-avoidance one by definition, so it is not held to this.
+        if (!r || r.fallback) continue
+        const own = [ns.find((v) => v.id === e.source)!, ns.find((v) => v.id === e.target)!]
+        for (let i = 0; i + 1 < r.points.length; i++) {
+          for (const box of own) if (enters(r.points[i], r.points[i + 1], box)) bad.push(`t=${t} ${e.id} segment ${i} enters ${box.id}`)
+        }
+        // The vector arrowheadPoints takes its direction from: each stub's far corner must still
+        // lie outward of its port, or the head has no direction (zero length) or the wrong one.
+        const p = r.points
+        const stubs: [Point, Point, Port, string][] = [[p[0], p[1], r.ports[0], 'source'], [p[p.length - 1], p[p.length - 2], r.ports[1], 'target']]
+        for (const [port, corner, { side }, end] of stubs) {
+          const o = outward(side)
+          if (Math.sign(corner.x - port.x) !== o.x || Math.sign(corner.y - port.y) !== o.y) bad.push(`t=${t} ${e.id} ${end} stub on ${side} runs ${Math.sign(corner.x - port.x)},${Math.sign(corner.y - port.y)}`)
+        }
+      }
+    }
+    expect(bad).toEqual([])
   })
   it('incremental: an untouched edge whose route crosses the moved node re-routes too', () => {
     const r = mk([n('a', 0, 0), n('b', 1000, 0), n('c', 400, 400), n('d', 400, 800)], [

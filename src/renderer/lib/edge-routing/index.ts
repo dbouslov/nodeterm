@@ -3,7 +3,7 @@
 // node, or whose current route's bbox meets a moved node's box, are re-routed; the rest keep
 // identity, and nudging is skipped for the re-routed set — bundles reform on the full pass that
 // runs when the drag ends.
-import { intersects, obstaclesFor } from './obstacles'
+import { inflate, intersects, obstaclesFor } from './obstacles'
 import { portsFor } from './ports'
 import { routeOne } from './route'
 import { nudge } from './nudge'
@@ -45,7 +45,16 @@ export function routeAll(req: RouteRequest, previous?: RoutedGraph, moved?: Read
   const obstacleCache = new Map<string, ReturnType<typeof obstaclesFor>>()
   const obstaclesOf = (id: string) => {
     let o = obstacleCache.get(id)
-    if (!o) { const e = live.find((x) => x.id === id)!; o = obstaclesFor(e, req); obstacleCache.set(id, o) }
+    // The edge's OWN two nodes are no obstacle to the search (its ports sit on them) but they are
+    // to a nudge: a channel offsets a run by more than the 20 px PORT_STUB, so the corner next to
+    // a stub was carried into its own node — the stub collapsed or reversed and the arrowhead
+    // pointed away from the node it marks. The raw boxes, plus 1 px so a run landing exactly ON a
+    // border (a zero-length stub, no arrowhead direction at all) counts as entering too.
+    if (!o) {
+      const e = live.find((x) => x.id === id)!
+      o = [...obstaclesFor(e, req), inflate(req.nodes.get(e.source)!, 1), inflate(req.nodes.get(e.target)!, 1)]
+      obstacleCache.set(id, o)
+    }
     return o
   }
   return { routes: nudge(routes, live, obstaclesOf), fallbacks }
