@@ -314,9 +314,12 @@ function identityRefusal(
  * be paid anyway, which is exactly the kind of gap a source-reading test cannot see.
  *
  * The set is exhaustive as of `FIRST_PAID_DECISION`: `notPermitted`, self-send, `rateLimited`,
- * `targetGone`, the three identity refusals and the two idle ones. If a future gate is free, it
- * belongs here; if it needs a probe, it belongs after. The test asserts the boundary by RUNNING a
- * delivery and counting `paneOwner` calls, not by reading this sentence.
+ * `targetGone`, the three identity refusals and the two idle ones. All but `targetGone` are free:
+ * its `targetLive` fact is a local `tmux has-session` for a node with no painter registered (a
+ * parked chat), so `runDelivery` asks it only once the permission and rate gates have passed. It
+ * reads no pane. If a future gate is free, it belongs here; if it needs a pane probe, it belongs
+ * after. The test asserts the boundary by RUNNING a delivery and counting `paneOwner` calls, not by
+ * reading this sentence.
  *
  * `null` means "nothing decidable yet"; the caller probes and then calls `decideDelivery`.
  */

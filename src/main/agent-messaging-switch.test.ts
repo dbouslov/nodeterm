@@ -64,7 +64,7 @@ function baseDeps(
       sent.push({ nodeId, payload })
       return true
     },
-    hasLiveSession: () => true,
+    hasLiveSession: async () => true,
     mirrorEntry: () => idle,
     projects: () => [
       {

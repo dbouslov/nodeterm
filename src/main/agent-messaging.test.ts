@@ -62,7 +62,7 @@ function fakeDeps(over: Partial<AgentMessagingDeps> = {}): AgentMessagingDeps & 
       rec.sent.push({ nodeId, payload })
       return true
     },
-    hasLiveSession: () => true,
+    hasLiveSession: async () => true,
     mirrorEntry: () => idle,
     projects: projectsFn,
     isRemoteNode: () => false,

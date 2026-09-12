@@ -2418,7 +2418,9 @@ export class PtyManager {
   private async tmuxSessionExists(persistKey: string): Promise<boolean> {
     if (!this.tmuxPath) return false
     try {
-      await runAsync(this.tmuxPath, ['-L', TMUX_SOCKET, 'has-session', '-t', sessionName(persistKey)], {
+      // `=`: this session and no other. A bare name that is no session falls back to the ONE session
+      // whose name it begins (`nt-b1` finds `nt-b12`, measured on tmux 3.7b): a gone node read live.
+      await runAsync(this.tmuxPath, ['-L', TMUX_SOCKET, 'has-session', '-t', `=${sessionName(persistKey)}`], {
         timeout: PROBE_TIMEOUT_MS
       })
       return true
@@ -4198,13 +4200,15 @@ export class PtyManager {
       // The session host has no tty/tmux identity surface. Do not query an unrelated POSIX tmux
       // merely because one is installed beside this native Windows generation.
       if (live?.sessionHost || !this.tmuxPath) return null
+      // `=…:` is exactly this session's active pane. A bare target whose session is gone reads the
+      // pane of the one session whose name it begins; a bare `=name` resolves nothing (tmux 3.7b).
       const first = await runAsync(this.tmuxPath, [
         '-L',
         TMUX_SOCKET,
         'display-message',
         '-p',
         '-t',
-        target,
+        `=${target}:`,
         PANE_OWNER_FMT
       ])
       const identity = parsePaneOwner(first.stdout)
@@ -4275,12 +4279,28 @@ export class PtyManager {
   }
 
   /**
-   * Does a live session exist for this node in THIS process right now? The messaging delivery's
-   * `targetLive` fact — deliberately not derived from an unreadable pane (see `DeliveryRequest`):
-   * only "no session is registered" may be reported as "the node is gone".
+   * Does this node's session still exist? The messaging delivery's `targetLive` fact — deliberately
+   * not derived from an unreadable pane (see `DeliveryRequest`): only a session tmux positively
+   * reports absent may be reported as "the node is gone".
+   *
+   * Asked by NAME, like everything the delivery then does to the pane (`paneOwner`, `sendEnvelope`
+   * address `nt-<id>`, never a registered pty). A registered painter is the wrong question: parking
+   * an off-screen node and the idle reap both release it (`releaseClient` → `forget`), dropping the
+   * `Session` while the tmux session and the agent in it run on (`attached=0`), and asking the
+   * registry answered `targetGone` for exactly those live chats. `tmuxSessionExists` keeps the
+   * fail-safe direction: a tmux that cannot be asked answers "exists", and gate 1's pane read then
+   * refuses what it cannot see.
+   *
+   * tmux alone, not `sessionExists`: that one also asks the session host wherever its bundle is on
+   * disk (a Server Edition image, a dev checkout after a build) and reads a host it could not ask as
+   * "exists". The delivery reaches a pane only through tmux, so here the host could only be wrong: a
+   * gone session read as live, and a first ask that starts a background host and waits out its
+   * connect.
    */
-  hasLiveSession(persistKey: string): boolean {
-    return !!this.sessionByPersistKey(persistKey)
+  hasLiveSession(persistKey: string): Promise<boolean> {
+    return this.liveSessionForPersistKey(persistKey)
+      ? Promise.resolve(true)
+      : this.tmuxSessionExists(persistKey)
   }
 
   /**
