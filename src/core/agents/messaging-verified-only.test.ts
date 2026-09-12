@@ -137,7 +137,7 @@ describe('where the verbs sit in the routing tables', () => {
     }
   })
 
-  it('the verified-only set is exactly the messaging verbs plus sticky, open-project and annotate', () => {
+  it('the verified-only set is exactly the messaging verbs plus sticky, open-project, annotate and snapshot', () => {
     // Pins that nothing ELSE ever drifts in: adding a SHIPPED verb here would strand its legacy
     // population with no hatch, which is the one thing this set must never be casually grown by.
     // `notify` (folded in from #98, Task 5.2) is a messaging verb like the other two — it writes
@@ -149,12 +149,15 @@ describe('where the verbs sit in the routing tables', () => {
     // for a forgeable caller would authorize whoever forged it; new verb, so fail-closed from
     // day one strands nobody. `annotate` (network overview) carries a byline for sticky's reason —
     // the record names the node that wrote it — and is new, so it strands nobody either.
+    // `snapshot` returns a picture of EVERY pane on the canvas (other agents' terminals included)
+    // and writes a file; it is new, so fail-closed from day one strands nobody.
     expect([...requiresVerified].sort()).toEqual([
       'annotate',
       'notify',
       'open-project',
       'reply',
       'send',
+      'snapshot',
       'sticky'
     ])
   })
@@ -169,5 +172,9 @@ describe('where the verbs sit in the routing tables', () => {
 
   it('the annotate refusal names what it refused', () => {
     expect(verifiedRefusalFor('annotate')).toBe('Annotation write refused.')
+  })
+
+  it('the snapshot refusal names what it refused', () => {
+    expect(verifiedRefusalFor('snapshot')).toBe('Snapshot refused.')
   })
 })
