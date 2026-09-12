@@ -8,7 +8,7 @@
 import { absolutePosition, type FocusableNode } from './nodeFocus'
 import { coldPlaceBelow, type ColdNode } from './coldOpen'
 import { addSelectionToGroup, type CanvasNode } from '../state/workspace'
-import { ancestorFrameIds, centerOf, placeOpened, type Box, type Point, type Size } from '@shared/placement'
+import { centerOf, framesJoinedBy, placeOpened, type Box, type Point, type Size } from '@shared/placement'
 
 /** A live node as the placement engine sees it: ROOT-space position (a frame child's stored
  *  position is frame-relative), then measured size, else stored size, else `dflt`. */
@@ -23,13 +23,34 @@ export function liveBoxesOf(all: readonly CanvasNode[], dflt: Size, skip?: Reado
   return all.filter((n) => !skip?.has(n.id)).map((n) => liveBox(n, all, dflt))
 }
 
+/** The `--after` deps a node opened from `src` is placed beside: the live nodes `after` names,
+ *  minus the source itself (waiting on the opener is still lineage, so that node stays below). */
+function liveDeps(all: readonly CanvasNode[], src: CanvasNode, after: readonly string[], dflt: Size): Box[] {
+  return after
+    .filter((d) => d !== src.id)
+    .flatMap((d) => all.filter((n) => n.id === d))
+    .map((n) => liveBox(n, all, dflt))
+}
+
+/**
+ * The frame an opened node is filed into (`withOpenedNode`): the source's innermost frame for a
+ * LINEAGE child; none for a node placed beside `--after` deps — it stays top-level beside them.
+ */
+export function openedFrameId(
+  all: readonly CanvasNode[],
+  src: CanvasNode,
+  after: readonly string[]
+): string | undefined {
+  return liveDeps(all, src, after, { w: 0, h: 0 }).length ? undefined : src.parentId
+}
+
 /**
  * Top-left (ROOT space) of the `index`-th node an agent opens from `src` — the control dispatch's
- * `placeNext`. `placeOpened` over every live node except `skip` (ephemeral cards) and the SOURCE'S
- * OWN FRAMES, plus `reserved` (siblings this call already placed: `setNodes` is async, so the live
- * array does not show them yet). The frames are not obstacles because the node is filed into the
- * innermost one (`withOpenedNode`); their other children are. Waiting on the source itself is
- * still lineage, so that node stays below it rather than beside it.
+ * `placeNext`. `placeOpened` over every live node except `skip` (ephemeral cards) and, for a
+ * LINEAGE child, the SOURCE'S OWN FRAMES (`framesJoinedBy`), plus `reserved` (siblings this call
+ * already placed: `setNodes` is async, so the live array does not show them yet). A lineage child
+ * is filed into the innermost frame (`withOpenedNode`), so the frames are not obstacles for it;
+ * their other children are. A node beside `--after` deps stays top-level and clears every frame.
  */
 export function livePlaceOpened(
   all: readonly CanvasNode[],
@@ -39,11 +60,8 @@ export function livePlaceOpened(
   index: number,
   opts: { reserved?: readonly Box[]; skip?: ReadonlySet<string> } = {}
 ): Point {
-  const skip = new Set([...(opts.skip ?? []), ...ancestorFrameIds(all, src.id)])
-  const deps = after
-    .filter((d) => d !== src.id)
-    .flatMap((d) => all.filter((n) => n.id === d))
-    .map((n) => liveBox(n, all, size))
+  const deps = liveDeps(all, src, after, size)
+  const skip = new Set([...(opts.skip ?? []), ...framesJoinedBy(all, src.id, deps)])
   return placeOpened(
     [...liveBoxesOf(all, size, skip), ...(opts.reserved ?? [])],
     liveBox(src, all, { w: 600, h: 400 }),

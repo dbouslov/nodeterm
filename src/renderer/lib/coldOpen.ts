@@ -22,8 +22,8 @@
 import { rootPositionIn, type PlacedNode } from './projectOpen'
 import {
   GROUP_PAD_X,
-  ancestorFrameIds,
   centerOf,
+  framesJoinedBy,
   placeOpened,
   type Box,
   type Point,
@@ -167,9 +167,10 @@ export function coldBox(nodes: readonly ColdNode[], n: ColdNode): Box {
  * or RIGHT of its `--after` deps (`deps`; waiting on the opener itself stays below it). `reserved`
  * holds the siblings this same call already placed, which are not in `nodes` because the store has
  * not been written yet. Resolved to ROOT space so a source inside a frame still places correctly;
- * that source's own frames are not obstacles, because the node is filed into the innermost one
- * (`coldFileIntoSourceFrame`), which grows to hold it. Returns a CENTER point — the factories'
- * `center` parameter.
+ * for a lineage child that source's own frames are not obstacles, because the node is filed into
+ * the innermost one (`coldFileIntoSourceFrame`), which grows to hold it — an `--after` dependent
+ * stays top-level beside its deps instead (`framesJoinedBy`). Returns a CENTER point — the
+ * factories' `center` parameter.
  */
 export function coldPlaceBelow(
   nodes: readonly ColdNode[],
@@ -178,12 +179,12 @@ export function coldPlaceBelow(
   opts: { reserved?: readonly Box[]; size?: Size; deps?: readonly ColdNode[] } = {}
 ): { x: number; y: number } {
   const size = opts.size ?? { w: 600, h: 400 }
-  const frames = ancestorFrameIds(nodes, source.id)
+  const deps = (opts.deps ?? []).filter((d) => d.id !== source.id).map((d) => coldBox(nodes, d))
+  const frames = framesJoinedBy(nodes, source.id, deps)
   const existing = [
     ...nodes.filter((n) => !frames.has(n.id)).map((n) => coldBox(nodes, n)),
     ...(opts.reserved ?? [])
   ]
-  const deps = (opts.deps ?? []).filter((d) => d.id !== source.id).map((d) => coldBox(nodes, d))
   return centerOf(placeOpened(existing, coldBox(nodes, source), deps, size, i), size)
 }
 
@@ -193,14 +194,18 @@ export function coldPlaceBelow(
  * frame. `placed` are the new nodes' ROOT-space boxes, in order; the answer is their frame-relative
  * positions (same order) and every frame up the chain that must grow to hold them — right and
  * down, never moved, the cold `--group` rule (`extent: 'parent'` clamps a child that falls outside
- * its frame). A source that is not in a frame, or whose frame is gone, files nothing.
+ * its frame). A source that is not in a frame, or whose frame is gone, files nothing — and so does
+ * a node placed beside `--after` deps (`deps`, other than the source itself): only a lineage child
+ * joins the frame; a dependent stays top-level beside its deps.
  */
 export function coldFileIntoSourceFrame(
   nodes: readonly ColdNode[],
   source: ColdNode,
-  placed: readonly Box[]
+  placed: readonly Box[],
+  opts: { deps?: readonly ColdNode[] } = {}
 ): { frameId?: string; positions: Point[]; frames: { id: string; size: { width: number; height: number } }[] } {
-  const frame = nodes.find((n) => n.id === source.parentId && n.kind === 'group')
+  const lineage = !(opts.deps ?? []).some((d) => d.id !== source.id)
+  const frame = lineage ? nodes.find((n) => n.id === source.parentId && n.kind === 'group') : undefined
   if (!frame) return { positions: placed.map((b) => ({ x: b.x, y: b.y })), frames: [] }
   const origin = coldBox(nodes, frame)
   const positions = placed.map((b) => ({ x: b.x - origin.x, y: b.y - origin.y }))

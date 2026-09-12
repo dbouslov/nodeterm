@@ -166,4 +166,20 @@ describe('placement parity — live, cold and headless place an opened node iden
     expect(r.cold).toEqual(at)
     expect(r.headless).toEqual(at)
   })
+
+  it('an --after dep just OUTSIDE the source’s frame: top-level beside it, clear of the frame, on all three paths', () => {
+    // Only a lineage child joins the source's frame. A dependent stays top-level beside its dep,
+    // so the frame is an obstacle for it: the slot right of `dep` (940, 1100) runs into the frame,
+    // and the node goes three cells right, past the frame's edge.
+    const scene: Spec[] = [
+      { id: 'g', x: 1000, y: 1000, w: 1400, h: 1200, group: true },
+      { id: 'src', x: 24, y: 56, parentId: 'g' },
+      { id: 'dep', x: 300, y: 1100 }
+    ]
+    const r = allThree(scene, 'src', ['dep'])
+    const at = { x: 940 + 3 * 640, y: 1100 }
+    expect(r.live).toEqual(at)
+    expect(r.cold).toEqual(at)
+    expect(r.headless).toEqual(at)
+  })
 })

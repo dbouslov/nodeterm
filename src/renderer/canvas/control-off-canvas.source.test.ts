@@ -38,7 +38,7 @@ function code(body: string): string {
 
 /** The `addAndConnect` helper, whose off-canvas half is the whole write. */
 function addAndConnectBody(): string {
-  const start = src.indexOf('const addAndConnect = (node: CanvasNode) => {')
+  const start = src.indexOf('const addAndConnect = (node: CanvasNode')
   expect(start, 'addAndConnect').toBeGreaterThan(-1)
   const end = src.indexOf('const nodeCount = ()', start)
   expect(end, 'nodeCount after it').toBeGreaterThan(start)

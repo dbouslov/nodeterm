@@ -986,6 +986,25 @@ describe('HeadlessNodeFactory', () => {
     expect(published.find((node) => node.id === 'frame-1')?.size).toEqual(frame.size)
   })
 
+  it('keeps a node opened --after a dep OUTSIDE the frame top-level, beside its dep (only lineage joins)', async () => {
+    await frameTheSource()
+    const reply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume', after: 'term-upstream' },
+      true
+    )
+    expect(reply).toMatchObject({ ok: true })
+    const id = (reply.result as { id: string }).id
+    const saved = (await store.load({ sideline: false })).projects[0].nodes
+    const dependent = saved.find((node) => node.id === id)!
+    expect(dependent.parentId).toBeUndefined()
+    // Beside term-upstream (x 80, 640 wide, y 30): top-aligned with it, to its right.
+    expect(dependent.position.y).toBe(30)
+    expect(dependent.position.x).toBeGreaterThanOrEqual(80 + 640 + 40)
+    // The source's frame is left exactly as it was.
+    expect(saved.find((node) => node.id === 'frame-1')!.size).toEqual({ width: 696, height: 530 })
+  })
+
   it.each([
     ['claude', "claude 'do work'"],
     ['codex', "codex 'do work' --ask-for-approval untrusted"],

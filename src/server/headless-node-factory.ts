@@ -11,7 +11,7 @@ import {
   type NodeColor
 } from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
-import { ancestorFrameIds, placeOpened, type Box } from '../shared/placement'
+import { framesJoinedBy, placeOpened, type Box } from '../shared/placement'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
   AGENT_CONFIG,
@@ -231,16 +231,18 @@ export function placeNode(
   reserved: readonly CanvasNodeState[] = [],
   deps: readonly CanvasNodeState[] = []
 ): { x: number; y: number } {
-  // The source's own frames are not obstacles: what it opens is filed into the innermost one,
-  // which grows to hold it (the desktop's rule).
-  const frames = ancestorFrameIds(project.nodes, source.id)
+  // The source's own frames are not obstacles for a lineage child, which is filed into the
+  // innermost one (it grows to hold it); a dependent stays top-level beside its deps and clears
+  // every frame (`framesJoinedBy`, the desktop's rule).
+  const depBoxes = deps.map((dep) => nodeBox(project, dep))
+  const frames = framesJoinedBy(project.nodes, source.id, depBoxes)
   const existing = [...project.nodes.filter((node) => !frames.has(node.id)), ...reserved].map((node) =>
     nodeBox(project, node)
   )
   return placeOpened(
     existing,
     nodeBox(project, source),
-    deps.map((dep) => nodeBox(project, dep)),
+    depBoxes,
     { w: size.width, h: size.height },
     reserved.length
   )
@@ -1123,19 +1125,19 @@ export class HeadlessNodeFactory {
 
       const count = parseCount(args.count, verb === 'open-terminal' ? TERMINAL_LIMIT : AGENT_LIMIT)
       const created: CanvasNodeState[] = []
-      // A source inside a frame keeps what it opens inside that frame (the desktop's rule): each
-      // node is placed below the source in ROOT space, filed into the frame, and the frame chain is
-      // re-fitted once every node of this call is in. Only in the source's own project — a
-      // `--project` target does not hold that frame.
-      const srcFrame =
-        target === source.project
-          ? target.nodes.find((node) => node.id === source.node.parentId && node.kind === 'group')
-          : undefined
       // `--after` deps that are stored nodes: the node goes RIGHT of them (the desktop's rule).
       // Waiting on the opener itself is still lineage, so that one stays below the opener.
       const afterNodes = after
         .filter((depId) => depId !== source.node.id)
         .flatMap((depId) => target.nodes.filter((candidate) => candidate.id === depId))
+      // A source inside a frame keeps its LINEAGE children inside that frame (the desktop's rule):
+      // each is placed below the source in ROOT space, filed into the frame, and the frame chain is
+      // re-fitted once every node of this call is in. A dependent stays top-level beside its deps.
+      // Only in the source's own project — a `--project` target does not hold that frame.
+      const srcFrame =
+        target === source.project && !afterNodes.length
+          ? target.nodes.find((node) => node.id === source.node.parentId && node.kind === 'group')
+          : undefined
       const commands = new Map<string, string>()
       const ropes = [...(target.ropes ?? [])]
       const bridges = [...(target.bridges ?? [])]

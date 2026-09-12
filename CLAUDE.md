@@ -3152,9 +3152,10 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   occupies (`placeInFrame`; the old `groupSlot(count)` collided whenever a child had been moved),
   then the frame hugs its children. Callers RESERVE each box they place before placing the next
   (`setNodes` is async). Boxes are root space; ephemeral cards are not obstacles; the frames a
-  node is spawned FROM are not obstacles for it (`ancestorFrameIds`): it is filed into the
+  LINEAGE child is spawned FROM are not obstacles for it (`framesJoinedBy`): it is filed into the
   innermost one and the frame chain grows in the same write — live `withOpenedNode`, cold
-  `coldFileIntoSourceFrame`, headless open-* and `sticky --create`.
+  `coldFileIntoSourceFrame`, headless open-* and `sticky --create`. A node placed beside `--after`
+  deps is not lineage: it stays top-level next to them, and every frame is an obstacle for it.
   `PLACEMENT_GAP` (40) = `arrangeNodes`'s gap on purpose. The engine never moves an existing
   node — only Restructure does, on an explicit action. `staggeredPosition` (360×320 steps keyed
   on node COUNT for 600×400 nodes) is gone. Ropes carry `kind: 'opener' | 'dep'` (`BridgeLink`;

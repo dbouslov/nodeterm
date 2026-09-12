@@ -194,6 +194,14 @@ describe('coldPlaceBelow — the live path’s placeBelow, off persisted geometr
     expect(coldPlaceBelow([src, dep], src, 0, { deps: [dep] })).toEqual({ x: 940, y: 1200 })
     expect(coldPlaceBelow([src, dep], src, 0, { deps: [src] })).toEqual(coldPlaceBelow([src, dep], src, 0))
   })
+
+  it('an --after dependent of a framed source: the frame IS an obstacle (it stays top-level beside its dep)', () => {
+    const g = N('g', { kind: 'group', position: { x: 1000, y: 1000 }, size: { width: 1400, height: 1200 } })
+    const src = N('src', { parentId: 'g', position: { x: 24, y: 56 }, size: { width: 600, height: 400 } })
+    const dep = N('dep', { position: { x: 300, y: 1100 }, size: { width: 600, height: 400 } })
+    // Right of dep (940, 1100) runs into the frame: three cells right, past its edge. CENTER = +300, +200.
+    expect(coldPlaceBelow([g, src, dep], src, 0, { deps: [dep] })).toEqual({ x: 940 + 3 * 640 + 300, y: 1300 })
+  })
 })
 
 describe('coldFileIntoSourceFrame — a framed source keeps what it opens inside its frame', () => {
@@ -220,6 +228,15 @@ describe('coldFileIntoSourceFrame — a framed source keeps what it opens inside
       { id: 'g', size: { width: 648, height: 960 } },
       { id: 'outer', size: { width: 800, height: 100 + 960 + 24 } }
     ])
+  })
+
+  it('files nothing for a node placed beside --after deps; waiting on the source itself is still lineage', () => {
+    const dep = N('dep', { position: { x: 0, y: 0 } })
+    expect(coldFileIntoSourceFrame([g, src, dep], src, [placed], { deps: [dep] })).toEqual({
+      positions: [{ x: 1024, y: 1536 }],
+      frames: []
+    })
+    expect(coldFileIntoSourceFrame([g, src, dep], src, [placed], { deps: [src] }).frameId).toBe('g')
   })
 
   it('files nothing for a top-level source, or one whose frame is gone', () => {

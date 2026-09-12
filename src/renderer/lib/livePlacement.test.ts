@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { livePlaceOpened, withOpenedNode } from './livePlacement'
+import { livePlaceOpened, openedFrameId, withOpenedNode } from './livePlacement'
 import { absolutePosition, type FocusableNode } from './nodeFocus'
 import type { CanvasNode } from '../state/workspace'
 
@@ -73,6 +73,33 @@ describe('livePlaceOpened — what the control dispatch’s placeNext lands on',
     const dep = node('dep', 3000, 1000)
     expect(livePlaceOpened([g, src, dep], src, ['dep'], SIZE, 0)).toEqual({ x: 3000 + 600 + 40, y: 1000 })
     expect(livePlaceOpened([g, src, dep], src, ['src'], SIZE, 0)).toEqual({ x: 1024, y: 1536 })
+  })
+
+  it('an --after dependent of a framed source stays top-level beside its dep, so the frame IS an obstacle', () => {
+    // dep just left of the frame: the slot right of it (940, 1100) runs into the frame, which a
+    // top-level node must clear — three cells right, past the frame's edge.
+    const left = node('left', 300, 1100)
+    expect(livePlaceOpened([g, src, left], src, ['left'], SIZE, 0)).toEqual({ x: 940 + 3 * 640, y: 1100 })
+  })
+})
+
+describe('openedFrameId — only a lineage child joins its source’s frame', () => {
+  const g = frame('g', 1000, 1000, 1400, 1200)
+  const src = node('src', 24, 56, 600, 400, 'g')
+  const dep = node('dep', 300, 1100)
+
+  it('a lineage child (no --after, or waiting on the source itself) joins the innermost frame', () => {
+    expect(openedFrameId([g, src, dep], src, [])).toBe('g')
+    expect(openedFrameId([g, src, dep], src, ['src'])).toBe('g')
+  })
+
+  it('a node placed beside an --after dep does not: it stays top-level next to its dep', () => {
+    expect(openedFrameId([g, src, dep], src, ['dep'])).toBeUndefined()
+  })
+
+  it('a top-level source files nothing', () => {
+    const top = node('top', 0, 0)
+    expect(openedFrameId([top], top, [])).toBeUndefined()
   })
 })
 

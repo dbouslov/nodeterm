@@ -104,10 +104,8 @@ export function placeOpened(
 }
 
 /**
- * The frames node `id` sits inside, innermost first. What an agent opens FROM a framed node is
- * filed into the innermost one, which grows to take it — so none of them is an obstacle for it;
- * their other children are. The one framed-source rule the live dispatch, the cold open and the
- * headless factory share (test/acceptance/placement-parity.test.ts). Cycle-guarded.
+ * The frames node `id` sits inside, innermost first. A node filed into the innermost one treats
+ * none of them as an obstacle; their other children still are (`framesJoinedBy`). Cycle-guarded.
  */
 export function ancestorFrameIds(
   nodes: readonly { id: string; parentId?: string }[],
@@ -121,6 +119,21 @@ export function ancestorFrameIds(
     p = nodes.find((n) => n.id === parentId)?.parentId
   }
   return ids
+}
+
+/**
+ * The frames that are NOT obstacles for a node opened from `sourceId`, given the `--after` deps it
+ * is placed beside: the source's own frames for a LINEAGE child (no deps: it goes below the source
+ * and is filed into the innermost one, which grows to hold it); none for a dependent, which stays
+ * top-level beside its deps and so must clear every frame. The one framed-source rule the live
+ * dispatch, the cold open and the headless factory share (test/acceptance/placement-parity.test.ts).
+ */
+export function framesJoinedBy(
+  nodes: readonly { id: string; parentId?: string }[],
+  sourceId: string,
+  deps: readonly Box[]
+): Set<string> {
+  return deps.length ? new Set() : ancestorFrameIds(nodes, sourceId)
 }
 
 /** No anchor at all (cold open into another project): below the lowest box, aligned with the leftmost. */
