@@ -3168,6 +3168,11 @@ export interface TriggersApi {
   ): Promise<{ outcome: 'fired' | 'missed' | 'failed' | 'queued'; detail?: string }>
 }
 
+/** Main's answer to the `snapshot` verb's capture call: the PNG written, with its pixel size. */
+export type CanvasSnapshotCaptureResult =
+  | { ok: true; path: string; width: number; height: number }
+  | { ok: false; error: string }
+
 export interface NodeTerminalApi {
   pty: PtyApi
   workspace: WorkspaceApi
