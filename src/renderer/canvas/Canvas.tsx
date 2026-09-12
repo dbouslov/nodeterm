@@ -9,13 +9,13 @@ import {
   BackgroundVariant,
   ControlButton,
   Controls,
-  MarkerType,
   MiniMap,
   ReactFlow,
   SelectionMode,
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStoreApi,
   type Connection,
   type EdgeChange,
   type Viewport
@@ -38,7 +38,8 @@ import {
   subscribeSessionReady
 } from '../nodes/TerminalNode'
 import { solveFitPadding } from './fit-view'
-import { FloatingEdge } from './FloatingEdge'
+import { circuitEdgeTypes, EdgeLegend, EdgeRouter, useEdgeRoutes } from './edges'
+import { edgeAnimated, type EdgeData } from '../lib/edgeKinds'
 import { MacWheelGestureRouter, trackpadRoutingEnabled } from './wheel-gesture'
 import { isBrowserRuntime } from '@renderer/bridge/runtime'
 import { WheelZoomBurstLimiter, clampWheelZoomSpeed, nextWheelZoom } from './wheel-zoom'
@@ -857,7 +858,7 @@ const ropeEdge = (id: string, source: string, target: string, kind?: RopeKind): 
   id,
   source,
   target,
-  type: 'floating',
+  type: 'circuit',
   // Lineage vs dependency (Restructure ranks by it). Left ABSENT when unknown — a pre-kind file —
   // because stamping `opener` on restore would rewrite a legacy dep rope as lineage on the next save.
   ...(kind ? { data: { kind } } : {})
@@ -875,9 +876,6 @@ const newNodeSize = (): BoxSize => {
   const s = terminalNodeSize()
   return { w: s.width, h: s.height }
 }
-
-/** The one edge renderer — every family routes between nearest borders (see FloatingEdge). */
-const edgeTypes = { floating: FloatingEdge }
 
 
 const minimapNodeColor = (n: Node): string =>
@@ -2020,10 +2018,10 @@ export function Canvas() {
       eEdges.push({
         id: `e-${lid}`,
         source: pid,
-        type: 'floating',
+        type: 'circuit',
         target: lid,
-        animated: st.state === 'working',
-        style: { stroke: accent, strokeWidth: 1.5 }
+        data: { kind: 'fanout', state: { working: st.state === 'working', agentColor: accent } } satisfies EdgeData,
+        animated: st.state === 'working'
       })
     }
     const byParent: Record<string, string[]> = {}
@@ -2078,10 +2076,10 @@ export function Canvas() {
         eEdges.push({
           id: `e-${cid}`,
           source: pid,
-          type: 'floating',
+          type: 'circuit',
           target: cid,
-          animated: v.state === 'working',
-          style: { stroke: accent, strokeWidth: 1.5 }
+          data: { kind: 'fanout', state: { working: v.state === 'working', agentColor: accent } } satisfies EdgeData,
+          animated: v.state === 'working'
         })
       })
     }
@@ -2104,8 +2102,6 @@ export function Canvas() {
     [nodes, ephemeralNodes, keepAliveEntries]
   )
 
-  // Context-link edges, statically styled (no per-message activity in the pull model).
-  const accent = settings.accent
   // Sticky-node id signature: lets displayEdges tell note edges (source is a sticky) apart
   // without depending on the whole nodes array identity (which changes every drag).
   const stickySig = useMemo(
@@ -2138,10 +2134,10 @@ export function Canvas() {
       trigPairsRef.current = []
       return ''
     }
-    const pairs = triggerEdges(nodes as never, accent)
+    const pairs = triggerEdges(nodes as never)
     trigPairsRef.current = pairs
     return pairs.map((e) => `${e.source}>${e.target}`).join('|')
-  }, [nodes, accent])
+  }, [nodes])
   const trigEdges = useMemo(
     () => trigPairsRef.current,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- trigEdgeSig IS the ref's signature
@@ -2160,11 +2156,6 @@ export function Canvas() {
     // is exactly what removing it does.
     const info = ropeInfoOf(nodesRef.current, (a) => agentConfig(a as AgentId)?.color)
     const hidden = hiddenEdgeNodeIds(nodesRef.current)
-    const labelBg = {
-      labelBgStyle: { fill: '#1c1c1e', fillOpacity: 0.85 },
-      labelBgPadding: [6, 3] as [number, number],
-      labelBgBorderRadius: 5
-    }
     // ONE edge per pair. A node an agent opens gets both a rope (lineage) and a context bridge
     // (readable context), which drew two near-identical arrows between the same two nodes. The
     // rope keeps the pixels; the bridge still exists in data (it is what authorizes reading) and
@@ -2174,23 +2165,15 @@ export function Canvas() {
     const decorated = linkEdges.filter((e) => !hiddenLinks.has(e.id)).map((e) => {
       const sel = !!e.selected
       const isNote = stickyIds.has(e.source)
-      const stroke = sel ? '#ffffff' : accent
       const baseLabel = isNote ? '🗒 note' : '⇄ context'
       return {
         ...e,
-        type: 'floating',
-        // Context and note links meet the node at its bridge handles (left/right dots) — the point
-        // the user dragged from — never at the top or bottom.
-        data: { anchor: 'horizontal' },
-        label: sel ? `${baseLabel} — ⌫ to remove` : baseLabel,
-        labelStyle: { fill: stroke, fontSize: 11, fontWeight: 600 },
-        ...labelBg,
-        style: { stroke, strokeWidth: sel ? 3.5 : 2 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 14, height: 14 },
-        // Context links are bidirectional (arrowheads both ends); note links flow one way.
-        ...(isNote
-          ? {}
-          : { markerStart: { type: MarkerType.ArrowClosed, color: stroke, width: 14, height: 14 } })
+        type: 'circuit',
+        // The KIND is all the edge carries: CircuitEdge looks up hue, dash and arrowheads from it
+        // (lib/edgeKinds.ts), and it keeps context and note links on the bridge handles (left/right
+        // dots, the point the user dragged from), never the top or bottom (lib/edge-routing/ports.ts).
+        data: { kind: isNote ? 'note' : 'context' } satisfies EdgeData,
+        label: sel ? `${baseLabel} — ⌫ to remove` : baseLabel
       }
     })
     const ropeCoversLink = new Set(
@@ -2198,44 +2181,30 @@ export function Canvas() {
     )
     // Ropes: colour from the source's agent, dashed + ⏳ while the target still waits on the
     // source, white + a removal hint while selected, clay + flowing while the target is a driven
-    // browser. The look is derived every time — nothing about it is stored on the edge.
+    // browser. The look is derived every render from KIND + STATE (lib/edgeKinds.ts) — nothing
+    // about it is stored on the edge; CircuitEdge does the table lookup. Driven is the same clay
+    // the RUNNING badge uses, legible on a zoomed-out canvas where the header chip is unreadable.
     const ropes = controlEdges.map((e) => {
       const v = ropeVisual(e, info)
-      const base = {
-        ...e,
-        type: 'floating',
-        animated: v.waiting,
-        style: { stroke: v.color, strokeWidth: 1.5, ...(v.waiting ? { strokeDasharray: '6 4' } : {}) },
-        markerEnd: { type: MarkerType.ArrowClosed, color: v.color, width: 14, height: 14 },
-        ...(v.waiting
-          ? { label: WAIT_LABEL, labelStyle: { fill: v.color, fontSize: 11, fontWeight: 600 }, ...labelBg }
-          : {})
-      }
-      if (e.selected) {
-        const label = v.waiting
+      const state = { waiting: v.waiting, driven: drivenTargets.has(e.target), agentColor: info(e.source)?.agentColor }
+      // Smart Spawning's rope kind, when a rope carries one, picks the port sides.
+      const ropeKind = (e.data as { kind?: 'opener' | 'dep' } | undefined)?.kind
+      const label = e.selected
+        ? v.waiting
           ? `${WAIT_LABEL} · ⌫ to stop waiting`
           : ropeCoversLink.has(pairKey(e.source, e.target))
             ? '⇄ context · ⌫ to remove'
             : '⌫ to remove'
-        return {
-          ...base,
-          label,
-          labelStyle: { fill: '#ffffff', fontSize: 11, fontWeight: 600 },
-          ...labelBg,
-          style: { ...base.style, stroke: '#ffffff', strokeWidth: 3 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#ffffff', width: 14, height: 14 }
-        }
+        : v.waiting
+          ? WAIT_LABEL
+          : undefined
+      return {
+        ...e,
+        type: 'circuit',
+        data: { kind: 'rope', state, ropeKind } satisfies EdgeData,
+        animated: edgeAnimated('rope', state),
+        ...(label ? { label } : {})
       }
-      // Driven: the same clay the RUNNING badge uses, thicker and flowing — legible on a zoomed-out
-      // canvas where the header chip is unreadable. This is the whole point of highlighting the rope.
-      if (drivenTargets.has(e.target))
-        return {
-          ...base,
-          animated: true,
-          style: { ...base.style, stroke: '#d97757', strokeWidth: 2.5 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#d97757', width: 14, height: 14 }
-        }
-      return base
     })
     const all =
       ephemeralEdges.length || ropes.length || trigEdges.length
@@ -2244,7 +2213,7 @@ export function Canvas() {
     // A closed eye hides every edge touching its node — data untouched, pixels gone.
     return hidden.size ? all.filter((e) => !edgeHidden(e, hidden)) : all
     // eslint-disable-next-line react-hooks/exhaustive-deps -- edgeSig stands in for nodesRef
-  }, [linkEdges, ephemeralEdges, controlEdges, accent, stickySig, edgeSig, trigEdges, drivenLeaseEntries])
+  }, [linkEdges, ephemeralEdges, controlEdges, stickySig, edgeSig, trigEdges, drivenLeaseEntries])
 
   // Header pin button (and ⌘⇧L): toggle the persisted pin preference. Clears the transient
   // dismiss so (re)pinning shows the docked panel; unpinning collapses it to hover-peek.
@@ -3573,6 +3542,19 @@ export function Canvas() {
       markDirty()
     },
     [setLinkEdges, markDirty, disarmDepsFor, nonWaitingRopeIds]
+  )
+
+  // Edge focus (spec 2026-09-11 edge routing, Section 4): hover lights one edge and dims the rest.
+  // Written to the routes store, not to Canvas state — a hover must not re-render this component —
+  // under the rfId of the flow this component and its <ReactFlow> share.
+  const rfStore = useStoreApi()
+  const onEdgeMouseEnter = useCallback(
+    (_e: React.MouseEvent, edge: Edge) => useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, edge.id),
+    [rfStore]
+  )
+  const onEdgeMouseLeave = useCallback(
+    () => useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, null),
+    [rfStore]
   )
 
   // Route edge changes (selection) to the right store: `ctrl-` ids are control ropes (local
@@ -14067,11 +14049,13 @@ export function Canvas() {
           nodes={allNodes}
           edges={displayEdges}
           nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
+          edgeTypes={circuitEdgeTypes}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
           onEdgeDoubleClick={onEdgeDoubleClick}
+          onEdgeMouseEnter={onEdgeMouseEnter}
+          onEdgeMouseLeave={onEdgeMouseLeave}
           onMove={onMove}
           onNodeDragStart={() => (draggingRef.current = true)}
           onNodeDragStop={() => {
@@ -14188,6 +14172,10 @@ export function Canvas() {
               useReactFlow, which throw outside the provider — and cursors are flow coordinates. */}
           <PresenceLayer />
           <StatusAwareMiniMap onNodeDoubleClick={goToNode} />
+          {/* Routes every edge once per geometry change into the store CircuitEdge paints from;
+              the legend explains the kinds (spec 2026-09-11 edge routing). */}
+          <EdgeRouter edges={displayEdges} />
+          <EdgeLegend />
         </ReactFlow>
         </SessionProvider>
 

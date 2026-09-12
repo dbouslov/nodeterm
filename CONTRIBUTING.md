@@ -464,14 +464,18 @@ has already produced a real hole: a traversal check that split on `/` alone saw 
 as a single harmless segment on *every* platform. Split on `[\\/]`, and prefer accepting both
 dialects while storing only one (see **Node icons** in CLAUDE.md for the worked example).
 
-**Canvas edges are all `type: 'floating'`, and one relation gets one edge.** Never set
-`sourceHandle`/`targetHandle` on an edge object — the rendered path is computed from the two nodes'
-rectangles (`renderer/lib/floatingEdge.ts`), and a fixed side is what sent an edge to a node placed
-left of its source looping across the whole canvas. And do not add a second edge family for a
-relation a rope already carries: `--after` is a **rope** whose dashed "⏳ waits for" look is DERIVED
-from the target's `pendingLaunch` (`renderer/lib/edgeModel.ts`), and the context bridge it also
-writes stays hidden underneath it. One `open-claude --after` used to land three edges on one node.
-`src/renderer/canvas/edge-model.source.test.ts` pins both halves.
+**Canvas edges are all `type: 'circuit'` with `data: { kind, state }`, and one relation gets one
+edge.** Never set `sourceHandle`/`targetHandle`, and never put `style` or `markerEnd` on an edge
+object — the look comes from `renderer/lib/edgeKinds.ts` at render time, so a new kind is one row
+in that table (and one legend row), not a new colour at a call site. The path comes from the pure
+router in `renderer/lib/edge-routing/`; if you need an edge to avoid something new, it is an
+obstacle rule there, not a React change. Its CI perf pins are counts, not timings (no widened
+search, no fallback on a spaced canvas); after changing the router, also run
+`PERF=1 npx vitest run src/renderer/lib/edge-routing` for the wall-clock pins. And do not add a
+second edge family for a relation a rope already carries: `--after` is a **rope** whose dashed
+"⏳ waits for" look is DERIVED from the target's `pendingLaunch` (`renderer/lib/edgeModel.ts`),
+and the context bridge it also writes stays hidden underneath it. One `open-claude --after` used
+to land three edges on one node. `src/renderer/canvas/edge-model.source.test.ts` pins both halves.
 
 **React Flow's `fitView` is queued, not immediate — never use it to frame something automatically.**
 Calling it sets `fitViewQueued` and the fit runs from a later `setNodes` (only once every node is

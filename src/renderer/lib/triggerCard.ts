@@ -100,8 +100,7 @@ export const RUN_OUTCOME_LABEL: Record<TriggerRun['outcome'], { label: string; t
  * spec survives sanitization draws one, and only when the target exists on this canvas.
  */
 export function triggerEdges(
-  nodes: Array<{ id: string; type?: string; data: { trigger?: TriggerSpec } }>,
-  accent: string
+  nodes: Array<{ id: string; type?: string; data: { trigger?: TriggerSpec } }>
 ): Edge[] {
   const ids = new Set(nodes.map((n) => n.id))
   const out: Edge[] = []
@@ -113,8 +112,8 @@ export function triggerEdges(
       id: `trigger-edge-${n.id}`,
       source: n.id,
       target: spec.target,
-      type: 'floating',
-      style: { stroke: accent, strokeDasharray: '6 4', opacity: 0.55 },
+      type: 'circuit',
+      data: { kind: 'trigger' },
       selectable: false,
       focusable: false
     })
