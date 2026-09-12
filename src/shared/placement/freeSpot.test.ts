@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { freeSpot, type Box } from './placement'
+import { freeSpot, type Box } from './index'
 
 const size = { w: 100, h: 100 }
 
@@ -38,7 +38,8 @@ describe('freeSpot', () => {
     for (let gx = -1; gx <= 1; gx++)
       for (let gy = -1; gy <= 1; gy++)
         if (!(gx === 1 && gy === 0)) existing.push({ x: gx * step, y: gy * step, w: 100, h: 100 })
-    const spot = freeSpot(existing, { x: 0, y: 0 }, size)
+    // A 128-step grid only leaves a usable hole at a 28 px gap; the default is PLACEMENT_GAP (40).
+    const spot = freeSpot(existing, { x: 0, y: 0 }, size, 28)
     expect(spot).toEqual({ x: 128, y: 0 }) // the one hole
   })
 

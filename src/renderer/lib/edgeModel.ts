@@ -92,15 +92,15 @@ export function ropeInfoOf(
 export function missingDepRopes(
   nodes: readonly { id: string; data: { pendingLaunch?: PendingLaunch } }[],
   ropes: readonly { source: string; target: string }[]
-): { id: string; source: string; target: string }[] {
+): { id: string; source: string; target: string; kind: 'dep' }[] {
   const live = new Set(nodes.map((n) => n.id))
   const have = new Set(ropes.map((r) => `${r.source} ${r.target}`))
-  const out: { id: string; source: string; target: string }[] = []
+  const out: { id: string; source: string; target: string; kind: 'dep' }[] = []
   for (const n of nodes) {
     for (const dep of n.data.pendingLaunch?.after ?? []) {
       if (!live.has(dep) || have.has(`${dep} ${n.id}`)) continue
       have.add(`${dep} ${n.id}`)
-      out.push({ id: `ctrl-${dep}-${n.id}`, source: dep, target: n.id })
+      out.push({ id: `ctrl-${dep}-${n.id}`, source: dep, target: n.id, kind: 'dep' })
     }
   }
   return out

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { CanvasNodeState, Project, Workspace } from '../shared/types'
 import {
   toPortableNodes, resolveNodes, projectToFile, fileToProject, framingViewport,
-  sameProjectContent, splitWorkspace, serializeProjectFile
+  sameProjectContent, splitWorkspace, serializeProjectFile, sanitizeRopes
 } from './workspace-files'
 import { legacyFileId } from '../shared/project-id'
 import type { ProjectFileV1 } from './workspace-files'
@@ -612,5 +612,39 @@ describe('project icon: emitted only when valid, sanitized on the hostile load p
   it('a hand-edited hostile icon shape on disk is dropped on load', () => {
     const f = { ...projectToFile(project(), 1, 'now'), icon: { type: 'lucide', name: 'not-real' } } as any
     expect(fileToProject(f, { id: 'p1' }).icon).toBeUndefined()
+  })
+
+  it('a rope kind that is not opener|dep is dropped on load and the rope is kept', () => {
+    const f = {
+      ...projectToFile(project(), 1, 'now'),
+      ropes: [
+        { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' },
+        { id: 'ctrl-a-c', source: 'a', target: 'c', kind: 42 }
+      ]
+    } as any
+    expect(fileToProject(f, { id: 'p1' }).ropes).toEqual([
+      { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' },
+      { id: 'ctrl-a-c', source: 'a', target: 'c' }
+    ])
+  })
+})
+
+describe('sanitizeRopes', () => {
+  it('keeps a valid kind and drops an unknown one, keeping the rope', () => {
+    expect(
+      sanitizeRopes([
+        { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' },
+        { id: 'ctrl-a-c', source: 'a', target: 'c', kind: 'constructor' },
+        { id: 'ctrl-a-d', source: 'a', target: 'd' }
+      ])
+    ).toEqual([
+      { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'dep' },
+      { id: 'ctrl-a-c', source: 'a', target: 'c' },
+      { id: 'ctrl-a-d', source: 'a', target: 'd' }
+    ])
+  })
+  it('drops entries that are not {id, source, target} strings, and answers undefined for a non-array', () => {
+    expect(sanitizeRopes([{ id: 1, source: 'a', target: 'b' }, null, 'x'])).toEqual([])
+    expect(sanitizeRopes('nope')).toBeUndefined()
   })
 })

@@ -56,6 +56,22 @@ describe('planServerChange', () => {
     expect(plan.ropes.at(-1)).toEqual(rope('ctrl-2', caller.id, spawned.id))
   })
 
+  it('a rope keeps its kind through the merge — live and server-added alike', () => {
+    // `kind` is what Restructure ranks by; a merge that rebuilt ropes as {id, source, target}
+    // would quietly turn every dependency into lineage on the next save.
+    const spawned = node('term-spawned')
+    const dep: EdgeRef = { ...rope('ctrl-1', caller.id, first.id), kind: 'dep' }
+    const opener: EdgeRef = { ...rope('ctrl-2', caller.id, spawned.id), kind: 'opener' }
+    const plan = planServerChange({
+      base: project([caller, first], { ropes: [dep] }),
+      incoming: project([caller, first, spawned], { ropes: [dep, opener] }),
+      liveNodeIds: [caller.id, first.id],
+      liveRopes: [dep],
+      liveBridges: []
+    })
+    expect(plan.ropes).toEqual([dep, opener])
+  })
+
   it('drops a rope the server removed', () => {
     const base = project([caller, first], {
       ropes: [rope('ctrl-1', caller.id, first.id), rope('ctrl-2', caller.id, first.id)]

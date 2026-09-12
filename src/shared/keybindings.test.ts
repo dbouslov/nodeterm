@@ -104,7 +104,7 @@ describe('registry invariants', () => {
         darwin: ['Delete', 'Backspace'], other: ['Delete', 'Backspace'], allowBareKey: true },
       { id: 'canvas.fitAll', title: 'Fit all nodes in view', group: 'Canvas', scope: 'canvas',
         darwin: [], other: [] },
-      { id: 'canvas.tidy', title: 'Tidy canvas', group: 'Canvas', scope: 'canvas',
+      { id: 'canvas.tidy', title: 'Restructure canvas', group: 'Canvas', scope: 'canvas',
         darwin: ['Cmd+Shift+A'], other: ['Cmd+Shift+A'] },
       { id: 'canvas.groupSelection', title: 'Group selection', group: 'Canvas', scope: 'canvas',
         darwin: [], other: [] },
