@@ -278,6 +278,8 @@ import {
   type ColdNode
 } from '../lib/coldOpen'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
+import { applyAnnotation, normalizeNodeAnnotation, parseAnnotateArgs } from '@shared/node-annotation'
+import { annotateNodes, annotateReply } from '../lib/annotateNodes'
 import {
   unavailableRecovery,
   planOpenProject,
@@ -9558,12 +9560,41 @@ export function Canvas() {
             reply({ ok: true, message: `created note "${node.data.title}" (${node.id})` })
             return
           }
+          // `annotate` (network overview) is store-answered for sticky's reason: a Hub annotating
+          // its stations must never travel the human's view. Same serialized write path as sticky.
+          if (verb === 'annotate') {
+            const project = projects.find((p) => p.id === route.projectId)
+            const storedSrc = project?.nodes.find((n) => n.id === sourceNodeId)
+            if (!project || !storedSrc || !sourceIsControlCapable(storedSrc.agentId)) {
+              reply({ ok: false, error: 'source node is not a control-capable agent' })
+              return
+            }
+            const parsed = parseAnnotateArgs(args)
+            if ('error' in parsed) {
+              reply({ ok: false, error: parsed.error })
+              return
+            }
+            const res = annotateNodes(project.nodes, parsed, sourceNodeId, Date.now())
+            if ('error' in res) {
+              reply({ ok: false, error: res.error })
+              return
+            }
+            for (const u of res.updates) {
+              const target = project.nodes.find((n) => n.id === u.id)!
+              useProjects
+                .getState()
+                .applyNodeMutation(route.projectId, { op: 'upsert', node: { ...target, annotation: u.annotation } })
+            }
+            void writeDisk()
+            reply({ ok: true, result: { annotated: res.updates.map((u) => u.id) }, message: annotateReply(res.updates) })
+            return
+          }
           if (!needsLiveCanvas(verb)) {
             const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
             reply({
               ok: true,
               result: rows,
-              message: rows.map((n) => `${n.id} [${n.kind}] ${n.title}`).join('\n')
+              message: rows.map((n) => `${n.id} [${n.kind}] ${n.title}` + (n.role ? ` · role: ${n.role}` : '')).join('\n')
             })
             return
           }
@@ -10163,12 +10194,18 @@ export function Canvas() {
             // separately would be seven round trips to learn the one thing that changes what it
             // does next.
             const st = useAgentStatus.getState().byId
-            const list = nodesRef.current.map((n) => ({
-              id: n.id,
-              kind: n.type,
-              title: n.data.title as string,
-              ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {})
-            }))
+            const list = nodesRef.current.map((n) => {
+              // Re-validated here: live node data is reachable by a peer canvas mutation, and a
+              // role carrying a newline would print a forged row into this text reply.
+              const role = normalizeNodeAnnotation(n.data.annotation)?.role
+              return {
+                id: n.id,
+                kind: n.type,
+                title: n.data.title as string,
+                ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {}),
+                ...(role ? { role } : {})
+              }
+            })
             reply({
               ok: true,
               result: list,
@@ -10176,6 +10213,7 @@ export function Canvas() {
                 .map(
                   (n) =>
                     `${n.id} [${n.kind}] ${n.title}` +
+                    (n.role ? ` · role: ${n.role}` : '') +
                     (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
                 )
                 .join('\n')
@@ -11336,6 +11374,47 @@ export function Canvas() {
             node.data.textUpdatedBy = srcTitle
             const newId = addAndConnect(node)
             reply({ ok: true, message: `created note "${node.data.title}" (${newId})` })
+            return
+          }
+          case 'annotate': {
+            // The network overview's role + recommendation (spec 2026-09-11 §2). Not
+            // confirm-gated: nothing reaches a PTY and the record names its writer. The hook server
+            // admits the verb for VERIFIED callers only, so `by` (the caller's node id) is not
+            // forgeable. Validate the whole id list against the snapshot for the reply, then
+            // re-apply inside the updater against the freshest data, as `sticky` does, so two
+            // near-simultaneous annotates of one node compose instead of the second overwriting.
+            const parsed = parseAnnotateArgs(args)
+            if ('error' in parsed) {
+              reply({ ok: false, error: parsed.error })
+              return
+            }
+            const now = Date.now()
+            const res = annotateNodes(
+              nodesRef.current.map((nd) => ({ id: nd.id, annotation: normalizeNodeAnnotation(nd.data.annotation) })),
+              parsed,
+              sourceNodeId,
+              now
+            )
+            if ('error' in res) {
+              reply({ ok: false, error: res.error })
+              return
+            }
+            const ids = new Set(parsed.ids)
+            setNodes((ns) =>
+              ns.map((nd) =>
+                ids.has(nd.id)
+                  ? {
+                      ...nd,
+                      data: {
+                        ...nd.data,
+                        annotation: applyAnnotation(normalizeNodeAnnotation(nd.data.annotation), parsed, sourceNodeId, now)
+                      }
+                    }
+                  : nd
+              )
+            )
+            markDirty()
+            reply({ ok: true, result: { annotated: res.updates.map((u) => u.id) }, message: annotateReply(res.updates) })
             return
           }
           case 'write': {

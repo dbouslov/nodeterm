@@ -14,6 +14,7 @@
 // that reads and changes nothing, answer straight out of its serialized nodes).
 
 import { canControlCanvas, type AgentId } from '@shared/agents/config'
+import { normalizeNodeAnnotation } from '@shared/node-annotation'
 import { projectTravel } from './presenceTravel'
 import {
   projectCapabilityGrantedFor,
@@ -33,6 +34,8 @@ export interface StoredNode {
   id: string
   kind?: string
   title?: string
+  /** Raw from the project file — re-validated before its role is printed. */
+  annotation?: unknown
 }
 
 /**
@@ -300,9 +303,14 @@ export function answerBrowserResolve(
 }
 
 /** `list`'s rows, built from serialized nodes — the same shape the live canvas answers with
- *  (`n.type` is the persisted `kind`, `n.data.title` the persisted `title`). */
+ *  (`n.type` is the persisted `kind`, `n.data.title` the persisted `title`). The role is
+ *  normalized first: a non-active project's nodes are the file's, and a role carrying a newline
+ *  would print a forged row into the text reply. */
 export function storedNodeListing(
   nodes: readonly StoredNode[]
-): { id: string; kind: string; title: string }[] {
-  return nodes.map((n) => ({ id: n.id, kind: n.kind ?? 'terminal', title: n.title ?? '' }))
+): { id: string; kind: string; title: string; role?: string }[] {
+  return nodes.map((n) => {
+    const role = normalizeNodeAnnotation(n.annotation)?.role
+    return { id: n.id, kind: n.kind ?? 'terminal', title: n.title ?? '', ...(role ? { role } : {}) }
+  })
 }

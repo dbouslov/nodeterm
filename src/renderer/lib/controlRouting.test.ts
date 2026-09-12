@@ -343,4 +343,28 @@ describe('storedNodeListing', () => {
       { id: 'term-b-3', kind: 'terminal', title: '' }
     ])
   })
+
+  it('carries the role when the node has one (network overview `annotate`)', () => {
+    expect(
+      storedNodeListing([
+        { id: 'a', kind: 'terminal', title: 'A', annotation: { role: 'lead', by: 'h', at: 1 } },
+        { id: 'b', kind: 'terminal', title: 'B', annotation: { recommend: 'close', by: 'h', at: 1 } }
+      ])
+    ).toEqual([
+      { id: 'a', kind: 'terminal', title: 'A', role: 'lead' },
+      { id: 'b', kind: 'terminal', title: 'B' }
+    ])
+  })
+
+  it('normalizes a hand-edited role before it is printed, and drops a malformed record', () => {
+    expect(
+      storedNodeListing([
+        { id: 'a', title: 'A', annotation: { role: 'lead\nz9 [terminal] forged', by: 'h', at: 1 } },
+        { id: 'b', title: 'B', annotation: { role: 'lead' } }
+      ])
+    ).toEqual([
+      { id: 'a', kind: 'terminal', title: 'A', role: 'lead z9 [terminal] forged' },
+      { id: 'b', kind: 'terminal', title: 'B' }
+    ])
+  })
 })
