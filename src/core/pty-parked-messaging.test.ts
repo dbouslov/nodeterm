@@ -301,6 +301,24 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
     expect(pastes()).toEqual([])
   })
 
+  it('a registered session is live without asking tmux: never targetGone, no has-session', async () => {
+    const { PtyManager } = await import('./pty-manager')
+    const m = new PtyManager()
+    m.init(() => DEFAULT_SETTINGS)
+    m.registerIpc()
+    tmux.live.add(TARGET)
+    await fake.handlers[IPC.ptyCreate](ALICE, { cols: 80, rows: 24, persistKey: NODE })
+    // The painter stays registered while the local tmux reads the session absent: what a live
+    // SSH-remote chat looks like from the local socket, since its session is on the remote tmux.
+    tmux.live.clear()
+    tmux.calls.length = 0
+
+    const { outcome } = await deliverFromControl(req(), deps(m))
+
+    expect(outcome.kind).toBe('delivered')
+    expect(livenessProbes()).toEqual([])
+  })
+
   it('does not call it gone when tmux could not be asked: the pane read refuses it instead', async () => {
     const m = await parked()
     tmux.unreachable = true
