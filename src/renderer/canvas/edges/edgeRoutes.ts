@@ -29,10 +29,12 @@ export function litSetFor(
   nodes: Map<string, RouteNode>,
   hovered: string | null
 ): Set<string> {
+  // `hovered` is only honoured for an edge that is still HERE: the pointer leaves no `mouseleave`
+  // behind when the edge it sat on is deleted, hidden by the eye, or dropped by a project switch,
+  // so a stale id would light a ghost — `anyLit` true, every real edge dimmed to 0.2, nothing lit.
   const out = new Set<string>()
-  if (hovered) out.add(hovered)
   for (const e of edges) {
-    if (e.selected || nodes.get(e.source)?.selected || nodes.get(e.target)?.selected) out.add(e.id)
+    if (e.id === hovered || e.selected || nodes.get(e.source)?.selected || nodes.get(e.target)?.selected) out.add(e.id)
   }
   return out
 }
