@@ -419,6 +419,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  `align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter` — tidy a layout. Works on',
     '  top-level nodes OR on the children of ONE frame (all ids must share a container — you cannot',
     '  arrange across frames in one call); arranging a frame\'s children also shrinks the frame to fit.',
+    '  `arrange` places nodes in exactly the order of `--nodes`:',
+    '  `row` left to right, `column` top to bottom, `grid` row by row.',
     '- `restructure [--layout rows|radial]` — re-lay out the WHOLE project by lineage, centered on',
     '  the opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their',
     '  children beneath those; a node armed `--after` sits to the right of what it waits on; a frame',
@@ -920,6 +922,9 @@ Verbs:
   arrange nodes from two different frames, or mix framed + loose, in one call). When the ids are a
   frame's children, the frame is also shrunk to hug the tidied layout. Since grouping preserves each
   node's scattered position, a fresh frame is usually too wide: \`arrange\` its children to fix that.
+  Nodes land in exactly the order of \`--nodes\` (a pinned node keeps its spot and is skipped):
+  \`row\` left to right, \`column\` top to bottom, \`grid\` row by row. To put A directly left of B:
+  \`arrange --nodes A,B --layout row\`.
 - \`restructure [--layout rows|radial]\` — re-lay out the WHOLE project by lineage, centered on the
   opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their
   children beneath those; a node armed \`--after\` sits to the right of what it waits on; a frame

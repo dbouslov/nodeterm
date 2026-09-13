@@ -2101,8 +2101,10 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   (`commonParentId` decides; a mixed set is refused, not silently subset-arranged — the old
   behavior). When the ids are a frame's children, the frame is shrunk to hug the tidied layout
   (`fitGroupToChildren`) — the fix for "grouping keeps scattered positions so the frame is too
-  wide". `move` also re-fits the source + destination frames. All pure + tested in
-  `state/workspace.test.ts` + `workspace.layout.test.ts`.
+  wide". `move` also re-fits the source + destination frames. `arrange` places the ids in exactly
+  the `--nodes` order (`arrangeNodes(…, { order: 'given' })`: row left to right, column top to
+  bottom, grid row by row); every internal caller keeps the default node-ARRAY order. All pure +
+  tested in `state/workspace.test.ts` + `workspace.layout.test.ts`.
   **Fan-in (`link`, 2026-07):** a spawned fan-out was previously write-only — nodes an agent
   opened were joined to it by a **rope** (`project.ropes`, explicitly *"Display-only — never
   context links"*), so an orchestrator could not read back what its own team produced and the
@@ -3161,7 +3163,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   rope keeps a dependent on its dependency's row, never above it; a cycle from a hand-edited file
   is broken at its back edge). Within a row: deps before dependents, then children under their
   opener, then current x — packed by restructure's own row packer, because `arrangeNodes` packs
-  in node-ARRAY order, not in the order of the ids it is handed (the old Tidy's "(y, x) sort"
+  in node-ARRAY order by default, not in the order of the ids it is handed (only the `arrange`
+  verb passes `order: 'given'`; the old Tidy's "(y, x) sort"
   never reached it). Rows are CENTERED under the rank-0 row's current center (the orchestrator
   stays put horizontally, its tree hangs beneath it), ROW_GAP apart; loose units (no ropes) pack
   below as the old Tidy grid (`arrangeNodes`), so with no ropes the result is a translation of
