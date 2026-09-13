@@ -1,5 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { canCommitCanvas, canClearDirty, canCreateOnCanvas } from './persistGuards'
+import { canCommitCanvas, canClearDirty, canCreateOnCanvas, commitSkipReason } from './persistGuards'
+
+describe('commitSkipReason', () => {
+  // The persist trace prints this word; each one points at a different broken piece of state.
+  it('names why a commit is skipped', () => {
+    expect(commitSkipReason('a', 'a')).toBeNull()
+    expect(commitSkipReason('a', '')).toBe('no-active-project')
+    expect(commitSkipReason(null, 'a')).toBe('canvas-not-loaded')
+    expect(commitSkipReason('a', 'b')).toBe('canvas-not-active-project')
+  })
+
+  it('is exactly the rule canCommitCanvas applies', () => {
+    for (const onScreen of ['a', 'b', '', null])
+      for (const active of ['a', 'b', ''])
+        expect(canCommitCanvas(onScreen, active)).toBe(commitSkipReason(onScreen, active) === null)
+  })
+})
 
 describe('canCommitCanvas', () => {
   it('commits while the nodes in hand belong to the active project', () => {

@@ -538,7 +538,8 @@ import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
 import { reflow, resizesEnded, settle } from '../lib/reflow'
 import { snapResizeChanges } from '../lib/resizeSnap'
-import { canClearDirty, canCommitCanvas, canCreateOnCanvas } from '../state/persistGuards'
+import { canClearDirty, canCreateOnCanvas, commitSkipReason } from '../state/persistGuards'
+import { tracePersist, traceErrorCode } from '../lib/persistTrace'
 import { isHidden } from '../lib/ui-visibility'
 import { boardLogEvents } from '../lib/boardLogDiff'
 import { useBoardLog } from '../state/boardLog'
@@ -1039,6 +1040,11 @@ function setupApi(): typeof window.nodeTerminal.projectSetup {
   return window.nodeTerminal.projectSetup
 }
 
+/** A `markDirty` swallowed during a load is normal for its few ms; one that is still being swallowed
+ *  this long after the load began is a stuck load, and the persist trace says so (rate-limited). */
+const SUPPRESSED_DIRTY_TRACE_AFTER_MS = 5_000
+const SUPPRESSED_DIRTY_TRACE_EVERY_MS = 30_000
+
 export function Canvas() {
   // This canvas's core api (a context read — stable for the session, no store subscription).
   // For the local session it IS window.nodeTerminal, so every call resolves identically.
@@ -1505,6 +1511,10 @@ export function Canvas() {
   // onBrowserNewWindow effect can dedup repeat opens and rate-cap a flood of window.open calls.
   const browserPopupSpawnsRef = useRef<{ url: string; source: string; t: number }[]>([])
   const loadingRef = useRef(false)
+  // Persist-trace bookkeeping only (lib/persistTrace.ts) — nothing decides anything from these.
+  const loadStartedAtRef = useRef(0)
+  const lastSuppressedTraceRef = useRef(0)
+  const autosaveFiringRef = useRef(false)
   const flowWrapRef = useRef<HTMLDivElement>(null)
   // Undo/redo history (snapshots of the nodes array; arrays are immutable per change).
   const pastRef = useRef<CanvasNode[][]>([])
@@ -2476,6 +2486,7 @@ export function Canvas() {
       // persists the conversion, so the next load is a no-op.
       const projects = ws.projects.map(migrateProjectTags)
       useProjects.getState().hydrate({ ...ws, projects })
+      tracePersist('hydrate', { active: ws.activeProjectId || null, projects: projects.length })
       // Upgrade the on-disk format (e.g. v1 -> v2 migration) right away. Reported like every
       // other save: a `void` here used to make the very first write of the session the one write
       // that could fail with no signal at all — including the format migration.
@@ -2508,11 +2519,17 @@ export function Canvas() {
     // epoch tag on the way out so nothing commits them under the new id (field bug 2026-08-10).
     if (!activeProjectId) {
       nodesProjectIdRef.current = null
+      tracePersist('load-bail', { reason: 'no-active-project', loading: loadingRef.current })
       return
     }
     const project = useProjects.getState().getProject(activeProjectId)
     if (!project) {
       nodesProjectIdRef.current = null
+      tracePersist('load-bail', {
+        reason: 'unknown-project',
+        active: activeProjectId,
+        loading: loadingRef.current
+      })
       return
     }
     // SSH project: (re)open its ControlMaster and record the controlPath so this project's
@@ -2560,6 +2577,8 @@ export function Canvas() {
       )
     }
     loadingRef.current = true
+    const loadStartedAt = Date.now()
+    loadStartedAtRef.current = loadStartedAt
     // Webview keep-alive (issue #301): move the OUTGOING project's browser/web pages into the
     // background pool before the node swap, so their `<webview>` elements stay mounted (as hidden
     // ghosts in the merged prop) instead of dying with the unmount. `keepAliveFromRef` — not
@@ -2589,6 +2608,7 @@ export function Canvas() {
     // epoch tag atomic, so no timer firing in between can commit the previous project's nodes.
     nodesRef.current = flow
     nodesProjectIdRef.current = project.id
+    tracePersist('load', { project: project.id, reload: preserveViewportRef.current, nodes: flow.length })
     // Worktree facts are per project: drop the previous project's (reset also clears its
     // statuses), then re-resolve from this project's cwd. SSH projects are skipped — local git
     // cannot reason about a remote path. Fire-and-forget: the store is epoch-guarded + fails open.
@@ -2639,6 +2659,7 @@ export function Canvas() {
     // Let load-induced changes settle before we start tracking edits as dirty.
     const t = setTimeout(() => {
       loadingRef.current = false
+      tracePersist('load-settled', { project: project.id, ms: Date.now() - loadStartedAt })
       // The broadcast effect early-returns while `loadingRef` is set and isn't re-triggered by the
       // reset, so push the freshly-loaded project's canvas once now — otherwise the connected phone
       // keeps mirroring the previous project until the host's next edit. Gated like the effect:
@@ -2723,7 +2744,22 @@ export function Canvas() {
     setDirty(true)
   }, [])
   const markDirty = useCallback(() => {
-    if (!loadingRef.current) bumpDirty()
+    if (!loadingRef.current) {
+      bumpDirty()
+      return
+    }
+    const now = Date.now()
+    if (
+      now - loadStartedAtRef.current > SUPPRESSED_DIRTY_TRACE_AFTER_MS &&
+      now - lastSuppressedTraceRef.current > SUPPRESSED_DIRTY_TRACE_EVERY_MS
+    ) {
+      lastSuppressedTraceRef.current = now
+      tracePersist('dirty-suppressed', {
+        reason: 'loading',
+        loadMs: now - loadStartedAtRef.current,
+        onScreen: nodesProjectIdRef.current
+      })
+    }
   }, [bumpDirty])
   // Expose markDirty to surfaces outside Canvas (a canvas node editing its kanban labels), so they
   // ride the same debounced whole-file save.
@@ -2792,16 +2828,26 @@ export function Canvas() {
     // The normal switch flow still commits — every caller commits BEFORE `setActive`, while the two
     // ids still agree — but an autosave timer armed under the previous project now skips instead of
     // writing its nodes under the new project's id (field bug 2026-08-10).
-    if (canCommitCanvas(nodesProjectIdRef.current, id))
-      useProjects
-        .getState()
-        .commitCanvas(
-          id,
-          flowToNodeStates(nodesRef.current),
-          viewportRef.current,
-          linkEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target })),
-          controlEdgesRef.current.map(ropeLink)
-        )
+    const skip = commitSkipReason(nodesProjectIdRef.current, id)
+    if (skip) {
+      tracePersist('commit-skip', {
+        reason: skip,
+        active: id || null,
+        onScreen: nodesProjectIdRef.current,
+        loading: loadingRef.current,
+        liveNodes: nodesRef.current.length
+      })
+      return
+    }
+    useProjects
+      .getState()
+      .commitCanvas(
+        id,
+        flowToNodeStates(nodesRef.current),
+        viewportRef.current,
+        linkEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+        controlEdgesRef.current.map(ropeLink)
+      )
   }, [])
 
   const writeDisk = useCallback(async () => {
@@ -2810,9 +2856,24 @@ export function Canvas() {
     // takes seconds — and clearing `dirty` unconditionally afterwards marked edits made DURING the
     // await as saved, which let the watcher's not-dirty branch clobber them (field bug 2026-08-10).
     const gen = dirtyGenRef.current
+    const via = autosaveFiringRef.current ? 'autosave' : 'direct'
+    autosaveFiringRef.current = false
+    // What this save carries, for the persist trace: the active project, the one React Flow holds,
+    // and the active project's node count as SENT vs as ON SCREEN — a gap is an uncommitted canvas.
+    let facts: Record<string, string | number | boolean | null> = {}
     try {
-      await api.workspace.save(useProjects.getState().toWorkspace())
+      const sent = useProjects.getState().toWorkspace()
+      facts = {
+        via,
+        active: sent.activeProjectId || null,
+        onScreen: nodesProjectIdRef.current,
+        sentNodes: sent.projects.find((p) => p.id === sent.activeProjectId)?.nodes.length ?? null,
+        liveNodes: nodesRef.current.length,
+        loading: loadingRef.current
+      }
+      await api.workspace.save(sent)
     } catch (err) {
+      tracePersist('save-fail', { ...facts, code: traceErrorCode(err) })
       // The save was refused, or the socket carrying it closed (the ws bridge synthesises
       // E_DISCONNECTED so an await fails rather than hanging). Both used to be thrown away by the
       // `void persist()` that called us, and BOTH ended persistence for the life of the tab: with
@@ -2823,6 +2884,7 @@ export function Canvas() {
       setSaveDelivery((prev) => nextSaveDelivery(prev, Date.now()))
       return
     }
+    tracePersist('save', { ...facts, cleared: canClearDirty(gen, dirtyGenRef.current) })
     setSaveDelivery(undefined)
     if (canClearDirty(gen, dirtyGenRef.current)) {
       setDirty(false)
@@ -3114,8 +3176,15 @@ export function Canvas() {
     // conflict decision), a number = wait that long. After a refused save it returns the BACKOFF
     // delay rather than null, which is what turns a dead timer into a bounded retry.
     const delay = autosaveDelay(dirty, !!conflict, saveDelivery)
-    if (delay === null) return
-    const t = setTimeout(() => void persist(), delay)
+    if (delay === null) {
+      // Dirty but not saving: the user owes a conflict answer, or the retry schedule is spent.
+      if (dirty) tracePersist('autosave-held', { reason: conflict ? 'conflict' : 'retries-exhausted' })
+      return
+    }
+    const t = setTimeout(() => {
+      autosaveFiringRef.current = true
+      void persist()
+    }, delay)
     return () => clearTimeout(t)
     // `resaveTick` re-arms the timer after a save that could NOT clear dirty (an edit raced it);
     // `saveDelivery` re-arms it after one that could not be written at all.

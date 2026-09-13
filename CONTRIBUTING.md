@@ -530,6 +530,11 @@ Where a behaviour can only be verified on hardware we do not have in CI (a Mac, 
 GPU), say so explicitly rather than implying coverage. Several docs carry numbered device
 checklists for exactly this.
 
+**A canvas that stops saving leaves a trace.** `userData/persist-trace.log` holds one line per
+persistence decision, from the renderer and from main, with ids, flags and sizes only (CLAUDE.md,
+"State & persistence model"). Read it before guessing. When you add a save path, add its
+`tracePersist` / `onTrace` line, and keep it a diagnostic: nothing may read the file back to decide.
+
 **A test that reads a checked-in file must not care how git checked it out.** `.gitattributes`
 declares `* text=auto eol=lf`, so every working tree is LF — but attributes only take effect on a
 re-checkout, so if you cloned before it landed, run `git add --renormalize .` (or re-clone) and your

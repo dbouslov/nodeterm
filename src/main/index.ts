@@ -54,6 +54,7 @@ import { registerFsHandlers } from '../core/fs-handlers'
 import { TrackpadGestureLedger } from './trackpad-gesture'
 import { LogBuffer } from '../core/log-buffer'
 import { installLogSink, splitTag } from '../core/log-sink'
+import { createPersistTrace, traceFromConsole, PERSIST_TRACE_FILE } from '../core/persist-trace'
 import { registerLogHandlers } from '../core/log-handlers'
 import {
   registerBrowserGuest,
@@ -492,6 +493,14 @@ const remoteWorkspaceIO = makeRemoteWorkspaceIO(
   (projectId) => workspaceStore.markUnmirrored(projectId)
 )
 const workspaceStore = new WorkspaceStore(remoteWorkspaceIO)
+// The persist trace (core/persist-trace.ts): this store's save decisions, the renderer's own (its
+// `[persist]` console lines, routed in the console-message listener below) and every messaging-gate
+// refusal, on disk under userData and bounded. Diagnostics only. Resolved at write time, so the
+// NT_MULTI userData override above always wins.
+const persistTrace = createPersistTrace({
+  file: () => join(app.getPath('userData'), PERSIST_TRACE_FILE)
+})
+workspaceStore.onTrace = (ev, fields) => persistTrace.record({ side: 'main', ev, ...fields })
 // Watch each local ref's project.json for outside edits (git pull, a teammate's commit).
 // Self-writes match the store's last-written cache and are ignored. Re-synced after every
 // store load/save via onPersist; disposed on quit next to ptyManager.killAll().
@@ -1204,6 +1213,8 @@ app.whenReady().then(async () => {
         // is for, and they triage by tag. Untagged lines fall back to 'renderer'.
         const { tag, rest } = splitTag(String(event.message ?? ''))
         logBuffer.push({ level, tag: tag || 'renderer', msg: rest })
+        // Only the app's own windows may write the persist trace — never a web page in a guest.
+        if (contents.getType() === 'window') traceFromConsole(String(event.message ?? ''), persistTrace)
       } catch {
         /* logging must never break a page */
       }
@@ -1735,6 +1746,9 @@ app.whenReady().then(async () => {
     sendEnvelope: (id, envelope) => ptyManager.sendEnvelope(id, envelope),
     hasLiveSession: (id) => ptyManager.hasLiveSession(id),
     projects: () => workspaceStore.persistedCanvases(),
+    // Diagnostics only: each refusal, with the persisted canvas it was read from and that canvas's age.
+    trace: (ev, fields) => persistTrace.record({ side: 'main', ev, ...fields }),
+    canvasAgeMs: (projectId) => workspaceStore.persistedAgeMs(projectId),
     isRemoteNode: (id) => !!ptyManager.sshRemoteForNode(id),
     // GLOBAL CONSTRAINT 11: every delivery path is gated behind the per-project switch, OFF by
     // default. The switch is the `agentMessaging` capability GRANT: the strict `=== true` flag
