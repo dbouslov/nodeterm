@@ -77,8 +77,8 @@ export function retireRefusal(
   if (!ledger.opened(req.nodeId, successor)) {
     return (
       `retire: ${successor} is not a session you opened during this app run — open your successor ` +
-      'with open-claude, open-agent or open-terminal, then retire into it. The proof ends when that ' +
-      'node closes or the app restarts. Nothing changed.'
+      'with open-claude, open-agent or open-terminal, then retire into it. The proof ends when either ' +
+      'of you closes or restarts, or when the app restarts. Nothing changed.'
     )
   }
   return null

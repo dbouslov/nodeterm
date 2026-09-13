@@ -574,10 +574,11 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  never moves the node on the canvas or changes its group. Use it to reflect progress: move a card',
     '  to your "In Progress"/"Done" column as work advances.',
     '- `retire --successor <id>` — hand YOUR place on the canvas to a session you opened, then close',
-    '  yourself: the successor takes your exact position, width, height and frame (touched frames are',
-    '  refit as with `move`; a pinned frame keeps its place and only shrinks back) and your',
-    '  kanban column. The successor must be a session node in THIS project that you opened (open-claude,',
-    '  open-agent or open-terminal) during this app run — the proof ends when it closes or the app',
+    '  yourself: the successor takes your logical rect (your position plus your expanded, un-maximized',
+    '  size) and frame (touched frames are refit as with `move`; a pinned frame keeps its place and',
+    '  shrinks back only if the successor was already inside it) and your kanban column. The successor',
+    '  must be a session node in THIS project that you opened (open-claude, open-agent or open-terminal)',
+    '  during this app run — the proof ends when either of you closes or restarts, or when the app',
     '  restarts; anything else is refused and nothing changes. Verified callers only. No confirm',
     '  dialog: you close only yourself. The reply reaches you before your session is torn down —',
     '  treat it as your last output. Server Edition refuses it by name (permanent, do not retry).',
@@ -1153,11 +1154,12 @@ ${snapshotVerbDocLines().join('\n')}
   its group, or touches the running session. Use it to reflect progress: as a station finishes,
   move its card into your "In Progress" / "Done" column so the board tells the real story.
 - \`retire --successor <id>\` — hand YOUR place on the canvas to a session you opened, then close
-  yourself. The successor takes your exact position, width, height and frame (every frame this
-  touches is refit as \`move\` refits it; a pinned frame keeps its position and children and only
-  shrinks back to hug them) and your kanban column. It must be a session (terminal/agent) node in
-  THIS project that you opened with open-claude, open-agent or open-terminal during this app run —
-  the proof ends when that node closes or the app restarts. Anything else (not yours, missing, you,
+  yourself. The successor takes your logical rect — your position plus your expanded, un-maximized
+  size — and frame (every frame this touches is refit as \`move\` refits it; a pinned frame keeps its
+  position and children, and shrinks back to hug them only if the successor was already inside it)
+  and your kanban column. It must be a session (terminal/agent) node in THIS project that you opened
+  with open-claude, open-agent or open-terminal during this app run — the proof ends when either of
+  you closes or restarts, or when the app restarts. Anything else (not yours, missing, you,
   not a session, another project) is refused and nothing changes. Verified callers only. No confirm
   dialog: you close only yourself. The reply reaches you BEFORE your session is torn down — treat it
   as your last output. Server Edition refuses it by name — permanent, do not retry.
