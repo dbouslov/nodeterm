@@ -18,6 +18,8 @@ const n = (id: string, x: number, y: number, parentId?: string, w = 100, h = 50)
 const frame = (id: string, x: number, y: number, w: number, h: number, parentId?: string): CanvasNode =>
   ({ ...n(id, x, y, parentId, w, h), type: 'group' }) as CanvasNode
 const pin = (node: CanvasNode): CanvasNode => ({ ...node, data: { ...node.data, pinned: true } }) as CanvasNode
+/** As a node is before React Flow first measures it: no size at all, so `nodeH` reads 0. */
+const unmeasured = (node: CanvasNode): CanvasNode => ({ ...node, width: undefined, height: undefined }) as CanvasNode
 /** As React Flow has them on the live canvas: `measured` set, and preferred by `nodeW`/`nodeH`. */
 const measured = (nodes: CanvasNode[]): CanvasNode[] =>
   nodes.map((x) => ({ ...x, measured: { width: x.width as number, height: x.height as number } }))
@@ -253,6 +255,22 @@ describe('close --compact', () => {
     expect(box(at(out, 'g'))).toEqual({ x: 100, y: 100, width: 296, height: 230 })
     expect(compactNote(plan)).toBe(' — compact: left g empty (ungroup it)')
   })
+
+  it('unmeasured nodes keep their columns: a close re-packs them at the frame\'s 2 columns', () => {
+    // No size yet, so each row's middle is its first node's top, and the row-mate sits exactly on it.
+    const before = [
+      frame('g', 100, 100, 296, 230),
+      unmeasured(n('a', 28, 62, 'g')),
+      unmeasured(n('b', 168, 62, 'g')),
+      unmeasured(n('c', 28, 152, 'g')),
+      unmeasured(n('d', 168, 152, 'g'))
+    ]
+    const { plan, out } = closeCompact(before, ['b'])
+    expect(plan.frames).toEqual(['g'])
+    // Still 2 columns: c moves up beside a, as in the measured case, instead of a, c, d stacking.
+    expect(at(out, 'c').position.y).toBe(at(out, 'a').position.y)
+    expect(at(out, 'c').position.x).toBeGreaterThan(at(out, 'a').position.x)
+  })
 })
 
 describe('readingRows — the column-count rule', () => {
@@ -261,5 +279,12 @@ describe('readingRows — the column-count rule', () => {
     // b starts above a's middle (25) and joins a's row; d sits above c but in c's row.
     expect(ids([n('a', 0, 0), n('b', 200, 20), n('d', 200, 90), n('c', 0, 100)])).toEqual([['a', 'b'], ['c', 'd']])
     expect(ids([n('a', 0, 0), n('b', 200, 30)])).toEqual([['a'], ['b']])
+  })
+
+  it('reads unmeasured nodes at one height as one row', () => {
+    // nodeH is 0, so a row's middle IS its top, and the row-mate lands exactly on it.
+    const ids = (nodes: CanvasNode[]) => readingRows(nodes).map((r) => r.map((x) => x.id))
+    const u = (id: string, x: number, y: number) => unmeasured(n(id, x, y))
+    expect(ids([u('a', 0, 0), u('b', 200, 0), u('c', 0, 100), u('d', 200, 100)])).toEqual([['a', 'b'], ['c', 'd']])
   })
 })

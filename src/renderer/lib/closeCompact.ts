@@ -23,10 +23,12 @@
 // THE GRID A FRAME KEEPS is the one it had BEFORE the close, which is why this is a plan read off
 // the canvas as the close found it and applied to the canvas the delete left:
 // - columns: children are read in rows — sorted by top edge, a child joins the current row while
-//   its top is above the middle of that row's FIRST child, each row then left to right — and the
-//   column count is the longest row. `arrangeNodes` puts a row on one y, so an arranged frame
-//   reads back exactly; a hand-placed one tolerates up to half a node of vertical drift. Closing a
-//   2-column frame's whole right column therefore leaves 2 columns, not 1.
+//   its top is at or above the middle of that row's FIRST child, each row then left to right — and
+//   the column count is the longest row. "At" matters for an unmeasured node: its height is 0, so
+//   its middle IS its top, and a row-mate at the same height sits exactly on it. `arrangeNodes`
+//   puts a row on one y, so an arranged frame reads back exactly; a hand-placed one tolerates up to
+//   half a node of vertical drift. Closing a 2-column frame's whole right column therefore leaves
+//   2 columns, not 1.
 // - origin: the top-left of the children before the close, so closing a frame's top row pulls the
 //   rest up. A frame that hugged its children — as `group`, `arrange` and `move` leave one — keeps
 //   its top-left corner; a hand-enlarged one is pulled in to hug them, as `arrange` does.
@@ -55,7 +57,7 @@ export function readingRows(nodes: readonly CanvasNode[]): CanvasNode[][] {
   const rows: CanvasNode[][] = []
   let rowMid = -Infinity
   for (const n of byTop) {
-    if (rows.length > 0 && n.position.y < rowMid) {
+    if (rows.length > 0 && n.position.y <= rowMid) {
       rows[rows.length - 1].push(n)
     } else {
       rows.push([n])
