@@ -123,8 +123,16 @@ export function routeControlSource(
  * would yank the human's view to the Hub's project on every call. The write lands in the owning
  * project's serialized nodes (`applyNodeMutation`) when that project is not the active one.
  */
+/*
+ * `geometry` is store-answered for `list`'s reason: it reads and changes nothing, and an
+ * orchestrator calls it before and after every layout step, so a live requirement would yank the
+ * human's view to the orchestrator's project on every check. Off canvas it reads the owning
+ * project's serialized nodes, hydrated by `nodeStatesToFlow` (stored sizes; a collapsed node at
+ * its header height).
+ */
 const STORE_ANSWERED_VERBS: ReadonlySet<string> = new Set([
   'list',
+  'geometry',
   'send',
   'reply',
   'sticky',
@@ -149,8 +157,8 @@ export function needsLiveCanvas(verb: string): boolean {
  *
  *   - `STORE_ANSWERED_VERBS` — "no canvas is needed at either end". `list` reads names, `send`/
  *     `reply` deliver into a tmux PANE, `sticky` rewrites a note, `annotate` records a node's
- *     role, `open-project` acts on the projects store. `needsLiveCanvas` is false for them and
- *     they never route at all.
+ *     role, `open-project` acts on the projects store, `geometry` reads rects. `needsLiveCanvas` is
+ *     false for them and they never route at all.
  *   - `COLD_OPENABLE_VERBS` — "a canvas IS needed, but the serialized one will do". The node these
  *     verbs create is INERT until its project is next shown: the launch command moves into
  *     `pendingLaunch` (`armForColdOpen`), the node is upserted through `applyNodeMutation`, and the

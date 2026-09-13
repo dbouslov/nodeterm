@@ -308,6 +308,7 @@ import {
   viewportForRect,
   type FocusableNode
 } from '../lib/nodeFocus'
+import { geometryReply } from '../lib/geometry'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
 import { measurePinnedInsets, type ScreenInsets } from '../lib/pinnedInsets'
 import { ZONE_GUTTER_PX, ZONES, zoneTargetRect, type ZoneId } from '../lib/nodeZones'
@@ -9802,6 +9803,13 @@ export function Canvas() {
             reply({ ok: true, result: { annotated: res.updates.map((u) => u.id) }, message: annotateReply(res.updates) })
             return
           }
+          // `geometry` is store-answered for `list`'s reason (STORE_ANSWERED_VERBS): a read must not
+          // travel the human's view. It reads the owning project's serialized nodes.
+          if (verb === 'geometry') {
+            const stored = projects.find((p) => p.id === route.projectId)?.nodes ?? []
+            reply(geometryReply(nodeStatesToFlow(stored), args.frame))
+            return
+          }
           if (!needsLiveCanvas(verb)) {
             const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
             reply({
@@ -10528,6 +10536,11 @@ export function Canvas() {
               result: list,
               message: list.map(listRowText).join('\n')
             })
+            return
+          }
+          case 'geometry': {
+            // Read-only, like `list`: no dialog, nothing changes. The logic is lib/geometry.
+            reply(geometryReply(nodesRef.current as CanvasNode[], args.frame))
             return
           }
           case 'open-terminal': {

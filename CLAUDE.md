@@ -1983,7 +1983,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   and A's saved viewport is applied, so the camera appears to jump and zoom on a background agent's
   say-so. THREE membership lists now decide, and their differences are the whole design:
   - `STORE_ANSWERED_VERBS` (`needsLiveCanvas` false) = **no canvas is needed at either end** —
-    `list` reads names, `send`/`reply` deliver into a tmux PANE, `sticky` rewrites a note,
+    `list` reads names, `geometry` reads rects, `send`/`reply` deliver into a tmux PANE, `sticky` rewrites a note,
     `annotate` writes a node's role/recommendation, `open-project` acts on the projects store.
   - `COLD_OPENABLE_VERBS` (`canColdOpen` — `open-terminal`/`open-claude`/`open-agent`) = **a canvas
     IS needed, but the serialized one will do.** `needsLiveCanvas` stays TRUE for them; they take
@@ -2115,6 +2115,15 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   (`fitGroupToChildren`) — the fix for "grouping keeps scattered positions so the frame is too
   wide". `move` also re-fits the source + destination frames. All pure + tested in
   `state/workspace.test.ts` + `workspace.layout.test.ts`.
+  **`geometry [--frame <groupId>]`** (read-only, no dialog): every node and frame, or one frame's
+  subtree, with root-space x/y from the STORED layout, the RENDERED size (measured when there is a
+  measurement; a collapsed node is `COLLAPSED_HEIGHT` even while `measured` still holds its expanded
+  height) and effective `pinned` (`isPinned`), plus the problems: sibling pairs that intersect with
+  positive area (touching edges are not overlaps) and children outside their frame. Positions are
+  stored, not drawn: React Flow clamps an `extent: 'parent'` child inside its frame when it draws, so
+  "sticks out" names a frame that does not fit its children's layout. Pure in `lib/geometry.ts`;
+  store-answered like `list`, so off canvas it hydrates the owning project's nodes with
+  `nodeStatesToFlow` instead of travelling.
   **Fan-in (`link`, 2026-07):** a spawned fan-out was previously write-only — nodes an agent
   opened were joined to it by a **rope** (`project.ropes`, explicitly *"Display-only — never
   context links"*), so an orchestrator could not read back what its own team produced and the

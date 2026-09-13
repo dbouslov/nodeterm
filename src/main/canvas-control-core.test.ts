@@ -865,6 +865,33 @@ describe('pin verb', () => {
   })
 })
 
+describe('geometry verb', () => {
+  it('is registered with no required flags; a --frame that is present must name a group', () => {
+    expect(parseControlRequest('geometry', {})).toEqual({ verb: 'geometry', args: {} })
+    expect(parseControlRequest('geometry', { frame: 'group-1' })).toEqual({
+      verb: 'geometry',
+      args: { frame: 'group-1' }
+    })
+    // The shim turns a valueless `--frame` (an empty shell variable) into ''. Answering with the
+    // whole canvas would answer a question the caller did not ask.
+    expect(parseControlRequest('geometry', { frame: '' })).toEqual({
+      error: 'geometry --frame requires a group id'
+    })
+  })
+
+  it('both agent-facing bodies describe it: the flag, rendered size, and the two kinds of problem', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`geometry [--frame <groupId>]`')
+      expect(body).toMatch(/collapsed height/i)
+      expect(body).toMatch(/touching edges/i)
+      expect(body).toMatch(/sticks out of its frame/i)
+    }
+  })
+})
+
 describe('minimize verb', () => {
   it('requires --node; --set is optional and only on|off', () => {
     expect(parseControlRequest('minimize', { node: 'n1,n2' })).toEqual({
