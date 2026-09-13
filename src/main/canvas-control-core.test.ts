@@ -444,6 +444,16 @@ describe('parseControlRequest', () => {
     }
   })
 
+  it('both agent-facing texts say a frame that grows to take a node moves its neighbours over', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      // `open-* --group` and `move --group` reflow (renderer/lib/reflow.ts): what sits below or right
+      // of the growing frame moves over, at every level up. Told nothing, an orchestrator re-arranges
+      // by hand what the canvas already moved. The headless Server Edition path only grows the frame.
+      expect(body).toContain('below or right of it moves over')
+      expect(body).toMatch(/Server Edition the frame only grows/)
+    }
+  })
+
   it('both agent-facing texts document the sticky verb', () => {
     for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
       expect(body).toContain('`sticky --node')

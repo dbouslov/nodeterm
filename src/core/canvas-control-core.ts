@@ -345,8 +345,10 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]` — open N plain terminals.',
     '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]` — open N Claude sessions.',
     `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open`,
-    '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
-    '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
+    '  any agent CLI. `--group` parents the node(s) into a group frame, which grows to fit: what sits',
+    '  below or right of it moves over to make room, up through every enclosing frame. On',
+    '  Server Edition the frame only grows. A worktree-bound group also hands its worktree path down',
+    '  as the cwd. `--after <id,id>` opens the node ARMED: it does not',
     '  start until every listed station has finished a turn SUCCESSFULLY. It is',
     '  roped to each listed station (one edge, dashed while it waits, solid once it runs) and can read',
     '  their work with get-linked-context when it wakes — nothing to `link`. Use it for "B needs what',
@@ -414,7 +416,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  Every id must share one container. `ungroup --group <id>` dissolves a frame and promotes its direct',
     '  children into the frame\'s parent. `move --nodes <id,id> [--group <id>]` reparents nodes or groups INTO an',
     '  existing frame (omit `--group`, or pass `top`/`none`, to pull them out to the top level) — this is',
-    '  how you move a node from one frame to another.',
+    '  how you move a node from one frame to another. What it lands on in the frame moves out of its',
+    '  way, and the frame grows as with `--group`.',
     '- `arrange --nodes <id,id> [--layout grid|row|column] [--cols N]` /',
     '  `align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter` — tidy a layout. Works on',
     '  top-level nodes OR on the children of ONE frame (all ids must share a container — you cannot',
@@ -812,8 +815,10 @@ Verbs:
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]\` — open N plain terminals (default 1).
 - \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N Claude sessions (default 1).
 - \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N sessions of any agent CLI.
-  \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
-  hands its worktree path down as the cwd.
+  \`--group\` parents the node(s) into an existing group frame, which grows to fit: what sits
+  below or right of it moves over to make room, up through every enclosing frame. On
+  Server Edition the frame only grows. A worktree-bound group also hands its worktree path
+  down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once
   every listed station has finished a turn successfully — that is how you express "B needs what A produces" without
   sitting in a poll loop. The armed node is roped to each listed station (one edge,
@@ -912,7 +917,8 @@ Verbs:
 - \`ungroup --group <id>\` — dissolve a group frame, promoting its direct children into the frame's
   parent (the nodes stay put; only the frame is removed).
 - \`move --nodes <id,id> [--group <id>]\` — reparent nodes or group subtrees INTO an existing group, keeping
-  each where it sits on the canvas. Omit \`--group\` (or pass \`top\`/\`none\`) to pull them OUT to the
+  each where it sits on the canvas (what it lands on in the group moves out of its way, and the group
+  grows as with \`--group\`). Omit \`--group\` (or pass \`top\`/\`none\`) to pull them OUT to the
   top level. This is how you move a node from one frame to another: \`move --nodes n1,n2 --group g2\`.
   Invalid cycles are rejected.
 - \`arrange --nodes <id,id> [--layout grid|row|column] [--cols N]\` — tidy layout, no overlap. Works

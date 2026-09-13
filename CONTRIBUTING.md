@@ -116,7 +116,9 @@ lane unaffected.
   beside them, into THEIR frame (`containerJoinedBy` decides the container once; top level when the
   deps are top-level or disagree). The live, cold and headless paths must agree on where it lands,
   and `test/acceptance/placement-parity.test.ts` fails when they do not. Moving EXISTING
-  nodes is `lib/restructure.ts`'s job and happens only on the explicit Restructure action — and
+  nodes is `lib/restructure.ts`'s job on the explicit Restructure action, and `lib/reflow.ts`'s when
+  a node changes size or joins a frame (its neighbours make room and the frames hug it; new code
+  that resizes a node calls `reflow`) — and
   anything that moves existing nodes automatically must skip pinned ones (`isPinned`,
   `renderer/state/workspace.ts`): the user pinned
   them so layout would leave them alone. Deep version: CLAUDE.md § Canvas interaction & panels.
