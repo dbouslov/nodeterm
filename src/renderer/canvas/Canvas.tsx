@@ -11007,7 +11007,7 @@ export function Canvas() {
             const layout = (['grid', 'row', 'column'] as const).find((l) => l === args.layout) ?? 'grid'
             const cols = args.cols ? parseInt(args.cols, 10) || undefined : undefined
             let next = verb === 'arrange'
-              ? arrangeNodes(live, ids, { layout, cols })
+              ? arrangeNodes(live, ids, { layout, cols, order: 'given' }) // --nodes order, not array order
               : alignNodes(live, ids, edge!)
             // Tidying a frame's children usually leaves the frame oversized (it was sized to their
             // old scattered spots) — shrink it to hug the new layout. Top-level sets have no frame.

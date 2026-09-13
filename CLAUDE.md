@@ -2109,6 +2109,9 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   --nodes <id,id> [--group <id>]` reparents nodes OR whole frame subtrees INTO a frame (or
   `top`/`none`/omit → out to top level) via `reparentNode` — the ONE way to move a node between
   frames, which `group` won't do; a cycle (a frame into itself or its own descendant) is refused.
+  `arrange` places the ids in exactly the `--nodes` order (`arrangeNodes(…, { order: 'given' })`:
+  row left to right, column top to bottom, grid row by row); every internal caller keeps the
+  default node-ARRAY order.
   `arrange`/`align` now run in ONE coordinate space: all top-level, OR all children of one frame
   (`commonParentId` decides; a mixed set is refused, not silently subset-arranged — the old
   behavior). When the ids are a frame's children, the frame is shrunk to hug the tidied layout
@@ -3182,7 +3185,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   rope keeps a dependent on its dependency's row, never above it; a cycle from a hand-edited file
   is broken at its back edge). Within a row: deps before dependents, then children under their
   opener, then current x — packed by restructure's own row packer, because `arrangeNodes` packs
-  in node-ARRAY order, not in the order of the ids it is handed (the old Tidy's "(y, x) sort"
+  in node-ARRAY order by default, not in the order of the ids it is handed (only the `arrange`
+  verb passes `order: 'given'`; the old Tidy's "(y, x) sort"
   never reached it). Rows are CENTERED under the rank-0 row's current center (the orchestrator
   stays put horizontally, its tree hangs beneath it), ROW_GAP apart; loose units (no ropes) pack
   below as the old Tidy grid (`arrangeNodes`), so with no ropes the result is a translation of

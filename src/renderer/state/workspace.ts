@@ -1247,15 +1247,27 @@ export function commonParentId(nodes: CanvasNode[], ids: string[]): string | nul
  * member. The ids must share ONE container — all top-level, or all children of the same group
  * (the layout then runs in that group's coordinate space); a mixed set is a no-op. Unknown ids
  * are skipped; returns the input array unchanged when nothing resolves. Pure and deterministic.
+ *
+ * ORDER: by default members are placed in node-ARRAY order, which restructure and the spawn-team /
+ * verify panels rely on. `order: 'given'` places them in the order of `ids` instead (a repeated id
+ * keeps its first place). Only the `arrange` verb passes it: an agent's `--nodes` list IS the
+ * order it asked for.
  */
 export function arrangeNodes(
   nodes: CanvasNode[],
   ids: string[],
-  opts?: { layout?: ArrangeLayout; cols?: number; gap?: number; origin?: { x: number; y: number } }
+  opts?: {
+    layout?: ArrangeLayout
+    cols?: number
+    gap?: number
+    origin?: { x: number; y: number }
+    order?: 'given'
+  }
 ): CanvasNode[] {
   const set = new Set(ids)
   // A pinned member (or one inside a pinned frame) stays where it is; only the rest are laid out.
   const members = nodes.filter((nd) => set.has(nd.id) && !isPinned(nd, nodes))
+  if (opts?.order === 'given') members.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
   // Only meaningful within one coordinate space (see commonParentId) — mixed containers → no-op.
   if (members.length === 0 || new Set(members.map((m) => m.parentId ?? null)).size > 1) return nodes
   const layout = opts?.layout ?? 'grid'
