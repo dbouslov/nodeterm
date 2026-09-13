@@ -407,7 +407,7 @@ caller's project before answering. For an OPEN that was a screen hijack: the use
 project B, an agent in project A runs `open-claude`, the tab switches and A's saved viewport is
 applied, so the camera appears to jump and zoom. The rule now has three tiers, all membership lists
 in `renderer/lib/controlRouting.ts`: `STORE_ANSWERED_VERBS` ("no canvas is needed at either end" —
-`list`, `send`, `reply`, `sticky`, `open-project`), `canColdOpen` ("a canvas IS needed, but the
+`list`, `geometry`, `send`, `reply`, `sticky`, `open-project`), `canColdOpen` ("a canvas IS needed, but the
 serialized one will do" — `open-terminal`, `open-claude`, `open-agent`, which write into the owning
 project's stored nodes with their launch armed and report `queued: true`) and `answersOffCanvas`
 ("…and there is nothing to defer" — `show-image`, `show-video`, `show-web`, `open-browser`, whose

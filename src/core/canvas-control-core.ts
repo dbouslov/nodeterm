@@ -948,8 +948,9 @@ Verbs:
   (same container) whose rectangles overlap, where touching edges do not count, or a child that
   sticks out of its frame. \`result\` carries the full JSON. x/y are layout positions, the ones
   \`arrange\`/\`align\` move; a child that sticks out is drawn clamped inside its frame, so fix it by
-  arranging that frame's children (which refits the frame). Run it before you lay out, and again
-  after \`arrange\` to confirm 0 overlaps.
+  arranging that frame's children (which refits the frame). A pinned frame keeps its layout (its
+  children report \`pinned: true\`), so \`pin --node <frame> --set off\` first. Run it before you lay
+  out, and again after \`arrange\` to confirm 0 overlaps.
 - \`link --to <id,id> [--from <id>]\` — context-link nodes, so each can READ the other's
   transcript on demand with the get-linked-context skill. \`--from\` defaults to you. Nothing is
   pushed into the linked sessions — reading is on demand, so linking never interrupts anyone.

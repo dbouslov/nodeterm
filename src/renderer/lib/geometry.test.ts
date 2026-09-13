@@ -156,6 +156,22 @@ describe('computeGeometry --frame <groupId>', () => {
     expect(report(canvas()).overlaps).toEqual([{ a: 'F', b: 'L', parentId: null, width: 100, height: 100 }])
   })
 
+  it('a nested scope root keeps its absolute position and inherited pin', () => {
+    // Position and pin walk the WHOLE canvas: the scope root's own ancestors are outside the scope.
+    const r = report(
+      [
+        frame({ id: 'F', x: 1000, y: 500, w: 900, h: 700, pinned: true }),
+        frame({ id: 'G', x: 50, y: 60, w: 500, h: 400, parentId: 'F' }),
+        n({ id: 'C', x: 20, y: 30, w: 200, h: 100, parentId: 'G' })
+      ],
+      'G'
+    )
+    expect(r.nodes.map((g) => [g.id, g.x, g.y, g.pinned])).toEqual([
+      ['G', 1050, 560, true],
+      ['C', 1070, 590, true]
+    ])
+  })
+
   it('refuses an unknown id and an id that is not a frame', () => {
     expect(computeGeometry(canvas(), 'nope')).toEqual({ error: 'geometry: no frame "nope" on this canvas' })
     expect(computeGeometry(canvas(), 'L')).toEqual({ error: 'geometry: "L" is not a frame (kind: terminal)' })

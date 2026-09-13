@@ -155,8 +155,8 @@ export function needsLiveCanvas(verb: string): boolean {
  *
  *   - `STORE_ANSWERED_VERBS` — "no canvas is needed at either end". `list` reads names, `send`/
  *     `reply` deliver into a tmux PANE, `sticky` rewrites a note, `annotate` records a node's
- *     role, `open-project` acts on the projects store. `needsLiveCanvas` is false for them and
- *     they never route at all.
+ *     role, `open-project` acts on the projects store, `geometry` reads rects. `needsLiveCanvas` is
+ *     false for them and they never route at all.
  *   - `COLD_OPENABLE_VERBS` — "a canvas IS needed, but the serialized one will do". The node these
  *     verbs create is INERT until its project is next shown: the launch command moves into
  *     `pendingLaunch` (`armForColdOpen`), the node is upserted through `applyNodeMutation`, and the
