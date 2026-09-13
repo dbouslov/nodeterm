@@ -2884,8 +2884,8 @@ export function Canvas() {
       setSaveDelivery((prev) => nextSaveDelivery(prev, Date.now()))
       return
     }
-    setSaveDelivery(undefined)
     tracePersist('save', { ...facts, cleared: canClearDirty(gen, dirtyGenRef.current) })
+    setSaveDelivery(undefined)
     if (canClearDirty(gen, dirtyGenRef.current)) {
       setDirty(false)
       return
