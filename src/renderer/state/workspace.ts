@@ -1247,15 +1247,27 @@ export function commonParentId(nodes: CanvasNode[], ids: string[]): string | nul
  * member. The ids must share ONE container — all top-level, or all children of the same group
  * (the layout then runs in that group's coordinate space); a mixed set is a no-op. Unknown ids
  * are skipped; returns the input array unchanged when nothing resolves. Pure and deterministic.
+ *
+ * ORDER: by default members are placed in node-ARRAY order, which restructure and the spawn-team /
+ * verify panels rely on. `order: 'given'` places them in the order of `ids` instead (a repeated id
+ * keeps its first place). Only the `arrange` verb passes it: an agent's `--nodes` list IS the
+ * order it asked for.
  */
 export function arrangeNodes(
   nodes: CanvasNode[],
   ids: string[],
-  opts?: { layout?: ArrangeLayout; cols?: number; gap?: number; origin?: { x: number; y: number } }
+  opts?: {
+    layout?: ArrangeLayout
+    cols?: number
+    gap?: number
+    origin?: { x: number; y: number }
+    order?: 'given'
+  }
 ): CanvasNode[] {
   const set = new Set(ids)
   // A pinned member (or one inside a pinned frame) stays where it is; only the rest are laid out.
   const members = nodes.filter((nd) => set.has(nd.id) && !isPinned(nd, nodes))
+  if (opts?.order === 'given') members.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
   // Only meaningful within one coordinate space (see commonParentId) — mixed containers → no-op.
   if (members.length === 0 || new Set(members.map((m) => m.parentId ?? null)).size > 1) return nodes
   const layout = opts?.layout ?? 'grid'
@@ -1446,21 +1458,66 @@ export function selectedRootIds(nodes: CanvasNode[], ids: string[]): string[] {
  * Grows every ancestor frame of `groupId` to hug its children again, innermost first. A frame
  * that gained a child bigger than itself must be re-fitted BEFORE its own parent is, or the
  * parent is fitted around a size that is about to change.
+ *
+ * `afterFit` runs after each frame is fitted, with the canvas as it was before that fit, and
+ * returns the canvas the walk goes on with: `lib/reflow` moves the frame's neighbours there.
  */
-function fitAncestorChain(
+export function fitAncestorChain(
   nodes: CanvasNode[],
   groupId: string | undefined,
-  grid = 0
+  grid = 0,
+  afterFit?: (fitted: CanvasNode[], frameId: string, unfitted: CanvasNode[]) => CanvasNode[]
 ): CanvasNode[] {
   let next = nodes
   const seen = new Set<string>()
   let currentId = groupId
   while (currentId && !seen.has(currentId)) {
     seen.add(currentId)
-    next = fitGroupToChildren(next, currentId, grid)
+    const fitted = fitGroupToChildren(next, currentId, grid)
+    next = afterFit ? afterFit(fitted, currentId, next) : fitted
     currentId = next.find((n) => n.id === currentId)?.parentId
   }
   return next
+}
+
+/** The height a never-measured node restores to: the literal each header chevron fell back to
+ *  (sticky and files their default size, terminal 300) — the node menu used 300 for every kind. */
+const collapseFallbackHeight = (type: string | undefined): number =>
+  type === 'sticky' ? STICKY_SIZE.height : type === 'files' ? FILES_SIZE.height : 300
+
+/**
+ * Minimize `ids` to their title bar (`on`) or restore them — the ONE implementation behind the
+ * header chevrons (terminal, sticky, files), the node menu's Minimize / Restore and the `minimize`
+ * control verb. Minimizing remembers the height to come back to in `data.expandedHeight`
+ * (flowToNodeStates persists that one while collapsed); restoring gives it back.
+ *
+ * A node already in the asked state is returned untouched: re-applying `expandedHeight` to an
+ * expanded node would undo any resize made since its last restore. When nothing changes the SAME
+ * array comes back, so `setNodes` skips the render.
+ *
+ * It resizes only the listed nodes — frames and neighbours are the caller's business. Generic
+ * because the node components' `useReactFlow()` hands over plain `Node[]`.
+ */
+export function setCollapsed<T extends Node>(nodes: T[], ids: readonly string[], on: boolean): T[] {
+  const want = new Set(ids)
+  let changed = false
+  const next = nodes.map((n) => {
+    if (!want.has(n.id) || !!n.data.collapsed === on) return n
+    changed = true
+    const expandedHeight =
+      (n.data.expandedHeight as number) ??
+      n.measured?.height ??
+      (n.height as number) ??
+      collapseFallbackHeight(n.type)
+    const height = on ? COLLAPSED_HEIGHT : expandedHeight
+    return {
+      ...n,
+      height,
+      style: { ...n.style, height },
+      data: { ...n.data, collapsed: on, expandedHeight }
+    } as T
+  })
+  return changed ? next : nodes
 }
 
 /**

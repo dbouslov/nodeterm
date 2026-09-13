@@ -52,6 +52,70 @@ describe('arrangeNodes', () => {
   })
 })
 
+describe('arrangeNodes order', () => {
+  // Node ARRAY order is a, b, c; the callers below name them in a different order.
+  const three = (): CanvasNode[] => [n('a', 0, 0), n('b', 400, 0), n('c', 800, 0)]
+  const at = (out: CanvasNode[], id: string) => out.find((x) => x.id === id)!.position
+
+  it("order: 'given' lays a row out left to right in exactly the order of the ids", () => {
+    const out = arrangeNodes(three(), ['c', 'a', 'b'], { layout: 'row', gap: 20, order: 'given' })
+    expect(at(out, 'c')).toEqual({ x: 0, y: 0 })
+    expect(at(out, 'a')).toEqual({ x: 120, y: 0 })
+    expect(at(out, 'b')).toEqual({ x: 240, y: 0 })
+  })
+
+  it("order: 'given' lays a column out top to bottom in the order of the ids", () => {
+    const out = arrangeNodes(three(), ['b', 'c', 'a'], { layout: 'column', gap: 10, order: 'given' })
+    expect(at(out, 'b')).toEqual({ x: 0, y: 0 })
+    expect(at(out, 'c')).toEqual({ x: 0, y: 60 })
+    expect(at(out, 'a')).toEqual({ x: 0, y: 120 })
+  })
+
+  it("order: 'given' fills a grid row by row in the order of the ids", () => {
+    const out = arrangeNodes([...three(), n('d', 1200, 0)], ['d', 'c', 'b', 'a'], {
+      layout: 'grid',
+      cols: 2,
+      gap: 10,
+      order: 'given'
+    })
+    expect(at(out, 'd')).toEqual({ x: 0, y: 0 })
+    expect(at(out, 'c')).toEqual({ x: 110, y: 0 })
+    expect(at(out, 'b')).toEqual({ x: 0, y: 60 })
+    expect(at(out, 'a')).toEqual({ x: 110, y: 60 })
+  })
+
+  it("David's case: `arrange --nodes <GO chat>,<Needs David> --layout row` puts the GO chat directly left of the note", () => {
+    // The note was created first, so it comes first in the node array.
+    const note = { ...n('needs-david', 900, 300, 240, 200), type: 'sticky' } as CanvasNode
+    const go = n('go-chat', 100, 40, 600, 400)
+    const out = arrangeNodes([note, go], ['go-chat', 'needs-david'], { layout: 'row', order: 'given' })
+    // origin = the pair's bounding-box top-left (100, 40); default gap 40
+    expect(at(out, 'go-chat')).toEqual({ x: 100, y: 40 })
+    expect(at(out, 'needs-david')).toEqual({ x: 100 + 600 + 40, y: 40 })
+  })
+
+  it("order: 'given' skips pinned and unknown ids, and a repeated id keeps its first place", () => {
+    const pinned = { ...n('p', 5000, 5000), data: { title: 'p', color: '#fff', group: null, pinned: true } } as CanvasNode
+    const out = arrangeNodes([...three(), pinned], ['b', 'ghost', 'p', 'a', 'b'], {
+      layout: 'row',
+      gap: 20,
+      order: 'given',
+      origin: { x: 0, y: 0 }
+    })
+    expect(at(out, 'b')).toEqual({ x: 0, y: 0 })
+    expect(at(out, 'a')).toEqual({ x: 120, y: 0 })
+    expect(at(out, 'p')).toEqual({ x: 5000, y: 5000 })
+    expect(at(out, 'c')).toEqual({ x: 800, y: 0 }) // not named: untouched
+  })
+
+  it('without `order`, members keep NODE-ARRAY order: restructure, spawn-team and verify rely on it', () => {
+    const out = arrangeNodes(three(), ['c', 'a', 'b'], { layout: 'row', gap: 20 })
+    expect(at(out, 'a')).toEqual({ x: 0, y: 0 })
+    expect(at(out, 'b')).toEqual({ x: 120, y: 0 })
+    expect(at(out, 'c')).toEqual({ x: 240, y: 0 })
+  })
+})
+
 describe('alignNodes', () => {
   const pair = () => [n('a', 10, 20, 100, 50), n('b', 200, 300, 60, 80)]
   it('left aligns x to the min x', () => {

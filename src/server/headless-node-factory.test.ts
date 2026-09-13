@@ -409,10 +409,11 @@ describe('HeadlessNodeFactory', () => {
         true
       ),
       // Bulk: an owned id first must not be written before the unowned one refuses the call.
-      await factory.annotate('term-source', { node: 'term-owned,term-foreign', role: 'stolen' })
+      await factory.annotate('term-source', { node: 'term-owned,term-foreign', role: 'stolen' }),
+      await factory.minimize('term-source', { node: 'term-owned,term-foreign' })
     ]
 
-    expect(replies.map((reply) => reply.ok)).toEqual([false, false, false, false, false, false, false])
+    expect(replies.map((reply) => reply.ok)).toEqual([false, false, false, false, false, false, false, false])
     expect(replies.map((reply) => reply.error)).toEqual([
       expect.stringContaining('link-not-owner'),
       expect.stringContaining('group-not-owner'),
@@ -420,7 +421,8 @@ describe('HeadlessNodeFactory', () => {
       expect.stringContaining('color-not-owner'),
       expect.stringContaining('sticky-not-owner'),
       expect.stringContaining('open-agent-not-owner'),
-      expect.stringContaining('annotate-not-owner')
+      expect.stringContaining('annotate-not-owner'),
+      expect.stringContaining('minimize-not-owner')
     ])
     expect((await store.load({ sideline: false })).projects[0]).toEqual(before)
     expect(pty.creates).toEqual([])
@@ -500,6 +502,103 @@ describe('HeadlessNodeFactory', () => {
     ).resolves.toMatchObject({
       ok: false,
       error: expect.stringContaining('annotate-project-refused')
+    })
+    expect(await store.load({ sideline: false })).toEqual(before)
+    expect(published).toEqual([])
+  })
+
+  it('minimizes and restores owned nodes durably, says what was already so, and never types', async () => {
+    await expect(factory.minimize('term-source', { node: 'term-upstream,term-owned' })).resolves.toEqual({
+      ok: true,
+      message: 'minimized 2: term-upstream, term-owned',
+      result: { minimized: true, changed: ['term-upstream', 'term-owned'], unchanged: [] }
+    })
+    const minimized = (await new WorkspaceStore().load({ sideline: false })).projects[0]
+    const upstream = minimized.nodes.find((node) => node.id === 'term-upstream')!
+    expect(upstream.collapsed).toBe(true)
+    // The persisted size stays the height to come back to; the browser shrinks the node on render.
+    expect(upstream.size).toEqual({ width: 640, height: 440 })
+    expect(published.map((node) => node.id)).toEqual(['term-upstream', 'term-owned'])
+
+    published.length = 0
+    await expect(factory.minimize('term-source', { node: 'term-upstream', set: 'on' })).resolves.toMatchObject({
+      ok: true,
+      message: 'already minimized: term-upstream — nothing to do'
+    })
+    expect(published).toEqual([])
+
+    await expect(factory.minimize('term-source', { node: 'term-owned', set: 'off' })).resolves.toMatchObject({
+      ok: true,
+      message: 'restored 1: term-owned'
+    })
+    const restored = (await new WorkspaceStore().load({ sideline: false })).projects[0]
+    expect(restored.nodes.find((node) => node.id === 'term-owned')?.collapsed).toBe(false)
+    expect(restored.nodes.find((node) => node.id === 'term-upstream')?.collapsed).toBe(true)
+    expect(pty.creates).toEqual([])
+    expect(pty.sends).toEqual([])
+  })
+
+  it('refuses the whole minimize list on an unknown id, a frame, another kind or a foreign flag', async () => {
+    const grouped = await factory.group('term-source', { nodes: 'term-upstream,term-owned', label: 'Frame' })
+    const groupId = (grouped.result as { groupId: string }).groupId
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push({
+      id: 'editor-owned',
+      kind: 'editor',
+      position: { x: 1200, y: 30 },
+      size: { width: 660, height: 460 },
+      title: 'Editor',
+      color: '#0a84ff',
+      group: null
+    })
+    await store.save(workspace)
+    ownership.record('editor-owned', { sourceNodeId: 'term-source', projectId: 'project-1' })
+    const before = await store.load({ sideline: false })
+    published.length = 0
+
+    expect(await factory.minimize('term-source', { node: 'term-owned,nope' })).toEqual({
+      ok: false,
+      error: 'minimize: no node on this canvas with id nope — nothing was changed'
+    })
+    expect(await factory.minimize('term-source', { node: `term-owned,${groupId}` })).toEqual({
+      ok: false,
+      error: `minimize: group frames do not minimize (${groupId}) — nothing was changed`
+    })
+    expect(await factory.minimize('term-source', { node: 'term-owned,editor-owned' })).toEqual({
+      ok: false,
+      error:
+        'minimize: only terminal, sticky and files nodes minimize (editor-owned is editor) — nothing was changed'
+    })
+    expect(await factory.minimize('term-source', { node: 'term-owned', title: 'x' })).toEqual({
+      ok: false,
+      error: 'minimize: --title is not supported by Server Edition canvas control'
+    })
+    expect(await store.load({ sideline: false })).toEqual(before)
+    expect(published).toEqual([])
+  })
+
+  it('minimize refuses a node the caller created in another project', async () => {
+    const workspace = await store.load({ sideline: false })
+    const otherDir = path.join(dataDir, 'other-project')
+    fs.mkdirSync(otherDir, { recursive: true })
+    workspace.projects.push({
+      id: 'project-2',
+      name: 'Other',
+      color: '#32d74b',
+      cwd: otherDir,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [terminal('term-other-project', 'Elsewhere', 'claude')],
+      bridges: [],
+      ropes: []
+    })
+    await store.save(workspace)
+    // Owned, so only the project check stands between the caller and a foreign project's node.
+    ownership.record('term-other-project', { sourceNodeId: 'term-source', projectId: 'project-2' })
+    const before = await store.load({ sideline: false })
+
+    await expect(factory.minimize('term-source', { node: 'term-other-project' })).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('minimize-project-refused')
     })
     expect(await store.load({ sideline: false })).toEqual(before)
     expect(published).toEqual([])

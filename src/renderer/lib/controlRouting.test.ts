@@ -7,6 +7,7 @@ import {
   controlVerbSetsForTests,
   sourceIsControlCapable,
   storedNodeListing,
+  listRowText,
   answerBrowserResolve,
   type ControlProject,
   type BrowserResolveProject
@@ -108,6 +109,13 @@ describe('needsLiveCanvas', () => {
     // end; this membership and Canvas.tsx's early-exit dispatch are the same decision stated once
     // each (spec §2.3, P6).
     expect(needsLiveCanvas('open-project')).toBe(false)
+  })
+
+  it('is false for geometry — checking where nodes sit must never travel the camera', () => {
+    // `list`'s reason: an orchestrator reads the layout before and after every arrange, and routing
+    // is by SOURCE — a live requirement would yank the human's view to the orchestrator's project
+    // on every check. Off canvas, the answer is read from that project's serialized nodes.
+    expect(needsLiveCanvas('geometry')).toBe(false)
   })
 })
 
@@ -366,5 +374,29 @@ describe('storedNodeListing', () => {
       { id: 'a', kind: 'terminal', title: 'A', role: 'lead z9 [terminal] forged' },
       { id: 'b', kind: 'terminal', title: 'B' }
     ])
+  })
+
+  it('marks a node the project file has minimized (`collapsed`)', () => {
+    expect(
+      storedNodeListing([
+        { id: 'a', kind: 'terminal', title: 'A', collapsed: true },
+        { id: 'b', kind: 'sticky', title: 'B', collapsed: false }
+      ])
+    ).toEqual([
+      { id: 'a', kind: 'terminal', title: 'A', minimized: true },
+      { id: 'b', kind: 'sticky', title: 'B' }
+    ])
+  })
+})
+
+describe('listRowText — one `list` row, live canvas or stored project alike', () => {
+  it('prints the id, kind and title, then each marker the row carries', () => {
+    expect(listRowText({ id: 'term-1', kind: 'terminal', title: 'Build' })).toBe('term-1 [terminal] Build')
+    expect(listRowText({ id: 'term-1', kind: 'terminal', title: 'Build', minimized: true })).toBe(
+      'term-1 [terminal] Build (minimized)'
+    )
+    expect(
+      listRowText({ id: 'term-1', kind: 'terminal', title: 'Build', minimized: true, role: 'tests', lastTurnErrored: true })
+    ).toBe('term-1 [terminal] Build (minimized) · role: tests — LAST TURN ERRORED')
   })
 })

@@ -183,6 +183,7 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     color: vi.fn(async () => ({ ok: true as const, result: { colored: ['term-target'] } })),
     sticky: vi.fn(async () => ({ ok: true as const, result: { id: 'sticky-new' } })),
     annotate: vi.fn(async () => ({ ok: true as const, result: { annotated: ['term-a'] } })),
+    minimize: vi.fn(async () => ({ ok: true as const, message: 'minimized 1: term-a' })),
     deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
   })
 
@@ -384,6 +385,35 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
       verified: true
     })).resolves.toEqual({ ok: false, error: 'annotate: unknown flag --title' })
     expect(a.annotate).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches minimize through the shared parser, refusing a bad --set or an unverified caller first', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await expect(handler({
+      verb: 'minimize',
+      nodeId: 'term-source',
+      args: { node: 'term-a,term-b', set: 'off' },
+      verified: true
+    })).resolves.toMatchObject({ ok: true })
+    expect(a.minimize).toHaveBeenCalledWith('term-source', { node: 'term-a,term-b', set: 'off' })
+
+    await expect(handler({
+      verb: 'minimize',
+      nodeId: 'term-source',
+      args: { node: 'term-a', set: 'maybe' },
+      verified: true
+    })).resolves.toEqual({ ok: false, error: 'minimize --set must be on or off' })
+    await expect(handler({
+      verb: 'minimize',
+      nodeId: 'term-source',
+      args: { node: 'term-a' },
+      verified: false
+    })).resolves.toEqual({
+      ok: false,
+      error: 'minimize-identity-refused: Server Edition canvas control requires verified node identity'
+    })
+    expect(a.minimize).toHaveBeenCalledTimes(1)
   })
 
   it('keeps every deferred or unknown verb a clean permanent edition refusal', async () => {

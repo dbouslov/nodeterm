@@ -107,6 +107,12 @@ lane unaffected.
   white, take `SYSTEM_NODE_COLOR_SWATCHES` instead, with the contrast reason in a comment. Deep
   version, including the measured numbers: CLAUDE.md § Node colors.
 
+- **Minimizing a node? Call `setCollapsed` (`state/workspace.ts`), never a local height rule.** The
+  header chevrons, the node menu's Minimize / Restore row and the `minimize` verb all go through it:
+  it keeps the height to come back to in `data.expandedHeight`, and leaves a node already in the
+  asked state untouched. It resizes only the nodes it is given, so anything that must follow them
+  (a frame, a neighbour) hooks the helper instead of copying it.
+
 - **Placing a new node? Call `@shared/placement`, never a local `{x, y}` rule.** Every path that
   creates a node (hand, dock, agent verb, cold open, headless server) goes through the one engine
   in `src/shared/placement/` — the eight independent rules it replaced are how nodes came to spawn
@@ -116,7 +122,9 @@ lane unaffected.
   beside them, into THEIR frame (`containerJoinedBy` decides the container once; top level when the
   deps are top-level or disagree). The live, cold and headless paths must agree on where it lands,
   and `test/acceptance/placement-parity.test.ts` fails when they do not. Moving EXISTING
-  nodes is `lib/restructure.ts`'s job and happens only on the explicit Restructure action — and
+  nodes is `lib/restructure.ts`'s job on the explicit Restructure action, and `lib/reflow.ts`'s when
+  a node changes size or joins a frame (its neighbours make room and the frames hug it; new code
+  that resizes a node calls `reflow`) — and
   anything that moves existing nodes automatically must skip pinned ones (`isPinned`,
   `renderer/state/workspace.ts`): the user pinned
   them so layout would leave them alone. Deep version: CLAUDE.md § Canvas interaction & panels.
@@ -407,7 +415,7 @@ caller's project before answering. For an OPEN that was a screen hijack: the use
 project B, an agent in project A runs `open-claude`, the tab switches and A's saved viewport is
 applied, so the camera appears to jump and zoom. The rule now has three tiers, all membership lists
 in `renderer/lib/controlRouting.ts`: `STORE_ANSWERED_VERBS` ("no canvas is needed at either end" —
-`list`, `send`, `reply`, `sticky`, `open-project`), `canColdOpen` ("a canvas IS needed, but the
+`list`, `geometry`, `send`, `reply`, `sticky`, `open-project`), `canColdOpen` ("a canvas IS needed, but the
 serialized one will do" — `open-terminal`, `open-claude`, `open-agent`, which write into the owning
 project's stored nodes with their launch armed and report `queued: true`) and `answersOffCanvas`
 ("…and there is nothing to defer" — `show-image`, `show-video`, `show-web`, `open-browser`, whose

@@ -141,6 +141,7 @@ export type ControlVerb =
   | 'move'
   | 'arrange'
   | 'align'
+  | 'geometry'
   | 'restructure'
   | 'link'
   | 'verify'
@@ -151,6 +152,7 @@ export type ControlVerb =
   | 'rename'
   | 'color'
   | 'pin'
+  | 'minimize'
   | 'write'
   | 'close'
   | 'board'
@@ -183,6 +185,7 @@ const VERBS: ControlVerb[] = [
   'move',
   'arrange',
   'align',
+  'geometry',
   'restructure',
   'link',
   'verify',
@@ -193,6 +196,7 @@ const VERBS: ControlVerb[] = [
   'rename',
   'color',
   'pin',
+  'minimize',
   'write',
   'close',
   'board',
@@ -272,8 +276,16 @@ export function parseControlRequest(
   if (v === 'restructure' && args.layout && args.layout !== 'rows' && args.layout !== 'radial') {
     return { error: 'restructure --layout must be rows or radial' }
   }
+  // Presence, not truthiness: the shim turns a valueless `--frame` into ''.
+  if (v === 'geometry' && args.frame !== undefined && !args.frame) {
+    return { error: 'geometry --frame requires a group id' }
+  }
   if (v === 'pin' && !args.node) return { error: 'pin requires --node <id>' }
   if (v === 'pin' && args.set !== 'on' && args.set !== 'off') return { error: 'pin requires --set on|off' }
+  if (v === 'minimize' && !args.node) return { error: 'minimize requires --node <id,id>' }
+  if (v === 'minimize' && args.set !== undefined && args.set !== 'on' && args.set !== 'off') {
+    return { error: 'minimize --set must be on or off' }
+  }
   if (v === 'link' && !args.to) return { error: 'link requires --to <id,id>' }
   if (v === 'verify' && !args.node) return { error: 'verify requires --node <id>' }
   if (v === 'spawn-team' && !args.team) return { error: 'spawn-team requires --team <json>' }
@@ -381,8 +393,10 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]` — open N plain terminals.',
     '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]` — open N Claude sessions.',
     `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open`,
-    '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
-    '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
+    '  any agent CLI. `--group` parents the node(s) into a group frame, which grows to fit: what sits',
+    '  below or right of it moves over to make room, up through every enclosing frame. On',
+    '  Server Edition the frame only grows. A worktree-bound group also hands its worktree path down',
+    '  as the cwd. `--after <id,id>` opens the node ARMED: it does not',
     '  start until every listed station has finished a turn SUCCESSFULLY. It is',
     '  roped to each listed station (one edge, dashed while it waits, solid once it runs) and can read',
     '  their work with get-linked-context when it wakes — nothing to `link`. Use it for "B needs what',
@@ -450,11 +464,20 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  Every id must share one container. `ungroup --group <id>` dissolves a frame and promotes its direct',
     '  children into the frame\'s parent. `move --nodes <id,id> [--group <id>]` reparents nodes or groups INTO an',
     '  existing frame (omit `--group`, or pass `top`/`none`, to pull them out to the top level) — this is',
-    '  how you move a node from one frame to another.',
+    '  how you move a node from one frame to another. What it lands on in the frame moves out of its',
+    '  way, and the frame grows as with `--group`.',
     '- `arrange --nodes <id,id> [--layout grid|row|column] [--cols N]` /',
-    '  `align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter` — tidy a layout. Works on',
+    '  `align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter` — tidy a layout.',
+    '  `arrange` places nodes in exactly the order of `--nodes`:',
+    '  `row` left to right, `column` top to bottom, `grid` row by row. Both work on',
     '  top-level nodes OR on the children of ONE frame (all ids must share a container — you cannot',
     '  arrange across frames in one call); arranging a frame\'s children also shrinks the frame to fit.',
+    '- `geometry [--frame <groupId>]` — where everything is (read-only): every node and frame, or one',
+    '  frame\'s subtree, with id, kind, title, parentId, absolute x/y, rendered width/height (a collapsed',
+    '  node reports its collapsed height), collapsed and pinned. The reply is one summary line ("21',
+    '  nodes, 6 frames, 0 overlaps") plus one line per problem: two siblings whose rectangles overlap',
+    '  (touching edges do not count), or a child that sticks out of its frame. `result` carries the',
+    '  full JSON. Run it before laying out, and after `arrange` to confirm 0 overlaps.',
     '- `restructure [--layout rows|radial]` — re-lay out the WHOLE project by lineage, centered on',
     '  the opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their',
     '  children beneath those; a node armed `--after` sits to the right of what it waits on; a frame',
@@ -495,6 +518,11 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  `align` and `--group` placement never move it or anything inside it (a pinned frame is a fixed',
     '  obstacle the rest is laid out around, and it grows in place to take a new child). The user',
     '  pins from the node menu; dragging by hand still works.',
+    '- `minimize --node <id,id> [--set on|off]` — shrink terminal, sticky and files nodes to their title',
+    '  bar (`--set off` restores the height each had). Use it on idle or finished stations so they stop',
+    '  taking space: nothing closes and the session keeps running. A group frame, an unknown id or any',
+    '  other kind refuses the whole list and names it. A node already in the asked state is left alone',
+    '  and the reply says so. No confirm dialog. `list` rows print `(minimized)`.',
     '- `write --node <id> --text "..."` / `close --node <id,id>` — type into / close nodes.',
     '  `close` takes a COMMA LIST and asks about the whole list in ONE dialog, so close a finished',
     '  wave in a single call rather than one call per node. Every id must exist on the canvas: an',
@@ -849,8 +877,10 @@ Verbs:
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]\` — open N plain terminals (default 1).
 - \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N Claude sessions (default 1).
 - \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N sessions of any agent CLI.
-  \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
-  hands its worktree path down as the cwd.
+  \`--group\` parents the node(s) into an existing group frame, which grows to fit: what sits
+  below or right of it moves over to make room, up through every enclosing frame. On
+  Server Edition the frame only grows. A worktree-bound group also hands its worktree path
+  down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once
   every listed station has finished a turn successfully — that is how you express "B needs what A produces" without
   sitting in a poll loop. The armed node is roped to each listed station (one edge,
@@ -949,7 +979,8 @@ Verbs:
 - \`ungroup --group <id>\` — dissolve a group frame, promoting its direct children into the frame's
   parent (the nodes stay put; only the frame is removed).
 - \`move --nodes <id,id> [--group <id>]\` — reparent nodes or group subtrees INTO an existing group, keeping
-  each where it sits on the canvas. Omit \`--group\` (or pass \`top\`/\`none\`) to pull them OUT to the
+  each where it sits on the canvas (what it lands on in the group moves out of its way, and the group
+  grows as with \`--group\`). Omit \`--group\` (or pass \`top\`/\`none\`) to pull them OUT to the
   top level. This is how you move a node from one frame to another: \`move --nodes n1,n2 --group g2\`.
   Invalid cycles are rejected.
 - \`arrange --nodes <id,id> [--layout grid|row|column] [--cols N]\` — tidy layout, no overlap. Works
@@ -957,6 +988,9 @@ Verbs:
   arrange nodes from two different frames, or mix framed + loose, in one call). When the ids are a
   frame's children, the frame is also shrunk to hug the tidied layout. Since grouping preserves each
   node's scattered position, a fresh frame is usually too wide: \`arrange\` its children to fix that.
+  Nodes land in exactly the order of \`--nodes\` (a pinned node keeps its spot and is skipped):
+  \`row\` left to right, \`column\` top to bottom, \`grid\` row by row. To put A directly left of B:
+  \`arrange --nodes A,B --layout row\`.
 - \`restructure [--layout rows|radial]\` — re-lay out the WHOLE project by lineage, centered on the
   opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their
   children beneath those; a node armed \`--after\` sits to the right of what it waits on; a frame
@@ -965,6 +999,17 @@ Verbs:
   and undoable. Prefer it to hand-arranging after a fan-out.
 - \`align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter\` — align edges/centers. Same
   one-container rule as \`arrange\`.
+- \`geometry [--frame <groupId>]\` — where everything is, read-only: every node and frame (or one
+  frame's subtree, the frame included) with id, kind, title, parentId, absolute x/y, rendered
+  width/height (a collapsed node reports its collapsed height), collapsed, and pinned (true when it
+  or a frame around it is pinned, so layout verbs will not move it). The reply is one summary line,
+  \`21 nodes, 6 frames, 0 overlaps\`, then one line per problem naming both titles: two siblings
+  (same container) whose rectangles overlap, where touching edges do not count, or a child that
+  sticks out of its frame. \`result\` carries the full JSON. x/y are layout positions, the ones
+  \`arrange\`/\`align\` move; a child that sticks out is drawn clamped inside its frame, so fix it by
+  arranging that frame's children (which refits the frame). A pinned frame keeps its layout (its
+  children report \`pinned: true\`), so \`pin --node <frame> --set off\` first. Run it before you lay
+  out, and again after \`arrange\` to confirm 0 overlaps.
 - \`link --to <id,id> [--from <id>]\` — context-link nodes, so each can READ the other's
   transcript on demand with the get-linked-context skill. \`--from\` defaults to you. Nothing is
   pushed into the linked sessions — reading is on demand, so linking never interrupts anyone.
@@ -1018,6 +1063,13 @@ Verbs:
   \`align\` and \`--group\` placement never move it or anything inside it (a pinned frame is a
   fixed obstacle the rest is laid out around, and it grows in place to take a new child). The user
   pins from the node menu; dragging by hand still works.
+- \`minimize --node <id,id> [--set on|off]\` — shrink terminal, sticky and files nodes to their
+  title bar; \`--set off\` restores each to the height it had. As a lead, minimize a station once it
+  is idle or finished so it stops taking space: nothing closes, the session keeps running, and a
+  restore gives the node back as it was. A group frame, an unknown id or any other kind refuses the
+  WHOLE list and names it. A node already in the asked state is left alone, and the reply says
+  \`already minimized\` (or \`not minimized\`). No confirm dialog. \`list\` rows print \`(minimized)\`.
+  The user does the same from the node menu (Minimize / Restore) or the title-bar chevron.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id,id>\` — close one node or several. \`--node\` takes a COMMA LIST, and the whole
   list is confirmed in ONE dialog — so when a wave of stations is finished, close them in a single
@@ -1026,7 +1078,7 @@ Verbs:
   refuses the whole request and closes NOTHING, naming the ids it could not find. Desktop asks the
   user to confirm. Server Edition closes
   only nodes this caller opened during the current server run, without a dialog. Its other
-  node-mutating verbs (link/group/rename/color/sticky update/annotate) likewise accept only current-run
+  node-mutating verbs (link/group/rename/color/minimize/sticky update/annotate) likewise accept only current-run
   creations, and refuse the whole request before any partial mutation.
 - \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
   this server run, in this project only. No confirm dialog; instead it is verified-only, gated by the project's
@@ -1104,7 +1156,8 @@ Typical requests this skill covers:
   per subject and \`arrange\` inside each.
 - "Open a Codex/Gemini/Copilot session" → \`open-agent --agent codex|gemini|copilot\`.
 - "Tidy up / group my terminals" → \`list\`, then \`group --nodes …\`, then \`arrange --nodes <those same ids>\`
-  to tidy the new frame's contents (grouping keeps each node's scattered spot, so arrange after grouping).
+  to tidy the new frame's contents (grouping keeps each node's scattered spot, so arrange after grouping),
+  then \`geometry\` to confirm 0 overlaps.
 - "Move this node into that group" → \`move --nodes <id> --group <targetGroupId>\` (not \`group\`, which only
   wraps loose nodes). "Break up this group" → \`ungroup --group <id>\`.
 - "Rename this node/group" → \`rename\`.

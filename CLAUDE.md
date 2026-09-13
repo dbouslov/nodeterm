@@ -1912,7 +1912,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   marker-block route instead — see docs/grok-agent.md.
   **Server creator ownership (2026-08 incident hardening):** enabled Server control accepts only
   verified node identity. `HeadlessNodeFactory` records which source node opened each new node in a
-  process-local ledger; link/group/rename/color/sticky-update, message delivery, and close validate
+  process-local ledger; link/group/rename/color/minimize/sticky-update, message delivery, and close validate
   the whole target set as current-run creations before writing or killing anything. Queued messages
   revalidate creator ownership before flush. The ledger is intentionally empty after restart —
   project JSON, titles, hook history and tmux names are not creator proof — so
@@ -1943,6 +1943,18 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   `<userData>/snapshots/<projectId>-<UTC stamp>.png`, pruned to the newest `SNAPSHOT_KEEP` (20).
   Verified-only (`requiresVerified`: the picture shows every pane). Server Edition: refused by name
   (`SNAPSHOT_UNSUPPORTED_CLAUSE` — no window); the relay/browser bridge stub refuses too.
+  **`minimize --node <id,id> [--set on|off]`** (2026-09-12) shrinks terminal / sticky / files nodes
+  to their title bar (`--set off` restores). ONE implementation, `setCollapsed(nodes, ids, on)` in
+  `state/workspace.ts`: the header chevrons, the node menu's Minimize / Restore row (hideable id
+  still `collapse`; group frames left out) and the verb all call it. A node already in the asked
+  state comes back untouched (restoring it would re-apply a stale `expandedHeight` over a later
+  resize), and it resizes only the listed nodes, never frames or neighbours. Requests resolve in
+  `shared/minimize.ts`: an unknown id, a group frame or another kind refuses the WHOLE list, naming
+  it; no-ops are said in the reply. No dialog (non-destructive, like `rename`); not store-answered,
+  so an off-screen caller travels as for `rename`/`pin`. `list` rows print `(minimized)` — both
+  `list` answers print through `listRowText`. Server Edition: `HeadlessNodeFactory.minimize`,
+  creator-owned, flips the persisted `collapsed` only (`size.height` already is the height to
+  restore).
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim
@@ -1984,7 +1996,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   and A's saved viewport is applied, so the camera appears to jump and zoom on a background agent's
   say-so. THREE membership lists now decide, and their differences are the whole design:
   - `STORE_ANSWERED_VERBS` (`needsLiveCanvas` false) = **no canvas is needed at either end** —
-    `list` reads names, `send`/`reply` deliver into a tmux PANE, `sticky` rewrites a note,
+    `list` reads names, `geometry` reads rects, `send`/`reply` deliver into a tmux PANE, `sticky` rewrites a note,
     `annotate` writes a node's role/recommendation, `open-project` acts on the projects store.
   - `COLD_OPENABLE_VERBS` (`canColdOpen` — `open-terminal`/`open-claude`/`open-agent`) = **a canvas
     IS needed, but the serialized one will do.** `needsLiveCanvas` stays TRUE for them; they take
@@ -2110,12 +2122,24 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   --nodes <id,id> [--group <id>]` reparents nodes OR whole frame subtrees INTO a frame (or
   `top`/`none`/omit → out to top level) via `reparentNode` — the ONE way to move a node between
   frames, which `group` won't do; a cycle (a frame into itself or its own descendant) is refused.
+  `arrange` places the ids in exactly the `--nodes` order (`arrangeNodes(…, { order: 'given' })`:
+  row left to right, column top to bottom, grid row by row); every internal caller keeps the
+  default node-ARRAY order.
   `arrange`/`align` now run in ONE coordinate space: all top-level, OR all children of one frame
   (`commonParentId` decides; a mixed set is refused, not silently subset-arranged — the old
   behavior). When the ids are a frame's children, the frame is shrunk to hug the tidied layout
   (`fitGroupToChildren`) — the fix for "grouping keeps scattered positions so the frame is too
   wide". `move` also re-fits the source + destination frames. All pure + tested in
   `state/workspace.test.ts` + `workspace.layout.test.ts`.
+  **`geometry [--frame <groupId>]`** (read-only, no dialog): every node and frame, or one frame's
+  subtree, with root-space x/y from the STORED layout, the RENDERED size (measured when there is a
+  measurement; a collapsed node is `COLLAPSED_HEIGHT` even while `measured` still holds its expanded
+  height) and effective `pinned` (`isPinned`), plus the problems: sibling pairs that intersect with
+  positive area (touching edges are not overlaps) and children outside their frame. Positions are
+  stored, not drawn: React Flow clamps an `extent: 'parent'` child inside its frame when it draws, so
+  "sticks out" names a frame that does not fit its children's layout. Pure in `lib/geometry.ts`;
+  store-answered like `list`, so off canvas it hydrates the owning project's nodes with
+  `nodeStatesToFlow` instead of travelling.
   **Fan-in (`link`, 2026-07):** a spawned fan-out was previously write-only — nodes an agent
   opened were joined to it by a **rope** (`project.ropes`, explicitly *"Display-only — never
   context links"*), so an orchestrator could not read back what its own team produced and the
@@ -3174,7 +3198,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   rope keeps a dependent on its dependency's row, never above it; a cycle from a hand-edited file
   is broken at its back edge). Within a row: deps before dependents, then children under their
   opener, then current x — packed by restructure's own row packer, because `arrangeNodes` packs
-  in node-ARRAY order, not in the order of the ids it is handed (the old Tidy's "(y, x) sort"
+  in node-ARRAY order by default, not in the order of the ids it is handed (only the `arrange`
+  verb passes `order: 'given'`; the old Tidy's "(y, x) sort"
   never reached it). Rows are CENTERED under the rank-0 row's current center (the orchestrator
   stays put horizontally, its tree hangs beneath it), ROW_GAP apart; loose units (no ropes) pack
   below as the old Tidy grid (`arrangeNodes`), so with no ropes the result is a translation of
@@ -3187,7 +3212,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   only be a visual no-op that still writes `project.json`) + restart-idle-agents (the bulk in-place agent restart, mirrored in ⌘K; both
   hidden when the canvas holds no restartable agent node, where they could only report "0
   restarted");
-  node/selection right-click = group, color, duplicate, align-to-grid, collapse,
+  node/selection right-click = group, color, duplicate, align-to-grid, minimize / restore
+  (`setCollapsed`; group frames left out),
   markdown-view (terminals), refresh-terminal (terminals — bumps `respawnNonce`: fresh PTY attach
   to the SAME tmux session; manual recovery for a stuck/unpainted terminal, and the same action
   sits in the node header as `term-node__refresh` since a dead view is a bad place to hunt for a
@@ -3224,7 +3250,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   joins the frame THOSE DEPS live in, never the source's just because the source is there, and
   stays top-level (clearing every frame) when its deps are top-level or sit in different frames.
   `PLACEMENT_GAP` (40) = `arrangeNodes`'s gap on purpose. The engine never moves an existing
-  node — only Restructure does, on an explicit action. `staggeredPosition` (360×320 steps keyed
+  node — only Restructure does, on an explicit action, and Reflow (below) moves the neighbours of a
+  node that changed size or joined a frame. `staggeredPosition` (360×320 steps keyed
   on node COUNT for 600×400 nodes) is gone. Ropes carry `kind: 'opener' | 'dep'` (`BridgeLink`;
   `sanitizeRopes` on both load seams; untagged = opener, and a restore never stamps a kind the
   file did not carry, so a legacy dep rope is not rewritten as lineage on the next save) so the
@@ -3240,6 +3267,22 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   moves anything laid out onto it (with no pins that pass changes nothing). Dragging by hand is
   not blocked. The headless `pin` verb is refused (follow-up). A new automatic mover must skip
   `isPinned` nodes.
+- **Reflow** (`lib/reflow.ts`, pure, 2026-09): frames follow their chats. `reflow(nodes, id,
+  prevRect, grid)` runs when a hand resize ends (`resizesEnded` pairs React Flow's `resizing: true`
+  and `resizing: false` changes), and `settle(nodes, id, grid)` (reflow with nothing grown) when a
+  drag inside a frame ends and when a node joins a frame (`open-* --group`, `move --group`).
+  Siblings below the node in its column band shift by how far its BOTTOM edge moved, siblings right
+  of it in its row band by how far its RIGHT edge moved (bands off the OLD rect; top and left edges
+  have none). Growth pushes and cascades, each push keeping the pair's gap capped at
+  `PLACEMENT_GAP` and clearing the whole path it sweeps, so no sibling passes one in its column or
+  row; shrink pulls the band back by at most the freed space, never closer to anything than that
+  gap. The changed node and `isPinned` nodes never move (a node pushed onto one goes past it). Then
+  `fitAncestorChain` (exported, with an `afterFit` hook) hugs each frame up to the top level, and a
+  frame whose rect changed moves ITS neighbours the same way. The hook drops the fitted frame's
+  stale `measured`, which `nodeW` reads first; a caller that resizes a node must drop it too. The
+  headless Server Edition `--group` / `move` only grow the frame (its own `fitAncestorChain` copy);
+  hand resize and drag reflow on every edition, since each runs this Canvas. Notes that fit their
+  text and `minimize` are meant to call `reflow`.
 - **Add menu** = bottom dock (`Dock.tsx`) `+`, mirrored by the pane menu and command palette.
 - **Edges** are all one React Flow type, `circuit` (`canvas/edges/`, spec
   docs/superpowers/specs/2026-09-11-edge-routing-design.md). The look is a table lookup on the

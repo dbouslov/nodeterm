@@ -479,6 +479,16 @@ describe('parseControlRequest', () => {
     }
   })
 
+  it('both agent-facing texts say a frame that grows to take a node moves its neighbours over', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      // `open-* --group` and `move --group` reflow (renderer/lib/reflow.ts): what sits below or right
+      // of the growing frame moves over, at every level up. Told nothing, an orchestrator re-arranges
+      // by hand what the canvas already moved. The headless Server Edition path only grows the frame.
+      expect(body).toContain('below or right of it moves over')
+      expect(body).toMatch(/Server Edition the frame only grows/)
+    }
+  })
+
   it('both agent-facing texts document the sticky verb', () => {
     for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
       expect(body).toContain('`sticky --node')
@@ -874,6 +884,18 @@ describe('restructure verb', () => {
   })
 })
 
+describe('arrange verb order', () => {
+  it('both agent-facing bodies say row, column and grid follow the --nodes order exactly', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toMatch(/in exactly the order of `--nodes`/)
+      expect(body).toMatch(/`row` left to right, `column` top to bottom, `grid` row by row/)
+    }
+  })
+})
+
 describe('pin verb', () => {
   it('requires --node and --set on|off', () => {
     expect(parseControlRequest('pin', { node: 'n1', set: 'on' })).toEqual({
@@ -896,6 +918,66 @@ describe('pin verb', () => {
     ]) {
       expect(body).toContain('`pin --node <id> --set on|off`')
       expect(body).toMatch(/never move/i)
+    }
+  })
+})
+
+describe('geometry verb', () => {
+  it('is registered with no required flags; a --frame that is present must name a group', () => {
+    expect(parseControlRequest('geometry', {})).toEqual({ verb: 'geometry', args: {} })
+    expect(parseControlRequest('geometry', { frame: 'group-1' })).toEqual({
+      verb: 'geometry',
+      args: { frame: 'group-1' }
+    })
+    // The shim turns a valueless `--frame` (an empty shell variable) into ''. Answering with the
+    // whole canvas would answer a question the caller did not ask.
+    expect(parseControlRequest('geometry', { frame: '' })).toEqual({
+      error: 'geometry --frame requires a group id'
+    })
+  })
+
+  it('both agent-facing bodies describe it: the flag, rendered size, and the two kinds of problem', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`geometry [--frame <groupId>]`')
+      expect(body).toMatch(/collapsed height/i)
+      expect(body).toMatch(/touching edges/i)
+      expect(body).toMatch(/sticks out of its frame/i)
+    }
+  })
+})
+
+describe('minimize verb', () => {
+  it('requires --node; --set is optional and only on|off', () => {
+    expect(parseControlRequest('minimize', { node: 'n1,n2' })).toEqual({
+      verb: 'minimize',
+      args: { node: 'n1,n2' }
+    })
+    expect(parseControlRequest('minimize', { node: 'n1', set: 'off' })).toEqual({
+      verb: 'minimize',
+      args: { node: 'n1', set: 'off' }
+    })
+    expect(parseControlRequest('minimize', { node: 'n1', set: 'on' })).toEqual({
+      verb: 'minimize',
+      args: { node: 'n1', set: 'on' }
+    })
+    expect(parseControlRequest('minimize', {})).toEqual({ error: 'minimize requires --node <id,id>' })
+    expect(parseControlRequest('minimize', { node: 'n1', set: 'yes' })).toEqual({
+      error: 'minimize --set must be on or off'
+    })
+    // Non-destructive, like `rename`: no confirm dialog.
+    expect(isDestructiveVerb('minimize')).toBe(false)
+  })
+
+  it('both agent-facing bodies document it and the list marker', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`minimize --node <id,id> [--set on|off]`')
+      expect(body).toContain('(minimized)')
     }
   })
 })

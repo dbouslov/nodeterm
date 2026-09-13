@@ -261,6 +261,7 @@ import {
   answersOffCanvas,
   sourceIsControlCapable,
   storedNodeListing,
+  listRowText,
   answerBrowserResolve,
   type BrowserResolveProject
 } from '../lib/controlRouting'
@@ -308,6 +309,7 @@ import {
   type FocusableNode
 } from '../lib/nodeFocus'
 import { runSnapshot, snapshotViewRefusal, SNAPSHOT_MARGIN_PX, SNAPSHOT_NOT_ON_SCREEN } from '../lib/canvasSnapshot'
+import { geometryReply } from '../lib/geometry'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
 import { measurePinnedInsets, type ScreenInsets } from '../lib/pinnedInsets'
 import { ZONE_GUTTER_PX, ZONES, zoneTargetRect, type ZoneId } from '../lib/nodeZones'
@@ -532,7 +534,8 @@ import type {
 import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/KanbanView'
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
-import { snapNodeToGrid } from '../lib/nodeSizing'
+import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
+import { reflow, resizesEnded, settle } from '../lib/reflow'
 import { snapResizeChanges } from '../lib/resizeSnap'
 import { canClearDirty, canCommitCanvas, canCreateOnCanvas } from '../state/persistGuards'
 import { isHidden } from '../lib/ui-visibility'
@@ -584,12 +587,13 @@ import {
   CLOSE_BULK_MAX
 } from '../lib/closeTargets'
 import { canvasSyncTarget } from './collab-sync'
+import { menuMinimizeRow, minimizeIds, minimizeReply, planMinimize } from '@shared/minimize'
 import {
   applyCanvasMutation,
   applyMutationToFlow,
   agentLaunchOverride,
   claudeLaunchCommand,
-  COLLAPSED_HEIGHT,
+  setCollapsed,
   alignNodes,
   arrangeNodes,
   commonParentId,
@@ -3460,6 +3464,9 @@ export function Canvas() {
     setNodes((ns) => (ns.some((n) => n.selected) ? ns.map((n) => ({ ...n, selected: false })) : ns))
   }, [ephSelId, setNodes])
 
+  // Each node's rect when React Flow's resizer took it, until that resize ends (`resizesEnded`).
+  const resizeStartRef = useRef(new Map<string, Rect>())
+
   const handleNodesChange: typeof onNodesChange = useCallback(
     (changes) => {
       // Ephemeral nodes (subagent / loop) live outside the managed state. Persist their drag
@@ -3509,10 +3516,25 @@ export function Canvas() {
       const snapped = snapSettings.snapToGrid
         ? snapResizeChanges(managed, nodesRef.current, snapSettings.gridSize || GRID)
         : managed
+      // Read before the changes apply: a resize's first change is where its old rect still is.
+      const ended = resizesEnded(snapped, nodesRef.current, resizeStartRef.current)
       onNodesChange(snapped)
+      // A hand resize ended: the neighbours make room or close the gap, and the frames around the
+      // node hug it, moving their own neighbours (lib/reflow). Queued after the change itself.
+      if (ended.length) setNodes((ns) => ended.reduce((acc, e) => reflow(acc, e.id, e.prevRect, snapGridNow()), ns))
       if (snapped.some((c) => c.type !== 'select')) markDirty()
     },
-    [onNodesChange, markDirty, ephParentPosition]
+    [onNodesChange, markDirty, ephParentPosition, setNodes]
+  )
+
+  // A drag inside a frame ended: the siblings the dropped node now overlaps get out of its way, and
+  // the frames around it hug, moving their own neighbours (lib/reflow). A top-level drag is left be.
+  const settleDragged = useCallback(
+    (dragged: readonly { id: string; parentId?: string }[]) => {
+      const framed = dragged.filter((n) => n.parentId)
+      if (framed.length) setNodes((ns) => framed.reduce((acc, n) => settle(acc, n.id, snapGridNow()), ns))
+    },
+    [setNodes]
   )
 
   // Resolve a node's agent id, with a tags fallback for not-yet-migrated legacy nodes and a
@@ -6963,24 +6985,11 @@ export function Canvas() {
     [setNodes, markDirty]
   )
 
-  const toggleCollapseNodes = useCallback(
-    (ids: string[]) => {
-      const set = new Set(ids)
-      setNodes((ns) =>
-        ns.map((n) => {
-          if (!set.has(n.id)) return n
-          const next = !n.data.collapsed
-          const expandedHeight =
-            (n.data.expandedHeight as number) ?? n.measured?.height ?? (n.height as number) ?? 300
-          const height = next ? COLLAPSED_HEIGHT : expandedHeight
-          return {
-            ...n,
-            height,
-            style: { ...n.style, height },
-            data: { ...n.data, collapsed: next, expandedHeight }
-          }
-        })
-      )
+  /** Minimize nodes to their title bar (`on`) or restore them: the node menu's Minimize / Restore
+   *  row. `setCollapsed` keeps each node's height to come back to. */
+  const setMinimized = useCallback(
+    (ids: string[], on: boolean) => {
+      setNodes((ns) => setCollapsed(ns, ids, on))
       markDirty()
     },
     [setNodes, markDirty]
@@ -8033,13 +8042,25 @@ export function Canvas() {
         : []),
       ...(isHidden('collapse', hidden)
         ? []
-        : ([
-            {
-              label: 'Collapse / Expand',
-              icon: <IconCollapse />,
-              onClick: () => toggleCollapseNodes(ids)
-            }
-          ] as MenuItem[])),
+        : (() => {
+            // Restores when every target is minimized, else minimizes them all (@shared/minimize).
+            // Group frames are left out, and a frames-only selection gets no row.
+            const row = menuMinimizeRow(
+              ids.flatMap((nid) => {
+                const n = nodesRef.current.find((node) => node.id === nid)
+                return n ? [{ id: n.id, kind: n.type ?? 'terminal', collapsed: !!n.data.collapsed }] : []
+              })
+            )
+            return row
+              ? ([
+                  {
+                    label: row.on ? 'Minimize' : 'Restore',
+                    icon: <IconCollapse />,
+                    onClick: () => setMinimized(row.ids, row.on)
+                  }
+                ] as MenuItem[])
+              : []
+          })()),
       ...(isHidden('pin', hidden)
         ? []
         : (() => {
@@ -8332,7 +8353,7 @@ export function Canvas() {
     branchClaude,
     transferConversation,
     agentIdOf,
-    toggleCollapseNodes,
+    setMinimized,
     setPinned,
     toggleMarkdown,
     reloadTerminals,
@@ -9808,12 +9829,19 @@ export function Canvas() {
             reply({ ok: true, result: { annotated: res.updates.map((u) => u.id) }, message: annotateReply(res.updates) })
             return
           }
+          // `geometry` is store-answered for `list`'s reason (STORE_ANSWERED_VERBS): a read must not
+          // travel the human's view. It reads the owning project's serialized nodes.
+          if (verb === 'geometry') {
+            const stored = projects.find((p) => p.id === route.projectId)?.nodes ?? []
+            reply(geometryReply(nodeStatesToFlow(stored), args.frame))
+            return
+          }
           if (!needsLiveCanvas(verb)) {
             const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
             reply({
               ok: true,
               result: rows,
-              message: rows.map((n) => `${n.id} [${n.kind}] ${n.title}` + (n.role ? ` · role: ${n.role}` : '')).join('\n')
+              message: rows.map(listRowText).join('\n')
             })
             return
           }
@@ -10503,8 +10531,9 @@ export function Canvas() {
           ids.push(addAndConnect(node))
         }
         // Hug the frame around its children in the same batch the children land in (a count-based
-        // size was wrong whenever a child had been moved or resized). A missing frame is a no-op.
-        setNodes((ns) => fitGroupToChildren(ns, groupId, snapGridNow()))
+        // size was wrong whenever a child had been moved or resized), and let each frame that grew
+        // move its neighbours over, up to the top level (lib/reflow). A missing frame is a no-op.
+        setNodes((ns) => ids.reduce((acc, id) => settle(acc, id, snapGridNow()), ns))
         return ids
       }
 
@@ -10524,6 +10553,7 @@ export function Canvas() {
                 id: n.id,
                 kind: n.type,
                 title: n.data.title as string,
+                ...(n.data.collapsed ? { minimized: true } : {}),
                 ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {}),
                 ...(role ? { role } : {})
               }
@@ -10531,15 +10561,13 @@ export function Canvas() {
             reply({
               ok: true,
               result: list,
-              message: list
-                .map(
-                  (n) =>
-                    `${n.id} [${n.kind}] ${n.title}` +
-                    (n.role ? ` · role: ${n.role}` : '') +
-                    (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
-                )
-                .join('\n')
+              message: list.map(listRowText).join('\n')
             })
+            return
+          }
+          case 'geometry': {
+            // Read-only, like `list`: no dialog, nothing changes. The logic is lib/geometry.
+            reply(geometryReply(nodesRef.current as CanvasNode[], args.frame))
             return
           }
           case 'open-terminal': {
@@ -10963,10 +10991,13 @@ export function Canvas() {
               reply({ ok: false, error: 'move: nothing moved (unknown ids, already there, or an invalid group cycle)' })
               return
             }
-            // The source frame(s) the nodes LEFT, and the destination, may now be the wrong size —
-            // hug whatever each ends up holding so no oversized/updated box is left behind.
+            // The destination: each moved node settles in (the children it landed on move out of its
+            // way) and the frame chain hugs it, each frame that grew moving its neighbours over, up
+            // to the top level (lib/reflow).
+            if (targetGroup) for (const id of moved) next = settle(next, id, snapGridNow())
+            // The source frame(s) the nodes LEFT may now be the wrong size — hug whatever each still
+            // holds so no oversized box is left behind.
             const affected = new Set<string>()
-            if (targetGroup) affected.add(targetGroup)
             for (const id of moved) {
               const was = live.find((n) => n.id === id)
               if (was?.parentId) affected.add(was.parentId)
@@ -11006,7 +11037,7 @@ export function Canvas() {
             const layout = (['grid', 'row', 'column'] as const).find((l) => l === args.layout) ?? 'grid'
             const cols = args.cols ? parseInt(args.cols, 10) || undefined : undefined
             let next = verb === 'arrange'
-              ? arrangeNodes(live, ids, { layout, cols })
+              ? arrangeNodes(live, ids, { layout, cols, order: 'given' }) // --nodes order, not array order
               : alignNodes(live, ids, edge!)
             // Tidying a frame's children usually leaves the frame oversized (it was sized to their
             // old scattered spots) — shrink it to hug the new layout. Top-level sets have no frame.
@@ -11677,6 +11708,31 @@ export function Canvas() {
             )
             markDirty()
             reply({ ok: true, message: `${on ? 'pinned' : 'unpinned'} ${id}`, result: { id, pinned: on } })
+            return
+          }
+          case 'minimize': {
+            // Shrink nodes to their title bar, or restore them (`--set off`): how a lead parks idle
+            // and finished stations. Non-destructive like `rename`, so no dialog. The whole list is
+            // resolved before anything changes (@shared/minimize): one bad id refuses all of it.
+            const on = args.set !== 'off'
+            const plan = planMinimize(
+              minimizeIds(args.node),
+              on,
+              nodesRef.current.map((n) => ({ id: n.id, kind: n.type ?? 'terminal', collapsed: !!n.data.collapsed }))
+            )
+            if (!plan.ok) {
+              reply({ ok: false, error: plan.error })
+              return
+            }
+            if (plan.change.length) {
+              setNodes((nodes) => setCollapsed(nodes, plan.change, on))
+              markDirty()
+            }
+            reply({
+              ok: true,
+              message: minimizeReply(on, plan.change, plan.already),
+              result: { minimized: on, changed: plan.change, unchanged: plan.already }
+            })
             return
           }
           case 'sticky': {
@@ -14298,15 +14354,17 @@ export function Canvas() {
           onEdgeMouseLeave={onEdgeMouseLeave}
           onMove={onMove}
           onNodeDragStart={() => (draggingRef.current = true)}
-          onNodeDragStop={() => {
+          onNodeDragStop={(_, _node, dragged) => {
             draggingRef.current = false
+            settleDragged(dragged)
             // Send the final position now instead of waiting for the throttle's trailing timer.
             publisherRef.current?.flush()
             markDirty()
           }}
           onSelectionDragStart={() => (draggingRef.current = true)}
-          onSelectionDragStop={() => {
+          onSelectionDragStop={(_, dragged) => {
             draggingRef.current = false
+            settleDragged(dragged)
             publisherRef.current?.flush()
             markDirty()
           }}

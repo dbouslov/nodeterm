@@ -15,6 +15,7 @@ import {
 } from './agents/agent-messaging'
 import { resetMessageFlow } from './agents/agent-message-flow'
 import { resetAgentMessageTraceForTests } from './agents/agent-message-trace'
+import { paneOwnerProject, resetPaneOwnershipForTests } from './agents/pane-ownership'
 import { MANAGED_SCRIPT_REVISION } from './agents/hooks/managed-script'
 import type { MirrorEntry } from './agent-status-mirror'
 import type { PtyManager } from './pty-manager'
@@ -192,6 +193,7 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
     host.asked.length = 0
     resetMessageFlow()
     resetAgentMessageTraceForTests()
+    resetPaneOwnershipForTests()
     // Only the manager's two sweeps (snapshot, idle reap) are faked, so they never fire against a
     // reset platform. Timeouts stay real: the receipt and the pane probe's deadline run on them.
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
@@ -210,7 +212,7 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
   })
 
   /** Open the node, then let its last view go: exactly what parking an off-screen pane does. */
-  async function parked(): Promise<PtyManager> {
+  async function parked(ownerProjectId?: string): Promise<PtyManager> {
     const { PtyManager } = await import('./pty-manager')
     const m = new PtyManager()
     m.init(() => DEFAULT_SETTINGS)
@@ -219,7 +221,8 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
     const { sessionId } = (await fake.handlers[IPC.ptyCreate](ALICE, {
       cols: 80,
       rows: 24,
-      persistKey: NODE
+      persistKey: NODE,
+      ownerProjectId
     })) as { sessionId: string }
     fake.senderListeners[IPC.ptyKill](ALICE, sessionId)
     // The state the bug report measured: the painter is gone, the tmux session is not.
@@ -259,6 +262,34 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
       now: () => 1_000_000,
       ...over
     }
+  }
+
+  /**
+   * Open the chat the way `open-claude` does (no tmux session yet, so this create is the spawn the
+   * ownership ledger records), park it, and bring it back on screen: the cycle the report measured
+   * (`attached=0`, then `attached=1`, the agent alive throughout). The re-mount is an attach and
+   * records nothing; `remountOwner` is the project whose canvas re-opened the node id.
+   */
+  async function openedParkedRemounted(remountOwner = 'p1'): Promise<PtyManager> {
+    const { PtyManager } = await import('./pty-manager')
+    const m = new PtyManager()
+    m.init(() => DEFAULT_SETTINGS)
+    m.registerIpc()
+    const opts = { cols: 80, rows: 24, persistKey: NODE }
+    const opened = (await fake.handlers[IPC.ptyCreate](ALICE, { ...opts, ownerProjectId: 'p1' })) as {
+      sessionId: string
+      fresh: boolean
+    }
+    expect(opened.fresh).toBe(true)
+    tmux.live.add(TARGET) // what that spawn's `tmux new-session` brought into being
+    fake.senderListeners[IPC.ptyKill](ALICE, opened.sessionId)
+    const back = (await fake.handlers[IPC.ptyCreate](ALICE, {
+      ...opts,
+      ownerProjectId: remountOwner
+    })) as { fresh: boolean }
+    expect(back.fresh).toBe(false)
+    tmux.calls.length = 0
+    return m
   }
 
   it('delivers to it by session name, as to an on-screen node, without spawning a painter', async () => {
@@ -371,5 +402,86 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
     const again = await deliverFromControl(req({ body: 'again' }), d)
     expect(again.outcome.kind).toBe('rateLimited')
     expect(livenessProbes()).toEqual([])
+  })
+
+  // The cases above stub `paneOwnerProject`. These read the real runtime ledger, which only the
+  // manager's own create and end paths write.
+  describe('who may message it after a park: the real ownership ledger', () => {
+    it("a chat its opener parked and brought back is still its opener's to message", async () => {
+      const m = await openedParkedRemounted()
+
+      const { outcome } = await deliverFromControl(req(), deps(m, { paneOwnerProject }))
+
+      expect(outcome.kind).toBe('delivered')
+      expect(pastes()).toHaveLength(1)
+      expect(pastes()[0].args).toContain(TARGET)
+    })
+
+    it('queues it for its opener while the re-mounted agent is mid-turn', async () => {
+      const m = await openedParkedRemounted()
+      const d = deps(m, { paneOwnerProject, mirrorEntry: () => ({ ...idle, state: 'working' }) })
+      const queue = createDeliveryQueue(d)
+      d.queue = queue
+      try {
+        const { outcome } = await deliverFromControl(req(), d)
+
+        expect(outcome.kind).toBe('queued')
+        expect(pastes()).toEqual([])
+      } finally {
+        queue.resetForTests()
+      }
+    })
+
+    it('another project that re-opens the same node id is still refused', async () => {
+      const m = await openedParkedRemounted('p2')
+      // p2's git-shared project.json lists its own caller and the node id p1 spawned.
+      const hostile = deps(m, {
+        paneOwnerProject,
+        projects: () => [
+          {
+            id: 'p2',
+            nodes: [
+              { id: 'c1', title: 'Gamma', agentId: 'claude' },
+              { id: NODE, title: 'Beta', agentId: 'claude' }
+            ]
+          }
+        ]
+      })
+
+      const { outcome } = await deliverFromControl(req({ sourceNodeId: 'c1' }), hostile)
+
+      expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+      // Its re-mount was an attach: nothing recorded p2.
+      expect(paneOwnerProject(NODE)).toBe('p1')
+      expect(pastes()).toEqual([])
+    })
+
+    it('a chat this run only attached to (opened before a restart) is still refused', async () => {
+      // `parked()` finds the tmux session already up at its first create: an attach, not a spawn.
+      // The create names its project, so the fresh gate is the one thing that keeps it unrecorded.
+      const m = await parked('p1')
+
+      const { outcome } = await deliverFromControl(req(), deps(m, { paneOwnerProject }))
+
+      expect(paneOwnerProject(NODE)).toBeUndefined()
+      expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+      expect(pastes()).toEqual([])
+    })
+
+    it('a chat closed while parked is no longer owned', async () => {
+      const m = await openedParkedRemounted()
+      const { sessionId } = (await fake.handlers[IPC.ptyCreate](ALICE, {
+        cols: 80,
+        rows: 24,
+        persistKey: NODE
+      })) as { sessionId: string }
+      fake.senderListeners[IPC.ptyKill](ALICE, sessionId)
+
+      await fake.handlers[IPC.ptyDestroy](ALICE, NODE)
+
+      expect(paneOwnerProject(NODE)).toBeUndefined()
+      const { outcome } = await deliverFromControl(req(), deps(m, { paneOwnerProject }))
+      expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    })
   })
 })

@@ -219,6 +219,7 @@ export async function initServerCanvasControl(
     color: (sourceNodeId, args) => factory.color(sourceNodeId, args),
     sticky: (sourceNodeId, args) => factory.sticky(sourceNodeId, args),
     annotate: (sourceNodeId, args) => factory.annotate(sourceNodeId, args),
+    minimize: (sourceNodeId, args) => factory.minimize(sourceNodeId, args),
     // `runDelivery` applies caller→target creator proof before any pane probe or write, and
     // re-applies it when a queued delivery flushes.
     deliver: async (input) => (await deliverFromControl(input, messaging)).reply
