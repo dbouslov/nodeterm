@@ -534,6 +534,12 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  is narrower: close requires a node this caller opened during the current server run, and all',
     '  node-mutating verbs accept only current-run creations. Every other target receives a named',
     '  ownership refusal before any partial mutation.',
+    '  `close --node <id,id> --compact` also tidies right after the close: each frame that held a',
+    '  closed node re-packs its remaining children in the `arrange` grid (reading order, the column',
+    '  count it had) and is re-fitted to them, and each enclosing frame that changed size does the',
+    '  same; the top level is never re-laid out. A pinned frame, everything inside one, and a frame',
+    '  holding a pinned node at any depth are left as is; a frame the close emptied stays, empty',
+    '  (`ungroup` it). A denied or expired close moves nothing. Server Edition refuses `--compact`.',
     '- `send --node <id> --text "..."` / `reply --node <id> --text "..."` — deliver a message into',
     '  an AGENT node the caller opened this run (no confirm dialog: verified-only, gated by the project\'s',
     '  agent-messaging switch — off by default — and rate-limited). A busy target is not interrupted',
@@ -1080,6 +1086,16 @@ Verbs:
   only nodes this caller opened during the current server run, without a dialog. Its other
   node-mutating verbs (link/group/rename/color/minimize/sticky update/annotate) likewise accept only current-run
   creations, and refuse the whole request before any partial mutation.
+  Add \`--compact\` to leave no hole: \`close --node <id,id> --compact\` re-packs, right after the
+  close, each frame that held a closed node — its remaining children go back into the \`arrange\`
+  grid, in reading order (top-to-bottom, left-to-right) and at the column count the frame had
+  before the close — and re-fits the frame to them. Each enclosing frame whose child frame changed
+  size gets the same; the top level is never re-laid out. A pinned frame, everything inside one,
+  and a frame holding a pinned node at any depth are left as is (re-packing would move the pinned
+  node or stack the rest on it), and the walk up stops there. A frame the close emptied stays, empty —
+  \`ungroup\` it. The reply names each frame that held a closed node and what happened to it. It
+  applies only when the close does: a denied or expired close moves nothing. Server Edition
+  refuses \`--compact\`.
 - \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
   this server run, in this project only. No confirm dialog; instead it is verified-only, gated by the project's
   agent-messaging switch (Settings → Agents, OFF by default), and rate-limited. Delivery lands when

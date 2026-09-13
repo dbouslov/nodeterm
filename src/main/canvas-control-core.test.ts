@@ -546,6 +546,22 @@ describe('parseControlRequest', () => {
     }
   })
 
+  it('both agent-facing texts document `close --compact`, and what it leaves alone', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      // Without the text the flag does not exist for an orchestrator, which keeps following a
+      // wave's close with one `arrange` per frame.
+      expect(body).toContain('close --node <id,id> --compact')
+      expect(body).toMatch(/`arrange`\s+grid/)
+      expect(body).toMatch(/column\s+count/)
+      // What it does NOT do is what a caller would otherwise assume, or fear.
+      expect(body).toMatch(/top level is never re-laid out/)
+      expect(body).toMatch(/pinned frame, everything inside one,\s+and a frame\s+holding a pinned node at any depth are left as is/)
+      expect(body).toMatch(/emptied stays, empty/)
+      expect(body).toMatch(/denied or expired close moves nothing/)
+      expect(body).toMatch(/Server Edition\s+refuses `--compact`/)
+    }
+  })
+
   it('the skill tells an agent NOT to retry a denial in the hope the dialog is off', () => {
     // A user may waive a verb's dialog (for the session, or permanently). The verb then just
     // applies, and the caller cannot tell which happened — so the one behaviour to rule out
