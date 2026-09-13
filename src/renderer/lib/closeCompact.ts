@@ -14,10 +14,11 @@
 // 3. A frame the close emptied stays where it is, empty. Ungrouping it is the caller's call.
 //
 // A FRAME STAYS AS IS when it is pinned — itself or by an ancestor (`isPinned`: a frame carries
-// its children) — or holds a pinned node. The second is the pin contract's point rather than its
-// letter: `arrangeNodes` leaves a pinned member where it is and starts the rest at the first slot,
-// so re-packing around one would stack a node on top of it. Only nodes that SURVIVE the close
-// count, so closing the pinned node itself frees its frame to re-pack.
+// its children) — or holds a pinned node at ANY depth. The second is the pin contract's point
+// rather than its letter: re-packing moves every child, a child frame carries whatever is pinned
+// inside it along, and `arrangeNodes` starts the rest at the first slot, so re-packing around a
+// pinned child would stack a node on top of it. Only nodes that SURVIVE the close count, so
+// closing the pinned node itself frees its frame to re-pack.
 //
 // THE GRID A FRAME KEEPS is the one it had BEFORE the close, which is why this is a plan read off
 // the canvas as the close found it and applied to the canvas the delete left:
@@ -66,14 +67,25 @@ export function readingRows(nodes: readonly CanvasNode[]): CanvasNode[][] {
 
 /** Whether compaction leaves `frame` as is (the header's rule). `nodes` = the survivors. */
 function staysAsIs(frame: CanvasNode, nodes: readonly CanvasNode[]): boolean {
-  return isPinned(frame, nodes) || nodes.some((n) => n.parentId === frame.id && n.data?.pinned === true)
+  if (isPinned(frame, nodes)) return true
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  // A pinned node anywhere inside: walk each pinned node's frame chain up, cycle-guarded.
+  return nodes.some((n) => {
+    if (n.data?.pinned !== true) return false
+    const seen = new Set<string>()
+    for (let p = n.parentId; p && !seen.has(p); p = byId.get(p)?.parentId) {
+      if (p === frame.id) return true
+      seen.add(p)
+    }
+    return false
+  })
 }
 
 export interface CompactPlan {
   /** Frames that held a closed node and keep at least one child: re-packed. */
   frames: string[]
   /** Frames that held a closed node but stay as is: pinned, inside a pinned frame, or holding a
-   *  pinned node. */
+   *  pinned node at any depth. */
   pinned: string[]
   /** Frames every child of which was closed: left where they are, empty. */
   emptied: string[]

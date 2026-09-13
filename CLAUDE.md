@@ -2147,8 +2147,9 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   child; columns = the longest row), then `fitGroupToChildren`; each ancestor whose child frame
   changed size repeats it, and the top level is never re-laid out (a frame that hugged its
   children keeps its top-left; a hand-enlarged one is pulled in, as `arrange` does). A frame that
-  is pinned (itself or by an ancestor — `isPinned`) or HOLDS a surviving pinned node stays as is,
-  and the walk up stops at the first such frame: `arrangeNodes` keeps a pinned member in place but
+  is pinned (itself or by an ancestor — `isPinned`) or HOLDS a surviving pinned node at any depth
+  stays as is, and the walk up stops at the first such frame: re-packing moves every child (a
+  child frame carries its pinned node along), and `arrangeNodes` keeps a pinned member in place but
   starts the rest at the first slot, so re-packing around one stacks a node on it. An emptied
   frame stays for the caller to `ungroup`. Canvas plans off
   `nodesRef` inside `runClose` (so waived and confirmed closes compact, and a denied or expired one

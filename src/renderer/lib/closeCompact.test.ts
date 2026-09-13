@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { CanvasNode } from '../state/workspace'
+import { rootPosition, type CanvasNode } from '../state/workspace'
 import { applyCompaction, compactNote, compactRequested, planCompaction, readingRows } from './closeCompact'
 
 // Minimal node stub: only the fields the layout fns read. Frames use the geometry
@@ -123,6 +123,27 @@ describe('close --compact', () => {
     expect(out).toBe(after)
   })
 
+  it('leaves a frame with a pinned node deeper inside as is — a child frame would carry it along', () => {
+    // F ⊃ { a, G ⊃ { p (pinned), b } }. Re-packing F moved G (168,62) → (28,62), and p with it.
+    const before = [
+      frame('F', 100, 100, 492, 230),
+      n('a', 28, 62, 'F'),
+      frame('G', 168, 62, 296, 140, 'F'),
+      pin(n('p', 28, 62, 'G')),
+      n('b', 168, 62, 'G')
+    ]
+    const pAbs = (nodes: CanvasNode[]) => rootPosition(at(nodes, 'p'), nodes)
+    expect(pAbs(before)).toEqual({ x: 296, y: 224 })
+    for (const ids of [['a', 'b'], ['a']]) {
+      const { plan, after, out } = closeCompact(before, ids)
+      expect(plan.frames).toEqual([])
+      expect(plan.pinned).toContain('F')
+      expect(out).toBe(after)
+      expect(pAbs(out)).toEqual({ x: 296, y: 224 })
+      expect(compactNote(plan)).toMatch(/left F(, G)? as is/)
+    }
+  })
+
   it('closing the pinned node itself frees its frame to re-pack', () => {
     const before = twoByTwo().map((x) => (x.id === 'b' ? pin(x) : x))
     const { plan, out } = closeCompact(before, ['b'])
@@ -165,6 +186,26 @@ describe('close --compact', () => {
     expect(at(out, 's').position).toEqual({ x: 28, y: 332 })
     expect(at(out, 'p').position).toEqual({ x: 168, y: 332 })
     expect(box(at(out, 'T'))).toEqual({ x: 0, y: 0, width: 352, height: 410 })
+  })
+
+  it('the walk up also stops at a frame with a pinned node deeper inside', () => {
+    // T ⊃ { F ⊃ {a, b, c, d}, H ⊃ {q (pinned)} }: F shrinks, but re-packing T would carry H — and
+    // q — up under F.
+    const before = measured([
+      frame('T', 0, 0, 352, 500),
+      frame('F', 28, 62, 296, 230, 'T'),
+      n('a', 28, 62, 'F'),
+      n('b', 168, 62, 'F'),
+      n('c', 28, 152, 'F'),
+      n('d', 168, 152, 'F'),
+      frame('H', 28, 332, 156, 140, 'T'),
+      pin(n('q', 28, 62, 'H'))
+    ])
+    const { plan, out } = closeCompact(before, ['c', 'd'])
+    expect(plan.frames).toEqual(['F'])
+    expect(box(at(out, 'F'))).toEqual({ x: 28, y: 62, width: 296, height: 140 })
+    expect(at(out, 'H').position).toEqual({ x: 28, y: 332 })
+    expect(box(at(out, 'T'))).toEqual({ x: 0, y: 0, width: 352, height: 500 })
   })
 
   it('a frame inside a pinned frame is pinned too: nothing moves at any level', () => {
