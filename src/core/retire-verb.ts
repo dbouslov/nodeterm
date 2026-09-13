@@ -65,7 +65,11 @@ export function retireRefusal(
 ): string | null {
   // The belt to hook-server's strict bucket, which refuses an unverified retire before any handler.
   if (!req.verified) return strictRefusalFor('retire')
-  const successor = (req.args.successor ?? '').trim()
+  // Parsed JSON, whatever the type says: a non-string would throw at .trim() and reach the route's
+  // catch, which answers an empty 204.
+  const raw: unknown = req.args.successor ?? ''
+  if (typeof raw !== 'string') return 'retire: --successor must be a node id string — nothing changed'
+  const successor = raw.trim()
   if (!successor) return 'retire requires --successor <id>'
   if (successor === req.nodeId) {
     return `retire: --successor names you (${successor}) — name the session that replaces you`

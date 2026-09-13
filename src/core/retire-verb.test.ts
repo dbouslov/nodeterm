@@ -61,6 +61,23 @@ describe('retire --successor: the caller must have opened the successor this app
     expect(retire(ledger, '  ')).toBe('retire requires --successor <id>')
     expect(retire(ledger, 'caller')).toMatch(/names you/)
   })
+
+  it.each([
+    ['a number', 42],
+    ['an object', { id: 'succ' }],
+    ['an array', ['succ']]
+  ])('refuses %s as --successor by name, without throwing', (_, successor) => {
+    // The route hands args over as parsed JSON, so a non-string can arrive despite the type. A throw
+    // here would reach the route's catch, which answers an empty 204.
+    const req = {
+      nodeId: 'caller',
+      args: { successor } as unknown as Record<string, string>,
+      verified: true
+    }
+    const ledger = openedBy('caller', ['succ'])
+    expect(() => retireRefusal(ledger, req)).not.toThrow()
+    expect(retireRefusal(ledger, req)).toBe('retire: --successor must be a node id string — nothing changed')
+  })
 })
 
 describe('what counts as proof: a verified open-* call that created the node', () => {
