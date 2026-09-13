@@ -6,7 +6,8 @@ import {
   buildCanvasControlInstructions,
   buildCanvasSkillBody,
   CONTROL_SHIM_SCRIPT,
-  CONTROL_UNREACHABLE_MSG
+  CONTROL_UNREACHABLE_MSG,
+  SNAPSHOT_KEEP
 } from '../core/canvas-control-core'
 import {
   CODEX_SANDBOX_BLOCKED_LINE,
@@ -312,6 +313,40 @@ describe('parseControlRequest', () => {
     for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
       expect(body).toContain('`annotate --node <id,id> [--role "…"] [--recommend "…"] [--clear]`')
       expect(body).toContain('one unknown id refuses the whole list')
+    }
+  })
+
+  it('snapshot takes no required flag, and --frame/--out each need a value', () => {
+    expect(parseControlRequest('snapshot', {})).toEqual({ verb: 'snapshot', args: {} })
+    expect(parseControlRequest('snapshot', { frame: 'g1', out: 'shots/a.png' })).toEqual({
+      verb: 'snapshot',
+      args: { frame: 'g1', out: 'shots/a.png' }
+    })
+    // The shim sends a valueless flag as an empty string; guessing "whole canvas" or "default
+    // path" for it would answer a question the caller did not ask.
+    expect(parseControlRequest('snapshot', { frame: '' })).toEqual({
+      error: 'snapshot: --frame needs a group id'
+    })
+    expect(parseControlRequest('snapshot', { out: ' ' })).toEqual({
+      error: 'snapshot: --out needs a path'
+    })
+    expect(isDestructiveVerb('snapshot')).toBe(false)
+  })
+
+  it('both agent-facing texts document the snapshot verb, where the file lands, and its refusals', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('`snapshot [--frame <groupId>] [--out <path>]`')
+      expect(body).toContain('no Screen Recording permission')
+      expect(body).toContain('snapshots/<projectId>-<time>.png')
+      expect(body).toContain(`newest ${SNAPSHOT_KEEP} are kept`)
+      expect(body).toContain('inside the project directory')
+      expect(body).toContain('never switches the user')
+      // Named so a caller asks the user instead of retrying into the same refusal.
+      for (const why of ['not the one on screen', 'minimized or hidden', 'kanban board', 'not a frame']) {
+        expect(body, why).toContain(why)
+      }
+      // The one refusal a caller SHOULD retry: another snapshot was still being taken.
+      expect(body).toContain('refused as already in progress — that one you DO retry')
     }
   })
 

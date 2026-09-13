@@ -102,6 +102,31 @@ function browserVerbDocLines(): string[] {
   ]
 }
 
+/** `snapshot`'s default folder (`<userData>/snapshots`) keeps this many PNGs, newest first. Here,
+ *  with the verb model, so main's pruning and the agent-facing docs read one number. */
+export const SNAPSHOT_KEEP = 20
+
+/** The `snapshot` verb entry both agent-facing bodies share (the `browserVerbDocLines` pattern), so
+ *  the skill and the AGENTS.md block cannot drift; the keep count renders from `SNAPSHOT_KEEP`. */
+function snapshotVerbDocLines(): string[] {
+  return [
+    '- `snapshot [--frame <groupId>] [--out <path>]` — a PNG of the whole canvas (every node in',
+    '  view) or of one frame, so you can SEE a layout instead of arranging blind. It is taken inside',
+    "  the app, so it needs no Screen Recording permission. The user's view is framed for the shot",
+    '  and put back exactly as it was. The file goes to',
+    `  \`<app data>/snapshots/<projectId>-<time>.png\` (the newest ${SNAPSHOT_KEEP} are kept), or with \`--out\` to`,
+    '  a path inside the project directory, in a folder that already exists (an SSH project takes',
+    '  no `--out`, and its snapshot is saved on the machine running nodeterm, not the remote host).',
+    '  The reply names the file, its pixel size, the canvas area captured and the zoom; read the PNG',
+    "  to look. A snapshot never switches the user's view, so it is REFUSED — ask the user, do not",
+    '  retry — when your project is not the one on screen, the window is minimized or hidden, the',
+    '  kanban board or Network overview is open, or the `--frame` id is not a frame (pass a group',
+    '  id from `list`). One snapshot runs at a time: a second one sent while the first is still being',
+    '  taken is refused as already in progress — that one you DO retry, in a moment. Verified callers',
+    '  only; there is no snapshot on the Server Edition.'
+  ]
+}
+
 export type ControlVerb =
   | 'list'
   | 'open-terminal'
@@ -139,6 +164,7 @@ export type ControlVerb =
   | 'annotate'
   | 'browser'
   | 'open-project'
+  | 'snapshot'
 
 export interface ControlCommand {
   verb: ControlVerb
@@ -181,6 +207,7 @@ const VERBS: ControlVerb[] = [
   'sticky',
   'annotate',
   'browser',
+  'snapshot',
   // Issue #338 PR 1: registered in the model (parse + gates + the grant ledger run in main), but
   // INERT until PR 2 adds the renderer dispatch case — today the renderer's `default:` answers
   // `unknown verb: open-project`. Deliberately undocumented in the skill/instructions bodies until
@@ -299,6 +326,15 @@ export function parseControlRequest(
   // (src/core/project-grants.ts) — the caller's path is hostile input and this presence check is
   // only the polite half.
   if (v === 'open-project' && !args.cwd) return { error: 'open-project requires --cwd <abs-path>' }
+  // `snapshot` requires nothing, but a flag it takes must carry a value (the shim sends a valueless
+  // flag as ''). The rest — the frame exists and is a group, the `--out` jail, the window is on
+  // screen — is decided where that state lives: main (window, jail) and the renderer (frame).
+  if (v === 'snapshot' && args.frame !== undefined && !args.frame.trim()) {
+    return { error: 'snapshot: --frame needs a group id' }
+  }
+  if (v === 'snapshot' && args.out !== undefined && !args.out.trim()) {
+    return { error: 'snapshot: --out needs a path' }
+  }
   return { verb: v, args }
 }
 
@@ -520,6 +556,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     `  \`--clear --role "x"\` keeps only the role. Up to ${ANNOTATE_BULK_MAX} ids per call, and`,
     '  one unknown id refuses the whole list. Verified callers only; the record shows which node',
     '  wrote it and when. Annotate every station you run.',
+    ...snapshotVerbDocLines(),
     '- `board` — the project\'s kanban board: every column (id + title) and the session cards in each,',
     '  plus the virtual Ungrouped column. Start here when you need a column id or want the board state.',
     '- `assign --node <id> [--column <id|title>] [--before <nodeId>]` — move a session card to a column',
@@ -1078,6 +1115,7 @@ Verbs:
   the role. Up to ${ANNOTATE_BULK_MAX} ids per call; one unknown id refuses the whole list and names it.
   Verified callers only — the record shows which node wrote it and when. As a Hub, annotate every
   station during Collect.
+${snapshotVerbDocLines().join('\n')}
 - \`board\` — read the project's kanban board: every column (id + title) and the session cards
   filed in each, plus the virtual Ungrouped column (unfiled sessions). Start here when you need
   a column id, or to see how the work is currently laid out.

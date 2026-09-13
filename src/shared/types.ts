@@ -3168,6 +3168,11 @@ export interface TriggersApi {
   ): Promise<{ outcome: 'fired' | 'missed' | 'failed' | 'queued'; detail?: string }>
 }
 
+/** Main's answer to the `snapshot` verb's capture call: the PNG written, with its pixel size. */
+export type CanvasSnapshotCaptureResult =
+  | { ok: true; path: string; width: number; height: number }
+  | { ok: false; error: string }
+
 export interface NodeTerminalApi {
   pty: PtyApi
   workspace: WorkspaceApi
@@ -3347,6 +3352,12 @@ export interface NodeTerminalApi {
     result?: unknown
     error?: string
   }): void
+  /** The `snapshot` verb's capture: main captures `rect` (CSS pixels, window-relative) for the
+   *  forwarded request `requestId` and writes the PNG where its own ticket says. Desktop only. */
+  captureCanvasSnapshot(payload: {
+    requestId: string
+    rect: { x: number; y: number; width: number; height: number }
+  }): Promise<CanvasSnapshotCaptureResult>
   /** The `browser` verb resolve round-trip (S8 PR 7): main asks the renderer to resolve a source
    *  node's owning project, control-capability and the LIVE per-project capability value. The
    *  renderer answers over `sendBrowserControlResolveResult` and NEVER runs a CDP command. */

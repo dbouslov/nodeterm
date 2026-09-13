@@ -156,6 +156,8 @@ export function buildRelayApi(connectionId: string, transport?: FrameTransport):
     // Edition); inert no-ops rather than a local subscription that never carries the host's events.
     onAgentControl: stub.onAgentControl,
     sendAgentControlResult: stub.sendAgentControlResult,
+    // `snapshot` captures the desktop's own window; it never rides the relay either.
+    captureCanvasSnapshot: stub.captureCanvasSnapshot,
     // Browser control never rides the relay either (no CDP off the desktop) — inert no-ops.
     onBrowserControlResolve: stub.onBrowserControlResolve,
     sendBrowserControlResolveResult: stub.sendBrowserControlResolveResult,

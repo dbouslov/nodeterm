@@ -509,6 +509,13 @@ export function buildStubApi(): Omit<
     }),
     onAgentControl: noopUnsub,
     sendAgentControlResult: noop,
+    // The `snapshot` capture needs the desktop window (`webContents.capturePage`). Unreachable here
+    // — `onAgentControl` above never fires, and the Server Edition refuses the verb by name — but a
+    // stray call answers an honest terminal refusal, never a file that was not written.
+    captureCanvasSnapshot: async () => ({
+      ok: false as const,
+      error: 'snapshot: canvas capture is only available in the desktop app. Do not retry.'
+    }),
     // Browser control is desktop-only (no <webview>, no CDP on the Server Edition / relay), so the
     // resolve round-trip is inert here — the verb is refused by name before it reaches a handler.
     onBrowserControlResolve: noopUnsub,

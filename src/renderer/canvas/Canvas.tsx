@@ -308,6 +308,7 @@ import {
   viewportForRect,
   type FocusableNode
 } from '../lib/nodeFocus'
+import { runSnapshot, snapshotViewRefusal, SNAPSHOT_MARGIN_PX, SNAPSHOT_NOT_ON_SCREEN } from '../lib/canvasSnapshot'
 import { geometryReply } from '../lib/geometry'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
 import { measurePinnedInsets, type ScreenInsets } from '../lib/pinnedInsets'
@@ -9699,6 +9700,12 @@ export function Canvas() {
         const { projects, activeProjectId: activeId } = useProjects.getState()
         const route = routeControlSource(projects, activeId, sourceNodeId)
         if (route.kind === 'switch' || route.kind === 'reopen') {
+          // `snapshot` pictures the canvas ON SCREEN. Travelling there to take it would switch the
+          // user's view on a background agent's say-so (the G5 hijack), so it is refused by name.
+          if (verb === 'snapshot') {
+            reply({ ok: false, error: SNAPSHOT_NOT_ON_SCREEN })
+            return
+          }
           // `sticky` is store-answered like send/reply, for the same G5 reason (see
           // STORE_ANSWERED_VERBS): its headline use is a SCHEDULED sync run, and travelling here
           // would yank the human's view to the sync agent's project on every run. The write lands
@@ -12121,6 +12128,34 @@ export function Canvas() {
               message: `moved ${cardTitle(nodeId) || nodeId} to ${where}`,
               result: { node: nodeId, column: columnId }
             })
+            return
+          }
+          case 'snapshot': {
+            // A PNG of the canvas as the user would see it, taken in-app (no Screen Recording
+            // grant). Main has already refused a hidden/minimized window and jailed --out, and the
+            // off-screen refusal is in the routing branch above; the sequence is lib/canvasSnapshot.
+            const activeId = useProjects.getState().activeProjectId
+            const covered = snapshotViewRefusal({
+              kanbanOpen: isGlobalKanbanOpen() || isKanbanOpen(activeId),
+              overviewOpen: !!activeId && viewFor(useViewMode.getState(), activeId) === 'overview'
+            })
+            if (covered) {
+              reply({ ok: false, error: covered })
+              return
+            }
+            reply(
+              await runSnapshot({
+                nodes: nodesRef.current as CanvasNode[],
+                frame: args.frame?.trim() || undefined,
+                pane: flowWrapRef.current?.getBoundingClientRect() ?? null,
+                fit: { margin: SNAPSHOT_MARGIN_PX, minZoom: CANVAS_MIN_ZOOM, maxZoom: CANVAS_MAX_ZOOM },
+                getViewport,
+                setViewport: (v) => setViewport(v, { duration: 0 }),
+                // Two frames: the first commits the new transform, the second runs after it painted.
+                paint: () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+                capture: (rect) => api.captureCanvasSnapshot({ requestId, rect })
+              })
+            )
             return
           }
           default:
