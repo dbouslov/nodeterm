@@ -373,6 +373,22 @@ Persistence has two layers:
 
 `settings.json` is a separate store (`core/settings-store.ts`, `state/settings.ts`).
 
+**Persist trace (diagnostics): `userData/persist-trace.log`.** One JSON line per persistence
+decision, so a canvas that stops reaching disk can be diagnosed after the fact (2026-09-13: chats
+opened after a relaunch never reached `project.json` until the first tab switch, so `send` to them
+was refused `cross-project`, and nothing on screen or in any log said why). Main writes the store's
+decisions (`WorkspaceStore.onTrace`: save received; projects written, unchanged, or held with a
+reason; write errors — the per-folder write error is still swallowed, but no longer silent) and every
+messaging-gate refusal (`AgentMessagingDeps.trace`, with the persisted canvas the scope was read from
+and its age). The renderer prints `[persist] {…}` console lines (`lib/persistTrace.ts`: load and
+load-bail with the loading flag, commit-skip named by `commitSkipReason`, every save with the active
+vs on-screen project and the nodes sent vs on screen, autosave held); main's `console-message`
+listener routes them from the app's own windows only (`traceFromConsole`). Ids, flags and sizes
+only, sanitized on both sides (`shared/persist-trace.ts`); bounded at 1 MiB plus one `.1` rotation
+(`core/persist-trace.ts`). Nothing reads it back: every hook is optional and a throwing one is
+ignored. Server Edition: the store and gate lines go under its data dir; a browser tab's `[persist]`
+lines stay in that tab's console.
+
 ## Projects (tabs)
 
 Each project is one canvas/page; terminals and notes belong to a project. The `projects`
