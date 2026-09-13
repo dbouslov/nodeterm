@@ -1,6 +1,7 @@
 // `retire --successor <id>` — the canvas half. A retiring chat hands its place to a session it
-// opened: the successor takes the caller's exact position, width, height and parent frame, and its
-// kanban column; Canvas then closes the caller (deleteNodes), after the reply.
+// opened: the successor takes the caller's position, width and height as the caller would restore
+// them (un-maximized, expanded), its parent frame and its kanban column; Canvas then closes the
+// caller (deleteNodes), after the reply.
 //
 // MAIN has already decided whether the caller MAY (verified, and the successor its own current-run
 // creation — `src/core/retire-verb.ts`). This decides the rest against the live canvas.
@@ -11,6 +12,7 @@ import {
   fitGroupToChildren,
   isPinned,
   reparentNode,
+  restoreMaximizedNode,
   shrinkPinnedGroupToChildren,
   type CanvasNode
 } from '../state/workspace'
@@ -49,12 +51,17 @@ export function planRetire(input: RetireInput): RetirePlan {
   if (successor.type !== 'terminal') {
     return { error: `retire: ${successorId} is not a session (terminal or agent) node — nothing changed` }
   }
-  const caller = live.find((n) => n.id === callerId)
+  // The caller's LOGICAL rect, not its display rect. A maximized caller is first put back where its
+  // restore toggle would put it (every frame the maximize grew refits back down); a collapsed caller
+  // hands over the height it expands to. The successor ends expanded and un-maximized.
+  const base = restoreMaximizedNode(live, callerId)
+  const caller = base.find((n) => n.id === callerId)
   if (!caller) return { error: 'retire: your node is not on this canvas — nothing changed' }
 
   const width = caller.width ?? caller.measured?.width
-  const height = caller.height ?? caller.measured?.height
-  let nodes = reparentNode(live, successorId, caller.parentId ?? null).map((n) =>
+  const height =
+    (caller.data.collapsed ? caller.data.expandedHeight : undefined) ?? caller.height ?? caller.measured?.height
+  let nodes = reparentNode(base, successorId, caller.parentId ?? null).map((n) =>
     n.id === successorId
       ? {
           ...n,
@@ -63,7 +70,9 @@ export function planRetire(input: RetireInput): RetirePlan {
           height,
           style: { ...n.style, width, height },
           // Drop the stale measurement, as withNodeRect does: persistence prefers `measured`.
-          measured: undefined
+          measured: undefined,
+          // The collapse toggle expands back to `expandedHeight`: a stale one would undo the handover.
+          data: { ...n.data, collapsed: false, expandedHeight: height, premaxRect: undefined }
         }
       : n
   )

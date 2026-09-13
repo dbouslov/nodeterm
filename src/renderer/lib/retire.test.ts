@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fitGroupToChildren, rootPosition, type CanvasNode } from '../state/workspace'
+import { COLLAPSED_HEIGHT, fitGroupToChildren, rootPosition, type CanvasNode } from '../state/workspace'
 import { assignNode, assignedTo, defaultKanban } from './kanban'
 import { planRetire, type RetirePlan } from './retire'
 
@@ -123,6 +123,51 @@ describe('planRetire — the successor takes the caller\'s place', () => {
     // Nothing inside moved: the successor sits exactly where the caller did, `other` stayed put.
     expect(byId(nodes, 'succ').position).toEqual({ x: 20, y: 40 })
     expect(byId(nodes, 'other').position).toEqual({ x: 20, y: 460 })
+  })
+})
+
+describe('planRetire — the successor takes the caller\'s LOGICAL rect, not its display rect', () => {
+  const withData = (n: CanvasNode, data: Partial<CanvasNode['data']>): CanvasNode =>
+    ({ ...n, data: { ...n.data, ...data } }) as CanvasNode
+
+  it('a collapsed caller hands over the height it expands to, not its header height', () => {
+    const caller = withData(term('caller', 40, 60, 640, COLLAPSED_HEIGHT), { collapsed: true, expandedHeight: 420 })
+    const succ = byId(applied(plan([caller, term('succ', 2000, 100, 300, 200)])).nodes, 'succ')
+    expect([succ.width, succ.height]).toEqual([640, 420])
+    expect(succ.style).toMatchObject({ width: 640, height: 420 })
+  })
+
+  it('a maximized caller hands over the rect its restore toggle gives back', () => {
+    // Maximized to the viewport inside an unpinned frame, which re-anchored to hug it. premaxRect
+    // is ROOT-space, so the frame origin moving since the maximize must not shift the successor.
+    const live = [
+      frame('g1', -120, -70, 2000, 1200),
+      withData(term('caller', 20, 20, 1920, 1080, 'g1'), { premaxRect: { x: 40, y: 60, width: 640, height: 420 } }),
+      term('succ', 2000, 100, 300, 200)
+    ]
+    const { nodes } = applied(plan(live))
+    const succ = byId(nodes, 'succ')
+    expect(rootPosition(succ, nodes)).toEqual({ x: 40, y: 60 })
+    expect([succ.width, succ.height]).toEqual([640, 420])
+    expect(succ.data.premaxRect).toBeUndefined()
+    // The frame the maximize grew gives the room back, as the restore toggle's refit would.
+    expect(byId(nodes, 'g1').width).toBeLessThan(1000)
+  })
+
+  it('the successor ends expanded and un-maximized, whatever state it was in', () => {
+    const caller = term('caller', 40, 60, 640, 420)
+    const collapsed = withData(term('succ', 2000, 100, 300, COLLAPSED_HEIGHT), { collapsed: true, expandedHeight: 200 })
+    const maximized = withData(term('succ', 0, 0, 1920, 1080), {
+      premaxRect: { x: 2000, y: 100, width: 300, height: 200 }
+    })
+    for (const [state, s] of [['collapsed', collapsed], ['maximized', maximized]] as const) {
+      const succ = byId(applied(plan([caller, s])).nodes, 'succ')
+      expect(succ.data.collapsed, state).toBeFalsy()
+      expect(succ.data.premaxRect, state).toBeUndefined()
+      expect(succ.height, state).toBe(420)
+      // The collapse toggle expands back to `expandedHeight`: a stale one would undo the handover.
+      expect(succ.data.expandedHeight, state).toBe(420)
+    }
   })
 })
 
