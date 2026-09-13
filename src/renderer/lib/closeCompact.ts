@@ -136,9 +136,16 @@ function depthOf(id: string, nodes: readonly CanvasNode[]): number {
 export function applyCompaction(after: CanvasNode[], plan: CompactPlan, grid = 0): CanvasNode[] {
   let next = after
   const pending = new Set(plan.frames)
+  // Each frame is re-laid out at most once. In a tree that already holds (innermost first, and a
+  // frame is queued only by a child), so this changes nothing there; it is what ends the walk on a
+  // parentId CYCLE (a hand-edited project.json), where each frame's re-fit grows the other and the
+  // walk would re-queue them forever.
+  const done = new Set<string>()
   while (pending.size > 0) {
     const id = [...pending].reduce((a, b) => (depthOf(b, next) > depthOf(a, next) ? b : a))
     pending.delete(id)
+    if (done.has(id)) continue
+    done.add(id)
     const frame = next.find((n) => n.id === id)
     const children = next.filter((n) => n.parentId === id)
     if (!frame || children.length === 0) continue
