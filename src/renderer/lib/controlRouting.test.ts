@@ -109,6 +109,13 @@ describe('needsLiveCanvas', () => {
     // each (spec §2.3, P6).
     expect(needsLiveCanvas('open-project')).toBe(false)
   })
+
+  it('is false for geometry — checking where nodes sit must never travel the camera', () => {
+    // `list`'s reason: an orchestrator reads the layout before and after every arrange, and routing
+    // is by SOURCE — a live requirement would yank the human's view to the orchestrator's project
+    // on every check. Off canvas, the answer is read from that project's serialized nodes.
+    expect(needsLiveCanvas('geometry')).toBe(false)
+  })
 })
 
 describe('canColdOpen — an OPEN is answered out of the store, not by moving the user', () => {

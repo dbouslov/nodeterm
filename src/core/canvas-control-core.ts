@@ -116,6 +116,7 @@ export type ControlVerb =
   | 'move'
   | 'arrange'
   | 'align'
+  | 'geometry'
   | 'restructure'
   | 'link'
   | 'verify'
@@ -157,6 +158,7 @@ const VERBS: ControlVerb[] = [
   'move',
   'arrange',
   'align',
+  'geometry',
   'restructure',
   'link',
   'verify',
@@ -244,6 +246,10 @@ export function parseControlRequest(
   if (v === 'align' && !args.edge) return { error: 'align requires --edge' }
   if (v === 'restructure' && args.layout && args.layout !== 'rows' && args.layout !== 'radial') {
     return { error: 'restructure --layout must be rows or radial' }
+  }
+  // Presence, not truthiness: the shim turns a valueless `--frame` into ''.
+  if (v === 'geometry' && args.frame !== undefined && !args.frame) {
+    return { error: 'geometry --frame requires a group id' }
   }
   if (v === 'pin' && !args.node) return { error: 'pin requires --node <id>' }
   if (v === 'pin' && args.set !== 'on' && args.set !== 'off') return { error: 'pin requires --set on|off' }
@@ -419,6 +425,12 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  `align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter` — tidy a layout. Works on',
     '  top-level nodes OR on the children of ONE frame (all ids must share a container — you cannot',
     '  arrange across frames in one call); arranging a frame\'s children also shrinks the frame to fit.',
+    '- `geometry [--frame <groupId>]` — where everything is (read-only): every node and frame, or one',
+    '  frame\'s subtree, with id, kind, title, parentId, absolute x/y, rendered width/height (a collapsed',
+    '  node reports its collapsed height), collapsed and pinned. The reply is one summary line ("21',
+    '  nodes, 6 frames, 0 overlaps") plus one line per problem: two siblings whose rectangles overlap',
+    '  (touching edges do not count), or a child that sticks out of its frame. `result` carries the',
+    '  full JSON. Run it before laying out, and after `arrange` to confirm 0 overlaps.',
     '- `restructure [--layout rows|radial]` — re-lay out the WHOLE project by lineage, centered on',
     '  the opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their',
     '  children beneath those; a node armed `--after` sits to the right of what it waits on; a frame',
@@ -928,6 +940,17 @@ Verbs:
   and undoable. Prefer it to hand-arranging after a fan-out.
 - \`align --nodes <id,id> --edge left|right|top|bottom|hcenter|vcenter\` — align edges/centers. Same
   one-container rule as \`arrange\`.
+- \`geometry [--frame <groupId>]\` — where everything is, read-only: every node and frame (or one
+  frame's subtree, the frame included) with id, kind, title, parentId, absolute x/y, rendered
+  width/height (a collapsed node reports its collapsed height), collapsed, and pinned (true when it
+  or a frame around it is pinned, so layout verbs will not move it). The reply is one summary line,
+  \`21 nodes, 6 frames, 0 overlaps\`, then one line per problem naming both titles: two siblings
+  (same container) whose rectangles overlap, where touching edges do not count, or a child that
+  sticks out of its frame. \`result\` carries the full JSON. x/y are layout positions, the ones
+  \`arrange\`/\`align\` move; a child that sticks out is drawn clamped inside its frame, so fix it by
+  arranging that frame's children (which refits the frame). A pinned frame keeps its layout (its
+  children report \`pinned: true\`), so \`pin --node <frame> --set off\` first. Run it before you lay
+  out, and again after \`arrange\` to confirm 0 overlaps.
 - \`link --to <id,id> [--from <id>]\` — context-link nodes, so each can READ the other's
   transcript on demand with the get-linked-context skill. \`--from\` defaults to you. Nothing is
   pushed into the linked sessions — reading is on demand, so linking never interrupts anyone.
@@ -1066,7 +1089,8 @@ Typical requests this skill covers:
   per subject and \`arrange\` inside each.
 - "Open a Codex/Gemini/Copilot session" → \`open-agent --agent codex|gemini|copilot\`.
 - "Tidy up / group my terminals" → \`list\`, then \`group --nodes …\`, then \`arrange --nodes <those same ids>\`
-  to tidy the new frame's contents (grouping keeps each node's scattered spot, so arrange after grouping).
+  to tidy the new frame's contents (grouping keeps each node's scattered spot, so arrange after grouping),
+  then \`geometry\` to confirm 0 overlaps.
 - "Move this node into that group" → \`move --nodes <id> --group <targetGroupId>\` (not \`group\`, which only
   wraps loose nodes). "Break up this group" → \`ungroup --group <id>\`.
 - "Rename this node/group" → \`rename\`.
