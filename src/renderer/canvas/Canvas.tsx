@@ -533,7 +533,8 @@ import type {
 import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/KanbanView'
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
-import { snapNodeToGrid } from '../lib/nodeSizing'
+import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
+import { reflow, resizesEnded, settle } from '../lib/reflow'
 import { snapResizeChanges } from '../lib/resizeSnap'
 import { canClearDirty, canCommitCanvas, canCreateOnCanvas } from '../state/persistGuards'
 import { isHidden } from '../lib/ui-visibility'
@@ -3462,6 +3463,9 @@ export function Canvas() {
     setNodes((ns) => (ns.some((n) => n.selected) ? ns.map((n) => ({ ...n, selected: false })) : ns))
   }, [ephSelId, setNodes])
 
+  // Each node's rect when React Flow's resizer took it, until that resize ends (`resizesEnded`).
+  const resizeStartRef = useRef(new Map<string, Rect>())
+
   const handleNodesChange: typeof onNodesChange = useCallback(
     (changes) => {
       // Ephemeral nodes (subagent / loop) live outside the managed state. Persist their drag
@@ -3511,10 +3515,25 @@ export function Canvas() {
       const snapped = snapSettings.snapToGrid
         ? snapResizeChanges(managed, nodesRef.current, snapSettings.gridSize || GRID)
         : managed
+      // Read before the changes apply: a resize's first change is where its old rect still is.
+      const ended = resizesEnded(snapped, nodesRef.current, resizeStartRef.current)
       onNodesChange(snapped)
+      // A hand resize ended: the neighbours make room or close the gap, and the frames around the
+      // node hug it, moving their own neighbours (lib/reflow). Queued after the change itself.
+      if (ended.length) setNodes((ns) => ended.reduce((acc, e) => reflow(acc, e.id, e.prevRect, snapGridNow()), ns))
       if (snapped.some((c) => c.type !== 'select')) markDirty()
     },
-    [onNodesChange, markDirty, ephParentPosition]
+    [onNodesChange, markDirty, ephParentPosition, setNodes]
+  )
+
+  // A drag inside a frame ended: the siblings the dropped node now overlaps get out of its way, and
+  // the frames around it hug, moving their own neighbours (lib/reflow). A top-level drag is left be.
+  const settleDragged = useCallback(
+    (dragged: readonly { id: string; parentId?: string }[]) => {
+      const framed = dragged.filter((n) => n.parentId)
+      if (framed.length) setNodes((ns) => framed.reduce((acc, n) => settle(acc, n.id, snapGridNow()), ns))
+    },
+    [setNodes]
   )
 
   // Resolve a node's agent id, with a tags fallback for not-yet-migrated legacy nodes and a
@@ -10505,8 +10524,9 @@ export function Canvas() {
           ids.push(addAndConnect(node))
         }
         // Hug the frame around its children in the same batch the children land in (a count-based
-        // size was wrong whenever a child had been moved or resized). A missing frame is a no-op.
-        setNodes((ns) => fitGroupToChildren(ns, groupId, snapGridNow()))
+        // size was wrong whenever a child had been moved or resized), and let each frame that grew
+        // move its neighbours over, up to the top level (lib/reflow). A missing frame is a no-op.
+        setNodes((ns) => ids.reduce((acc, id) => settle(acc, id, snapGridNow()), ns))
         return ids
       }
 
@@ -10964,10 +10984,13 @@ export function Canvas() {
               reply({ ok: false, error: 'move: nothing moved (unknown ids, already there, or an invalid group cycle)' })
               return
             }
-            // The source frame(s) the nodes LEFT, and the destination, may now be the wrong size —
-            // hug whatever each ends up holding so no oversized/updated box is left behind.
+            // The destination: each moved node settles in (the children it landed on move out of its
+            // way) and the frame chain hugs it, each frame that grew moving its neighbours over, up
+            // to the top level (lib/reflow).
+            if (targetGroup) for (const id of moved) next = settle(next, id, snapGridNow())
+            // The source frame(s) the nodes LEFT may now be the wrong size — hug whatever each still
+            // holds so no oversized box is left behind.
             const affected = new Set<string>()
-            if (targetGroup) affected.add(targetGroup)
             for (const id of moved) {
               const was = live.find((n) => n.id === id)
               if (was?.parentId) affected.add(was.parentId)
@@ -14296,15 +14319,17 @@ export function Canvas() {
           onEdgeMouseLeave={onEdgeMouseLeave}
           onMove={onMove}
           onNodeDragStart={() => (draggingRef.current = true)}
-          onNodeDragStop={() => {
+          onNodeDragStop={(_, _node, dragged) => {
             draggingRef.current = false
+            settleDragged(dragged)
             // Send the final position now instead of waiting for the throttle's trailing timer.
             publisherRef.current?.flush()
             markDirty()
           }}
           onSelectionDragStart={() => (draggingRef.current = true)}
-          onSelectionDragStop={() => {
+          onSelectionDragStop={(_, dragged) => {
             draggingRef.current = false
+            settleDragged(dragged)
             publisherRef.current?.flush()
             markDirty()
           }}

@@ -3237,7 +3237,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   joins the frame THOSE DEPS live in, never the source's just because the source is there, and
   stays top-level (clearing every frame) when its deps are top-level or sit in different frames.
   `PLACEMENT_GAP` (40) = `arrangeNodes`'s gap on purpose. The engine never moves an existing
-  node — only Restructure does, on an explicit action. `staggeredPosition` (360×320 steps keyed
+  node — only Restructure does, on an explicit action, and Reflow (below) moves the neighbours of a
+  node that changed size or joined a frame. `staggeredPosition` (360×320 steps keyed
   on node COUNT for 600×400 nodes) is gone. Ropes carry `kind: 'opener' | 'dep'` (`BridgeLink`;
   `sanitizeRopes` on both load seams; untagged = opener, and a restore never stamps a kind the
   file did not carry, so a legacy dep rope is not rewritten as lineage on the next save) so the
@@ -3253,6 +3254,22 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   moves anything laid out onto it (with no pins that pass changes nothing). Dragging by hand is
   not blocked. The headless `pin` verb is refused (follow-up). A new automatic mover must skip
   `isPinned` nodes.
+- **Reflow** (`lib/reflow.ts`, pure, 2026-09): frames follow their chats. `reflow(nodes, id,
+  prevRect, grid)` runs when a hand resize ends (`resizesEnded` pairs React Flow's `resizing: true`
+  and `resizing: false` changes), and `settle(nodes, id, grid)` (reflow with nothing grown) when a
+  drag inside a frame ends and when a node joins a frame (`open-* --group`, `move --group`).
+  Siblings below the node in its column band shift by how far its BOTTOM edge moved, siblings right
+  of it in its row band by how far its RIGHT edge moved (bands off the OLD rect; top and left edges
+  have none). Growth pushes and cascades, each push keeping the pair's gap capped at
+  `PLACEMENT_GAP` and clearing the whole path it sweeps, so no sibling passes one in its column or
+  row; shrink pulls the band back by at most the freed space, never closer to anything than that
+  gap. The changed node and `isPinned` nodes never move (a node pushed onto one goes past it). Then
+  `fitAncestorChain` (exported, with an `afterFit` hook) hugs each frame up to the top level, and a
+  frame whose rect changed moves ITS neighbours the same way. The hook drops the fitted frame's
+  stale `measured`, which `nodeW` reads first; a caller that resizes a node must drop it too. The
+  headless Server Edition `--group` / `move` only grow the frame (its own `fitAncestorChain` copy);
+  hand resize and drag reflow on every edition, since each runs this Canvas. Notes that fit their
+  text and `minimize` are meant to call `reflow`.
 - **Add menu** = bottom dock (`Dock.tsx`) `+`, mirrored by the pane menu and command palette.
 - **Edges** are all one React Flow type, `circuit` (`canvas/edges/`, spec
   docs/superpowers/specs/2026-09-11-edge-routing-design.md). The look is a table lookup on the
