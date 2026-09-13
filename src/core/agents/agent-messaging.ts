@@ -38,6 +38,7 @@ import {
 import { noteNewTurn, noteSent, reserveFlow } from './agent-message-flow'
 import { recordDelivery } from './agent-message-trace'
 import { resolveDeliveryScope, scopeRefusal } from './agent-message-scope'
+import type { PersistTraceFields } from '../../shared/persist-trace'
 import {
   DeliveryQueue,
   type DeliveryQueueDeps,
@@ -122,6 +123,14 @@ export interface AgentMessagingDeps {
    * injected. Absent ⇒ never hibernated, and only a `targetBusy` refusal queues.
    */
   isHibernated?(nodeId: string): boolean
+  /**
+   * Diagnostics only (the persist trace, shared/persist-trace.ts): told about every refusal, with
+   * the persisted canvas the scope was read from. Never consulted for a decision; a hook that
+   * throws is ignored. Absent ⇒ no trace.
+   */
+  trace?(ev: string, fields: PersistTraceFields): void
+  /** How long ago the store last read or wrote project `projectId`'s persisted canvas. */
+  canvasAgeMs?(projectId: string): number | undefined
 }
 
 /**
@@ -497,6 +506,25 @@ export async function runDelivery(
     const owner = projectId ? deps.paneOwnerProject(req.targetNodeId) : undefined
     if (!projectId || !owner || owner !== projectId) notPermitted = 'unproven-target-owner'
     else if (!deps.messagingEnabled(owner)) notPermitted = 'switch-off'
+  }
+  if (notPermitted && deps.trace) {
+    // Which persisted canvas the answer came from: the SOURCE's project, when any canvas lists it.
+    // A `cross-project` for a chat opened after the last save reads as `canvas: null` here.
+    const read = projects.find((p) => p.nodes.some((n) => n.id === req.sourceNodeId))
+    try {
+      deps.trace('gate-refuse', {
+        verb: req.verb,
+        reason: notPermitted,
+        source: req.sourceNodeId,
+        target: req.targetNodeId,
+        canvas: read?.id ?? null,
+        canvasAgeMs: read ? (deps.canvasAgeMs?.(read.id) ?? null) : null,
+        canvases: projects.length,
+        targetFound: scope.kind === 'refused' ? scope.targetFound : true
+      })
+    } catch {
+      // Diagnostics never change an answer.
+    }
   }
 
   // Flow control (PR #208), taken as a RESERVATION rather than a pure read: `checkFlowLimits`
