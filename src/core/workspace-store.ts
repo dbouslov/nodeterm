@@ -29,6 +29,7 @@ import { hoistLegacyNodeExec, type LocalNodeExecMap } from '../shared/node-exec'
 import { collisionSeed, derivedProjectId, freshProjectId } from '../shared/project-id'
 import { appendProjectNode, removeProjectNode, type RemoteNodeInput } from './project-node-append'
 import { ensureProjectBoard, setProjectCardColumn } from './project-kanban-write'
+import type { PersistTraceFields } from '../shared/persist-trace'
 
 /** Checked remote read: `absent` (no file — safe to push our cache) is NOT `error` (connection
  *  down / ssh failure — a failed read is never evidence of absence, so nothing may be pushed). */
@@ -117,13 +118,39 @@ async function sweepStaleTmp(target: string): Promise<void> {
  * renderer contract is unchanged: load() returns / save() takes an assembled
  * v2-shaped Workspace.
  */
+/**
+ * `lastWritten`, remembering WHEN each entry was set — the age the persist trace reports for the
+ * canvas a gate read (`persistedAgeMs`). Otherwise exactly the plain map it replaces.
+ */
+class StampedMap extends Map<string, string> {
+  readonly at = new Map<string, number>()
+  override set(key: string, value: string): this {
+    this.at.set(key, Date.now())
+    return super.set(key, value)
+  }
+  override delete(key: string): boolean {
+    this.at.delete(key)
+    return super.delete(key)
+  }
+  override clear(): void {
+    this.at.clear()
+    super.clear()
+  }
+}
+
+/** A write failure's errno code for the persist trace (`EACCES`, `ENOSPC`, …), else a fixed word. */
+function errorCode(e: unknown): string {
+  const code = (e as NodeJS.ErrnoException | null)?.code
+  return typeof code === 'string' && code ? code : 'error'
+}
+
 export class WorkspaceStore {
   /** file path -> exact content of the file as we last WROTE or READ it (skip-unchanged + watcher
    *  self-write suppression). Always the RAW bytes, never a re-serialization: a project.json whose
    *  on-disk formatting differs from ours (a teammate's editor, a git checkout) would otherwise
    *  never match isSelfWrite, so every fs event on it read as an external change forever — endless
    *  spurious reloads and conflict bars (field bug 2026-08-10). */
-  private lastWritten = new Map<string, string>()
+  private lastWritten = new StampedMap()
   /** project id -> rev of the last written/loaded file. */
   private revs = new Map<string, number>()
   /** Entries whose one-time exec migration could NOT run (their project file was unreadable at load).
@@ -191,6 +218,33 @@ export class WorkspaceStore {
   private index: WorkspaceIndexV3 | null = null
   /** Optional hook fired after every load()/save() — the watcher re-syncs its watch set (Task 5). */
   onPersist?: () => void
+  /**
+   * Diagnostics only (the persist trace, shared/persist-trace.ts): one call per save decision —
+   * received, which project files were written or skipped as unchanged, any write error. Never
+   * consulted, and a hook that throws is ignored, so a save does exactly what it did without it.
+   */
+  onTrace?: (ev: string, fields: PersistTraceFields) => void
+
+  private trace(ev: string, fields: PersistTraceFields): void {
+    try {
+      this.onTrace?.(ev, fields)
+    } catch {
+      // Diagnostics never change a save.
+    }
+  }
+
+  /**
+   * How long ago this store last wrote or read project `projectId`'s persisted canvas — the copy
+   * `persistedCanvases` answers with. `undefined` for an unknown id or a canvas that lives only in
+   * the index (no file to stamp).
+   */
+  persistedAgeMs(projectId: string, now = Date.now()): number | undefined {
+    const e = this.index?.entries.find((x) => x.id === projectId || x.project?.id === projectId)
+    if (!e) return undefined
+    const file = e.cwd ? projectFilePath(e.cwd) : e.dataFile ? inlineFilePath(e.id) : undefined
+    const at = file ? this.lastWritten.at.get(file) : undefined
+    return at === undefined ? undefined : now - at
+  }
 
   constructor(private remoteIO?: RemoteWorkspaceIO) {}
 
@@ -924,6 +978,15 @@ export class WorkspaceStore {
   }
 
   private async saveNow(workspace: Workspace): Promise<void> {
+    this.trace('save-received', {
+      active: workspace.activeProjectId || null,
+      projects: workspace.projects.length
+    })
+    const startedAt = Date.now()
+    const wrote: string[] = []
+    const unchanged: string[] = []
+    // Deliberately not written this save, as `id:reason`.
+    const held: string[] = []
     if (!workspace.projects.length && !this.index) {
       // A store that never read the index may not replace a populated one with "no projects":
       // that is the boot-save wipe — load() failed transiently, the renderer hydrated zero
@@ -932,7 +995,10 @@ export class WorkspaceStore {
       try {
         const disk = JSON.parse(await fs.readFile(this.indexPath, 'utf-8')) as
           { entries?: unknown[]; projects?: unknown[] }
-        if ((disk.entries?.length ?? 0) > 0 || (disk.projects?.length ?? 0) > 0) return
+        if ((disk.entries?.length ?? 0) > 0 || (disk.projects?.length ?? 0) > 0) {
+          this.trace('save-refused', { reason: 'empty-over-populated-index' })
+          return
+        }
       } catch { /* absent or unparsable (loadInner sidelines corruption) — an empty write is fresh */ }
     }
     const savedAt = new Date().toISOString()
@@ -964,6 +1030,7 @@ export class WorkspaceStore {
     }
 
     const unavailableIds = new Set(workspace.projects.filter((p) => p.unavailable).map((p) => p.id))
+    for (const id of unavailableIds) held.push(`${id}:unavailable`)
     if (unavailableIds.size) {
       for (const e of index.entries) {
         if (!unavailableIds.has(e.id)) continue
@@ -1011,12 +1078,16 @@ export class WorkspaceStore {
       const file = projectFilePath(cwd)
       const prev = this.lastWritten.get(file)
       const prevParsed = prev ? (JSON.parse(prev) as ProjectFileV1) : null
-      if (prevParsed && sameProjectContent(prevParsed, candidate)) continue
+      if (prevParsed && sameProjectContent(prevParsed, candidate)) {
+        unchanged.push(projectId)
+        continue
+      }
       if (!prevParsed && candidate.nodes.length === 0 && !(await this.emptyOrAbsentOnDisk(file))) {
         // The local twin of the SSH "never blind-write a file we have not read" rule: an empty
         // canvas from a store that never read this file (setProjectFolder, migration, a hydrate
         // race) must not overwrite the populated — or corrupt-but-recoverable — only copy. The
         // disk stays authoritative; the next load returns its truth.
+        held.push(`${projectId}:empty-over-unread`)
         continue
       }
       const next: ProjectFileV1 = { ...candidate, rev: (this.revs.get(projectId) ?? 0) + 1 }
@@ -1026,7 +1097,12 @@ export class WorkspaceStore {
         await writeAtomic(file, content)
         this.lastWritten.set(file, content)
         this.revs.set(projectId, next.rev)
-      } catch { /* folder gone (unmounted disk): the entry simply stays stale → unavailable next load */ }
+        wrote.push(projectId)
+      } catch (e) {
+        // Folder gone (unmounted disk): the entry simply stays stale → unavailable next load. Still
+        // swallowed — one missing folder must not fail the whole save — but no longer silent.
+        this.trace('file-error', { project: projectId, code: errorCode(e) })
+      }
     }
 
     // Inline (cwd-less) canvases: their own file under userData, written before the index and with
@@ -1034,7 +1110,12 @@ export class WorkspaceStore {
     // candidate overwrite a populated file this store has not read — plus the one rule only this
     // leg needs (see `writeDataFile`): a second app instance shares this userData, so a file whose
     // rev has moved ahead of ours belongs to that instance and is not overwritten.
-    for (const [projectId, candidate] of dataFiles) await this.writeDataFile(projectId, candidate)
+    for (const [projectId, candidate] of dataFiles) {
+      const outcome = await this.writeDataFile(projectId, candidate)
+      if (outcome === 'wrote') wrote.push(projectId)
+      else if (outcome === 'unchanged') unchanged.push(projectId)
+      else if (outcome !== 'error') held.push(`${projectId}:${outcome}`)
+    }
 
     // ssh caches: bump rev on change so a later remote write can win; mirror write in Task 8.
     for (const e of index.entries) {
@@ -1088,7 +1169,12 @@ export class WorkspaceStore {
     }
 
     // Compact index, atomic — same reasoning as the old single-file store.
-    await writeAtomic(this.indexPath, JSON.stringify(index))
+    try {
+      await writeAtomic(this.indexPath, JSON.stringify(index))
+    } catch (e) {
+      this.trace('save-error', { code: errorCode(e) })
+      throw e
+    }
     await this.sweepRemovedDataFiles(previousIndex, index)
     this.index = index
 
@@ -1098,6 +1184,13 @@ export class WorkspaceStore {
       platform().broadcast(IPC.workspaceMigrated, 'exec')
     }
 
+    this.trace('save', {
+      active: workspace.activeProjectId || null,
+      wrote,
+      unchanged,
+      held,
+      ms: Date.now() - startedAt
+    })
     this.onPersist?.()
   }
 
@@ -1120,8 +1213,11 @@ export class WorkspaceStore {
    * canvas in `project` (the dual-write), so the content is readable either way round — which is
    * also what makes a half-done migration consistent in both directions.
    */
-  private async writeDataFile(projectId: string, candidate: ProjectFileV1): Promise<void> {
-    if (!isInlineProjectFileId(projectId)) return
+  private async writeDataFile(
+    projectId: string,
+    candidate: ProjectFileV1
+  ): Promise<'wrote' | 'unchanged' | 'not-a-file-id' | 'rev-ahead' | 'empty-over-unread' | 'error'> {
+    if (!isInlineProjectFileId(projectId)) return 'not-a-file-id'
     const file = inlineFilePath(projectId)
     const prev = this.lastWritten.get(file)
     let prevParsed: ProjectFileV1 | null = null
@@ -1130,7 +1226,7 @@ export class WorkspaceStore {
         prevParsed = JSON.parse(prev) as ProjectFileV1
       } catch { /* our own cache, but never trusted blindly */ }
     }
-    if (prevParsed && sameProjectContent(prevParsed, candidate)) return
+    if (prevParsed && sameProjectContent(prevParsed, candidate)) return 'unchanged'
     const ourRev = this.revs.get(projectId) ?? 0
     // Read the file only when we are actually about to write it.
     const onDisk = await this.readDataFile(projectId, false)
@@ -1139,9 +1235,11 @@ export class WorkspaceStore {
       // against reality instead of re-deciding this every time.
       this.lastWritten.set(file, onDisk.raw)
       this.revs.set(projectId, onDisk.file.rev)
-      return
+      return 'rev-ahead'
     }
-    if (!prevParsed && candidate.nodes.length === 0 && (onDisk?.file.nodes.length ?? 0) > 0) return
+    if (!prevParsed && candidate.nodes.length === 0 && (onDisk?.file.nodes.length ?? 0) > 0) {
+      return 'empty-over-unread'
+    }
     const next: ProjectFileV1 = { ...candidate, rev: ourRev + 1 }
     const content = serializeProjectFile(next)
     try {
@@ -1149,7 +1247,12 @@ export class WorkspaceStore {
       await writeAtomic(file, content)
       this.lastWritten.set(file, content)
       this.revs.set(projectId, next.rev)
-    } catch { /* the index's `project` copy still holds this canvas; the next save retries */ }
+      return 'wrote'
+    } catch (e) {
+      // The index's `project` copy still holds this canvas; the next save retries.
+      this.trace('file-error', { project: projectId, code: errorCode(e) })
+      return 'error'
+    }
   }
 
   /**
