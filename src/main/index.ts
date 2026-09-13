@@ -3284,7 +3284,8 @@ app.whenReady().then(async () => {
   corePlatform.on(IPC.ptyDestroy, (nodeId: string) => clearProjectGrants(nodeId))
   corePlatform.on(IPC.ptyRecycle, (nodeId: string) => clearProjectGrants(nodeId))
   // Which sessions each caller's open call created this run — the only proof `retire` accepts.
-  // Cleared by a real close alone: a park and its re-mount leave it (core/retire-verb.ts).
+  // Cleared by a real close or a restart, like the grants above; a park and its re-mount leave it
+  // (core/retire-verb.ts).
   const openerLedger = new OpenerLedger()
   forgetOnClose(corePlatform, openerLedger)
   // App quit: detach every debugger lease. A second `before-quit` listener alongside the module-

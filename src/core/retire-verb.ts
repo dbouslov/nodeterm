@@ -18,7 +18,8 @@ const OPEN_VERBS: ReadonlySet<string> = new Set(['open-terminal', 'open-claude',
  * a restart and retire fails closed until the caller opens a fresh successor.
  *
  * Keyed by node id, NOT by pane: an off-screen park (the PTY client is killed, tmux lives) and its
- * re-mount (an attach) never touch it. Only a real close ends a proof — see `forgetOnClose`.
+ * re-mount (an attach) never touch it. Only a real close or a restart ends a proof — see
+ * `forgetOnClose`.
  */
 export class OpenerLedger {
   /** created node id → the node whose open call created it */
@@ -106,8 +107,10 @@ export async function withOpenerLedger(
   return reply
 }
 
-/** End proofs on a REAL close only. Not `ptyKill` (a park), not `ptyCreate` (a re-mount), not
- *  `ptyRecycle` (a restart keeps the node): each of those leaves the node on the canvas. */
+/** End proofs on a real close (`ptyDestroy`) and on a restart (`ptyRecycle`): a recycle mints a
+ *  fresh identity, so the proof fails closed there, as project grants do. Not `ptyKill` (a park)
+ *  and not `ptyCreate` (a re-mount): both leave the same session on the canvas. */
 export function forgetOnClose(platform: Pick<CorePlatform, 'on'>, ledger: OpenerLedger): void {
   platform.on(IPC.ptyDestroy, (nodeId: string) => ledger.forget(nodeId))
+  platform.on(IPC.ptyRecycle, (nodeId: string) => ledger.forget(nodeId))
 }

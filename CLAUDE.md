@@ -1965,8 +1965,9 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   project.json or the opener rope; empty after a restart). Gate and record are ONE call,
   `withOpenerLedger`, wrapped around main's renderer round-trip, so the gate cannot be dropped
   without the forward. The ledger is keyed by node id, not pane: a park (`ptyKill`) and its re-mount
-  (`ptyCreate`) never touch it; only `ptyDestroy` ends a proof. No confirm dialog (the caller
-  closes only itself), and the renderer replies BEFORE `deleteNodes([caller])`. Touched frames
+  (`ptyCreate`) never touch it; only `ptyDestroy` or `ptyRecycle` ends a proof (a restart mints a
+  fresh identity, as for project grants). No confirm dialog (the caller closes only itself), and
+  the renderer replies BEFORE `deleteNodes([caller])`. Touched frames
   refit as `move` refits them, except a pinned frame, which keeps its position and children and
   only shrinks back to hug them (`shrinkPinnedGroupToChildren`). It travels like `move` (it needs
   measured sizes). Server Edition: named refusal (not in `SERVER_V1_VERBS`).

@@ -88,7 +88,7 @@ describe('what counts as proof: a verified open-* call that created the node', (
   })
 })
 
-describe('the proof survives a park cycle and ends only with a real close', () => {
+describe('the proof survives a park cycle and ends with a real close or a restart', () => {
   beforeEach(() => resetPaneOwnershipForTests())
 
   it('the successor parked and re-mounted keeps its proof — retire still succeeds', () => {
@@ -96,9 +96,9 @@ describe('the proof survives a park cycle and ends only with a real close', () =
     const ledger = openedBy('caller', ['succ'])
     forgetOnClose(platform, ledger)
     // An off-screen park kills the PTY client (IPC.ptyKill — the tmux session survives, attached=0)
-    // and the re-mount creates one again (IPC.ptyCreate, an attach). A restart recycles
-    // (IPC.ptyRecycle). The ledger listens to none of them: only a real close ends the proof.
-    expect(Object.keys(platform.listeners)).toEqual([IPC.ptyDestroy])
+    // and the re-mount creates one again (IPC.ptyCreate, an attach). The ledger listens to neither:
+    // only a real close (IPC.ptyDestroy) or a restart (IPC.ptyRecycle, a fresh identity) ends a proof.
+    expect(Object.keys(platform.listeners).sort()).toEqual([IPC.ptyDestroy, IPC.ptyRecycle].sort())
     expect(platform.senderListeners).toEqual({})
     expect(platform.handlers).toEqual({})
     // Nor may retire consult the pane registry, which a session end clears and an attach never
@@ -124,6 +124,16 @@ describe('the proof survives a park cycle and ends only with a real close', () =
     forgetOnClose(platform, ledger)
     platform.listeners[IPC.ptyDestroy]('caller')
     expect(ledger.opened('caller', 'succ')).toBe(false)
+  })
+
+  it("a restart (recycle) of the caller drops its proofs: a recycled caller's retire is refused", () => {
+    // A recycle mints a fresh identity, so main clears project grants on it; the proof fails closed
+    // the same way.
+    const platform = fakePlatform()
+    const ledger = openedBy('caller', ['succ'])
+    forgetOnClose(platform, ledger)
+    platform.listeners[IPC.ptyRecycle]?.('caller')
+    expect(retire(ledger, 'succ')).toEqual(expect.stringMatching(/not a session you opened/))
   })
 })
 
