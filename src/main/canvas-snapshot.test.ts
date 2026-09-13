@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -172,16 +172,23 @@ describe('captureCanvasSnapshot', () => {
     expect(pngSize(await fsp.readFile(written))).toEqual({ width: 1600, height: 1000 })
   })
 
-  it('writes an --out ticket where it points and prunes nothing', async () => {
+  it('writes an --out ticket where it points and prunes nothing — not our folder, not its folder', async () => {
+    // One PNG over the cap in each folder, so a prune of either would delete something.
+    const seed = async (dir: string) => {
+      await fsp.mkdir(dir, { recursive: true })
+      const names = Array.from({ length: SNAPSHOT_KEEP + 1 }, (_, i) => `seed-${String(i).padStart(2, '0')}.png`)
+      for (const name of names) await fsp.writeFile(path.join(dir, name), 'x')
+      return names
+    }
+    const ours = path.join(userData, 'snapshots')
+    const inOurs = await seed(ours)
+    const inProject = await seed(project)
     const out = path.join(project, 'shot.png')
-    const remove = vi.fn(async () => {})
-    const r = await captureCanvasSnapshot({ projectId: 'p1', out }, { x: 0, y: 0, width: 10, height: 10 }, target(), {
-      ...io,
-      remove
-    })
+    const r = await captureCanvasSnapshot({ projectId: 'p1', out }, { x: 0, y: 0, width: 10, height: 10 }, target(), io)
     expect(r).toEqual({ ok: true, path: out, width: 1600, height: 1000 })
     expect(pngSize(await fsp.readFile(out))).toEqual({ width: 1600, height: 1000 })
-    expect(remove).not.toHaveBeenCalled()
+    expect((await fsp.readdir(ours)).sort()).toEqual(inOurs)
+    expect((await fsp.readdir(project)).sort()).toEqual([...inProject, 'shot.png'])
   })
 
   it('captures in window pixels: the CSS rect is scaled by the page zoom and rounded', async () => {
