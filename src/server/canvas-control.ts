@@ -38,10 +38,13 @@ import {
   type ServerEditionControlActions
 } from './control-unsupported'
 import { HeadlessNodeFactory } from './headless-node-factory'
+import type { PersistTrace } from '../core/persist-trace'
 import { sendSettledEnvelope } from './settled-envelope'
 
 export interface ServerCanvasControlDeps {
   workspaceStore: WorkspaceStore
+  /** Diagnostics only: messaging-gate refusals go to the persist trace (core/persist-trace.ts). */
+  persistTrace?: PersistTrace
   ptyManager: PtyManager
   settings(): Settings
   boardLog: BoardLogHandlers
@@ -194,6 +197,8 @@ export async function initServerCanvasControl(
     hasLiveSession: (nodeId) => deps.ptyManager.hasLiveSession(nodeId),
     mirrorEntry,
     projects: () => deps.workspaceStore.persistedCanvases(),
+    trace: (ev, fields) => deps.persistTrace?.record({ side: 'main', ev, ...fields }),
+    canvasAgeMs: (projectId) => deps.workspaceStore.persistedAgeMs(projectId),
     isRemoteNode: () => false,
     messagingEnabled: messagingEnabledVia((projectId) =>
       deps.workspaceStore.capabilityProjectFor(projectId)),

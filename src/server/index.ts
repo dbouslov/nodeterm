@@ -50,6 +50,7 @@ import os from 'os'
 import { hookServer } from '../core/agents/hook-server'
 import { serverEditionControlHandler } from './control-unsupported'
 import { initServerCanvasControl, type ServerCanvasControl } from './canvas-control'
+import { createPersistTrace, PERSIST_TRACE_FILE } from '../core/persist-trace'
 import { refreshNodeTokens } from '../core/agents/node-token-service'
 import { armServerNodeIdentity } from './node-identity-arm'
 import { wireServerCodexSharedIdentity } from './codex-shared-identity'
@@ -203,6 +204,11 @@ export async function startServer(
   const settingsStore = new SettingsStore()
   const ptyManager = new PtyManager()
   const workspaceStore = new WorkspaceStore()
+  // The persist trace, as on the desktop (core/persist-trace.ts): this store's save decisions and
+  // every messaging-gate refusal, bounded, under the data dir. A browser tab's own `[persist]` lines
+  // stay in that tab's console — there is no console listener on this shell.
+  const persistTrace = createPersistTrace({ file: path.join(config.dataDir, PERSIST_TRACE_FILE) })
+  workspaceStore.onTrace = (ev, fields) => persistTrace.record({ side: 'main', ev, ...fields })
 
   settingsStore.init()
   // The linked-account resolver's one source of truth on this shell. Registered as
@@ -639,6 +645,7 @@ export async function startServer(
   if (config.canvasControl === true) {
     try {
       canvasControl = await initServerCanvasControl({
+        persistTrace,
         workspaceStore,
         ptyManager,
         settings: () => settingsStore.get(),
