@@ -107,6 +107,21 @@ describe('planRetire — the successor takes the caller\'s place', () => {
     expect([g2.position, g2.width, g2.height]).toEqual([{ x: 500, y: 500 }, 100, 100])
   })
 
+  it('a pinned frame the successor enters from outside keeps its exact size and position', () => {
+    // The reviewer's probe: the frame never grew for the successor, so it has no room to give back —
+    // a roomy frame sized by hand stays as the user sized it.
+    const live = [
+      frame('p', 100, 100, 1000, 800, true),
+      term('caller', 40, 60, 640, 420, 'p'),
+      term('succ', 2000, 100, 300, 200)
+    ]
+    const { nodes } = applied(plan(live))
+    const p = byId(nodes, 'p')
+    expect([p.position, p.width, p.height]).toEqual([{ x: 100, y: 100 }, 1000, 800])
+    expect(p.style).toMatchObject({ width: 1000, height: 800 })
+    expect(byId(nodes, 'succ').parentId).toBe('p')
+  })
+
   it('a pinned frame that grew for the successor ends at its pre-successor size and position', () => {
     // The orchestrator flow: the caller opens its successor INSIDE its own pinned frame
     // (`--group`), the frame grows in place to take it, then the caller retires into it.

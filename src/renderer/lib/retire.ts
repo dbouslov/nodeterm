@@ -77,14 +77,14 @@ export function planRetire(input: RetireInput): RetirePlan {
       : n
   )
   // Refit every frame the swap touched, as `move` does. A pinned frame is the user's fixed layout:
-  // it keeps its position and its children where they are, and only gives back the room it took for
-  // the successor — it never grows and never moves.
+  // it keeps its position and its children where they are, and never grows or moves. One the
+  // successor entered from outside never grew for it, so it keeps its exact size; only the one the
+  // successor was already in gives back the room its old slot took.
   for (const id of new Set([successor.parentId, caller.parentId])) {
     const frame = id ? nodes.find((n) => n.id === id) : undefined
     if (!frame || !nodes.some((n) => n.parentId === frame.id)) continue
-    nodes = isPinned(frame, nodes)
-      ? shrinkPinnedGroupToChildren(nodes, frame.id, grid)
-      : fitGroupToChildren(nodes, frame.id, grid)
+    if (!isPinned(frame, nodes)) nodes = fitGroupToChildren(nodes, frame.id, grid)
+    else if (frame.id === successor.parentId) nodes = shrinkPinnedGroupToChildren(nodes, frame.id, grid)
   }
   return { nodes, kanban: input.kanban && inheritColumn(input.kanban, callerId, successorId) }
 }
