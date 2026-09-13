@@ -2097,14 +2097,15 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   --nodes <id,id> [--group <id>]` reparents nodes OR whole frame subtrees INTO a frame (or
   `top`/`none`/omit → out to top level) via `reparentNode` — the ONE way to move a node between
   frames, which `group` won't do; a cycle (a frame into itself or its own descendant) is refused.
+  `arrange` places the ids in exactly the `--nodes` order (`arrangeNodes(…, { order: 'given' })`:
+  row left to right, column top to bottom, grid row by row); every internal caller keeps the
+  default node-ARRAY order.
   `arrange`/`align` now run in ONE coordinate space: all top-level, OR all children of one frame
   (`commonParentId` decides; a mixed set is refused, not silently subset-arranged — the old
   behavior). When the ids are a frame's children, the frame is shrunk to hug the tidied layout
   (`fitGroupToChildren`) — the fix for "grouping keeps scattered positions so the frame is too
-  wide". `move` also re-fits the source + destination frames. `arrange` places the ids in exactly
-  the `--nodes` order (`arrangeNodes(…, { order: 'given' })`: row left to right, column top to
-  bottom, grid row by row); every internal caller keeps the default node-ARRAY order. All pure +
-  tested in `state/workspace.test.ts` + `workspace.layout.test.ts`.
+  wide". `move` also re-fits the source + destination frames. All pure + tested in
+  `state/workspace.test.ts` + `workspace.layout.test.ts`.
   **Fan-in (`link`, 2026-07):** a spawned fan-out was previously write-only — nodes an agent
   opened were joined to it by a **rope** (`project.ropes`, explicitly *"Display-only — never
   context links"*), so an orchestrator could not read back what its own team produced and the

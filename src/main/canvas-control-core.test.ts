@@ -839,6 +839,18 @@ describe('restructure verb', () => {
   })
 })
 
+describe('arrange verb order', () => {
+  it('both agent-facing bodies say row, column and grid follow the --nodes order exactly', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toMatch(/in exactly the order of `--nodes`/)
+      expect(body).toMatch(/`row` left to right, `column` top to bottom, `grid` row by row/)
+    }
+  })
+})
+
 describe('pin verb', () => {
   it('requires --node and --set on|off', () => {
     expect(parseControlRequest('pin', { node: 'n1', set: 'on' })).toEqual({
@@ -861,18 +873,6 @@ describe('pin verb', () => {
     ]) {
       expect(body).toContain('`pin --node <id> --set on|off`')
       expect(body).toMatch(/never move/i)
-    }
-  })
-})
-
-describe('arrange verb order', () => {
-  it('both agent-facing bodies say row, column and grid follow the --nodes order exactly', () => {
-    for (const body of [
-      buildCanvasSkillBody('/tmp/nodeterm.sh'),
-      buildCanvasControlInstructions('/tmp/nodeterm.sh')
-    ]) {
-      expect(body).toMatch(/in exactly the order of `--nodes`/)
-      expect(body).toMatch(/`row` left to right, `column` top to bottom, `grid` row by row/)
     }
   })
 })
