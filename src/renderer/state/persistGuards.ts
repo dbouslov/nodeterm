@@ -19,8 +19,24 @@
  * never written under the wrong id.
  */
 export function canCommitCanvas(nodesProjectId: string | null, activeProjectId: string): boolean {
-  if (!activeProjectId) return false
-  return nodesProjectId === activeProjectId
+  return commitSkipReason(nodesProjectId, activeProjectId) === null
+}
+
+export type CommitSkipReason = 'no-active-project' | 'canvas-not-loaded' | 'canvas-not-active-project'
+
+/**
+ * Why `canCommitCanvas` refuses, or `null` when it allows — the word the persist trace prints
+ * (lib/persistTrace.ts). Each reason names a different broken piece of state: no project is open,
+ * the load effect never installed a canvas (or bailed and cleared the epoch tag), or React Flow
+ * holds another project's nodes.
+ */
+export function commitSkipReason(
+  nodesProjectId: string | null,
+  activeProjectId: string
+): CommitSkipReason | null {
+  if (!activeProjectId) return 'no-active-project'
+  if (nodesProjectId === null) return 'canvas-not-loaded'
+  return nodesProjectId === activeProjectId ? null : 'canvas-not-active-project'
 }
 
 /**
