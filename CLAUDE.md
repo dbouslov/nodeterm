@@ -1912,7 +1912,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   marker-block route instead — see docs/grok-agent.md.
   **Server creator ownership (2026-08 incident hardening):** enabled Server control accepts only
   verified node identity. `HeadlessNodeFactory` records which source node opened each new node in a
-  process-local ledger; link/group/rename/color/sticky-update, message delivery, and close validate
+  process-local ledger; link/group/rename/color/minimize/sticky-update, message delivery, and close validate
   the whole target set as current-run creations before writing or killing anything. Queued messages
   revalidate creator ownership before flush. The ledger is intentionally empty after restart —
   project JSON, titles, hook history and tmux names are not creator proof — so
@@ -1930,6 +1930,18 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   `list` rows print `· role:`. Pure helpers in `shared/node-annotation.ts`, validated at both
   serializer seams like `icon`. Server Edition: `HeadlessNodeFactory.annotate`, creator-owned like
   `rename`.
+  **`minimize --node <id,id> [--set on|off]`** (2026-09-12) shrinks terminal / sticky / files nodes
+  to their title bar (`--set off` restores). ONE implementation, `setCollapsed(nodes, ids, on)` in
+  `state/workspace.ts`: the header chevrons, the node menu's Minimize / Restore row (hideable id
+  still `collapse`; group frames left out) and the verb all call it. A node already in the asked
+  state comes back untouched (restoring it would re-apply a stale `expandedHeight` over a later
+  resize), and it resizes only the listed nodes, never frames or neighbours. Requests resolve in
+  `shared/minimize.ts`: an unknown id, a group frame or another kind refuses the WHOLE list, naming
+  it; no-ops are said in the reply. No dialog (non-destructive, like `rename`); not store-answered,
+  so an off-screen caller travels as for `rename`/`pin`. `list` rows print `(minimized)` — both
+  `list` answers print through `listRowText`. Server Edition: `HeadlessNodeFactory.minimize`,
+  creator-owned, flips the persisted `collapsed` only (`size.height` already is the height to
+  restore).
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim
@@ -3183,7 +3195,8 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   only be a visual no-op that still writes `project.json`) + restart-idle-agents (the bulk in-place agent restart, mirrored in ⌘K; both
   hidden when the canvas holds no restartable agent node, where they could only report "0
   restarted");
-  node/selection right-click = group, color, duplicate, align-to-grid, collapse,
+  node/selection right-click = group, color, duplicate, align-to-grid, minimize / restore
+  (`setCollapsed`; group frames left out),
   markdown-view (terminals), refresh-terminal (terminals — bumps `respawnNonce`: fresh PTY attach
   to the SAME tmux session; manual recovery for a stuck/unpainted terminal, and the same action
   sits in the node header as `term-node__refresh` since a dead view is a bad place to hunt for a

@@ -107,6 +107,12 @@ lane unaffected.
   white, take `SYSTEM_NODE_COLOR_SWATCHES` instead, with the contrast reason in a comment. Deep
   version, including the measured numbers: CLAUDE.md § Node colors.
 
+- **Minimizing a node? Call `setCollapsed` (`state/workspace.ts`), never a local height rule.** The
+  header chevrons, the node menu's Minimize / Restore row and the `minimize` verb all go through it:
+  it keeps the height to come back to in `data.expandedHeight`, and leaves a node already in the
+  asked state untouched. It resizes only the nodes it is given, so anything that must follow them
+  (a frame, a neighbour) hooks the helper instead of copying it.
+
 - **Placing a new node? Call `@shared/placement`, never a local `{x, y}` rule.** Every path that
   creates a node (hand, dock, agent verb, cold open, headless server) goes through the one engine
   in `src/shared/placement/` — the eight independent rules it replaced are how nodes came to spawn

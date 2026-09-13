@@ -36,6 +36,8 @@ export interface StoredNode {
   title?: string
   /** Raw from the project file — re-validated before its role is printed. */
   annotation?: unknown
+  /** Raw from the project file. Read truthy, as `nodeStatesToFlow` renders it. */
+  collapsed?: unknown
 }
 
 /**
@@ -316,9 +318,36 @@ export function answerBrowserResolve(
  *  would print a forged row into the text reply. */
 export function storedNodeListing(
   nodes: readonly StoredNode[]
-): { id: string; kind: string; title: string; role?: string }[] {
+): { id: string; kind: string; title: string; role?: string; minimized?: boolean }[] {
   return nodes.map((n) => {
     const role = normalizeNodeAnnotation(n.annotation)?.role
-    return { id: n.id, kind: n.kind ?? 'terminal', title: n.title ?? '', ...(role ? { role } : {}) }
+    return {
+      id: n.id,
+      kind: n.kind ?? 'terminal',
+      title: n.title ?? '',
+      ...(n.collapsed ? { minimized: true } : {}),
+      ...(role ? { role } : {})
+    }
   })
+}
+
+/** One `list` row, from the live canvas or from a stored project. */
+export interface ListRow {
+  id: string
+  kind?: string
+  title: string
+  role?: string
+  minimized?: boolean
+  lastTurnErrored?: boolean
+}
+
+/** A `list` row as text: the id, kind and title, then each marker the row carries. The live
+ *  canvas and the stored-project answer print through here, so the two cannot drift. */
+export function listRowText(row: ListRow): string {
+  return (
+    `${row.id} [${row.kind}] ${row.title}` +
+    (row.minimized ? ' (minimized)' : '') +
+    (row.role ? ` · role: ${row.role}` : '') +
+    (row.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
+  )
 }

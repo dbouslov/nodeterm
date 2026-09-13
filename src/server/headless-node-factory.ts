@@ -12,6 +12,7 @@ import {
 } from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
 import { applyAnnotation, parseAnnotateArgs } from '../shared/node-annotation'
+import { minimizeIds, minimizeReply, planMinimize } from '../shared/minimize'
 import { containerJoinedBy, framesJoinedBy, placeOpened, type Box } from '../shared/placement'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
@@ -1115,6 +1116,63 @@ export class HeadlessNodeFactory {
         ok: true,
         message: `colored ${changed.length} node(s) ${color}${note}`,
         result: { colored: changed.map((node) => node.id), skipped, color }
+      }
+    })
+  }
+
+  /** Shrink nodes to their title bar or restore them, modeled on `annotate`: the whole list is
+   *  resolved (@shared/minimize) and ownership-checked before any write. The persisted
+   *  `size.height` already IS the height to come back to, so only `collapsed` flips. */
+  minimize(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      const flagError = unsupportedFlags(args, new Set(['node', 'set']))
+      if (flagError) return { ok: false, error: `minimize: ${flagError}` }
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+
+      const ids = minimizeIds(args.node)
+      for (const id of ids) {
+        const projects = nodeProjects(workspace, id)
+        if (projects.length && (projects.length !== 1 || projects[0].id !== source.project.id)) {
+          return {
+            ok: false,
+            error: `minimize-project-refused: ${id} is not exclusively in the caller's project`
+          }
+        }
+      }
+      const on = args.set !== 'off'
+      const plan = planMinimize(
+        ids,
+        on,
+        source.project.nodes.map((node) => ({
+          id: node.id,
+          kind: node.kind ?? 'terminal',
+          collapsed: !!node.collapsed
+        }))
+      )
+      if (!plan.ok) return { ok: false, error: plan.error }
+      const unowned = this.unownedMutation(sourceNodeId, ids)
+      if (unowned) return this.ownershipRefusal('minimize', sourceNodeId, unowned)
+
+      if (plan.change.length) {
+        const change = new Set(plan.change)
+        const changed = source.project.nodes
+          .filter((node) => change.has(node.id))
+          .map((node) => ({ ...node, collapsed: on }))
+        const byId = new Map(changed.map((node) => [node.id, node]))
+        source.project.nodes = source.project.nodes.map((node) => byId.get(node.id) ?? node)
+        await this.deps.workspaceStore.save(workspace)
+        // Layout only: nothing reaches a pane.
+        this.publish(source.project, changed)
+      }
+      return {
+        ok: true,
+        message: minimizeReply(on, plan.change, plan.already),
+        result: { minimized: on, changed: plan.change, unchanged: plan.already }
       }
     })
   }

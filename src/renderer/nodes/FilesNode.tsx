@@ -29,7 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { NodeResizer, useReactFlow, type NodeProps } from '@xyflow/react'
 import type { DirEntry } from '@shared/types'
 import { NODE_MIN_SIZES } from '../lib/nodeSizing'
-import { COLLAPSED_HEIGHT, type CanvasNode } from '../state/workspace'
+import { setCollapsed, type CanvasNode } from '../state/workspace'
 import { NodeColorSwatches } from '../components/NodeColorSwatches'
 import {
   breadcrumbs,
@@ -318,21 +318,7 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
   )
 
   const toggleCollapse = () =>
-    setNodes((ns) =>
-      ns.map((n) => {
-        if (n.id !== id) return n
-        const next = !n.data.collapsed
-        const expandedHeight =
-          (n.data.expandedHeight as number) ?? n.measured?.height ?? (n.height as number) ?? 460
-        const height = next ? COLLAPSED_HEIGHT : expandedHeight
-        return {
-          ...n,
-          height,
-          style: { ...n.style, height },
-          data: { ...n.data, collapsed: next, expandedHeight }
-        }
-      })
-    )
+    setNodes((ns) => setCollapsed(ns, [id], !ns.find((n) => n.id === id)?.data.collapsed))
 
   const shown = useMemo(() => filterEntries(entries ?? [], query), [entries, query])
   const crumbs = useMemo(() => breadcrumbs(cwd), [cwd])

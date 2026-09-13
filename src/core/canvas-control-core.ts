@@ -127,6 +127,7 @@ export type ControlVerb =
   | 'rename'
   | 'color'
   | 'pin'
+  | 'minimize'
   | 'write'
   | 'close'
   | 'board'
@@ -169,6 +170,7 @@ const VERBS: ControlVerb[] = [
   'rename',
   'color',
   'pin',
+  'minimize',
   'write',
   'close',
   'board',
@@ -253,6 +255,10 @@ export function parseControlRequest(
   }
   if (v === 'pin' && !args.node) return { error: 'pin requires --node <id>' }
   if (v === 'pin' && args.set !== 'on' && args.set !== 'off') return { error: 'pin requires --set on|off' }
+  if (v === 'minimize' && !args.node) return { error: 'minimize requires --node <id,id>' }
+  if (v === 'minimize' && args.set !== undefined && args.set !== 'on' && args.set !== 'off') {
+    return { error: 'minimize --set must be on or off' }
+  }
   if (v === 'link' && !args.to) return { error: 'link requires --to <id,id>' }
   if (v === 'verify' && !args.node) return { error: 'verify requires --node <id>' }
   if (v === 'spawn-team' && !args.team) return { error: 'spawn-team requires --team <json>' }
@@ -471,6 +477,11 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  `align` and `--group` placement never move it or anything inside it (a pinned frame is a fixed',
     '  obstacle the rest is laid out around, and it grows in place to take a new child). The user',
     '  pins from the node menu; dragging by hand still works.',
+    '- `minimize --node <id,id> [--set on|off]` — shrink terminal, sticky and files nodes to their title',
+    '  bar (`--set off` restores the height each had). Use it on idle or finished stations so they stop',
+    '  taking space: nothing closes and the session keeps running. A group frame, an unknown id or any',
+    '  other kind refuses the whole list and names it. A node already in the asked state is left alone',
+    '  and the reply says so. No confirm dialog. `list` rows print `(minimized)`.',
     '- `write --node <id> --text "..."` / `close --node <id,id>` — type into / close nodes.',
     '  `close` takes a COMMA LIST and asks about the whole list in ONE dialog, so close a finished',
     '  wave in a single call rather than one call per node. Every id must exist on the canvas: an',
@@ -1004,6 +1015,13 @@ Verbs:
   \`align\` and \`--group\` placement never move it or anything inside it (a pinned frame is a
   fixed obstacle the rest is laid out around, and it grows in place to take a new child). The user
   pins from the node menu; dragging by hand still works.
+- \`minimize --node <id,id> [--set on|off]\` — shrink terminal, sticky and files nodes to their
+  title bar; \`--set off\` restores each to the height it had. As a lead, minimize a station once it
+  is idle or finished so it stops taking space: nothing closes, the session keeps running, and a
+  restore gives the node back as it was. A group frame, an unknown id or any other kind refuses the
+  WHOLE list and names it. A node already in the asked state is left alone, and the reply says
+  \`already minimized\` (or \`not minimized\`). No confirm dialog. \`list\` rows print \`(minimized)\`.
+  The user does the same from the node menu (Minimize / Restore) or the title-bar chevron.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id,id>\` — close one node or several. \`--node\` takes a COMMA LIST, and the whole
   list is confirmed in ONE dialog — so when a wave of stations is finished, close them in a single
@@ -1012,7 +1030,7 @@ Verbs:
   refuses the whole request and closes NOTHING, naming the ids it could not find. Desktop asks the
   user to confirm. Server Edition closes
   only nodes this caller opened during the current server run, without a dialog. Its other
-  node-mutating verbs (link/group/rename/color/sticky update/annotate) likewise accept only current-run
+  node-mutating verbs (link/group/rename/color/minimize/sticky update/annotate) likewise accept only current-run
   creations, and refuse the whole request before any partial mutation.
 - \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
   this server run, in this project only. No confirm dialog; instead it is verified-only, gated by the project's

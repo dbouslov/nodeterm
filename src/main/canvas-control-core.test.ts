@@ -891,3 +891,36 @@ describe('geometry verb', () => {
     }
   })
 })
+
+describe('minimize verb', () => {
+  it('requires --node; --set is optional and only on|off', () => {
+    expect(parseControlRequest('minimize', { node: 'n1,n2' })).toEqual({
+      verb: 'minimize',
+      args: { node: 'n1,n2' }
+    })
+    expect(parseControlRequest('minimize', { node: 'n1', set: 'off' })).toEqual({
+      verb: 'minimize',
+      args: { node: 'n1', set: 'off' }
+    })
+    expect(parseControlRequest('minimize', { node: 'n1', set: 'on' })).toEqual({
+      verb: 'minimize',
+      args: { node: 'n1', set: 'on' }
+    })
+    expect(parseControlRequest('minimize', {})).toEqual({ error: 'minimize requires --node <id,id>' })
+    expect(parseControlRequest('minimize', { node: 'n1', set: 'yes' })).toEqual({
+      error: 'minimize --set must be on or off'
+    })
+    // Non-destructive, like `rename`: no confirm dialog.
+    expect(isDestructiveVerb('minimize')).toBe(false)
+  })
+
+  it('both agent-facing bodies document it and the list marker', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`minimize --node <id,id> [--set on|off]`')
+      expect(body).toContain('(minimized)')
+    }
+  })
+})

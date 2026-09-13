@@ -25,7 +25,7 @@ export const HIDEABLE_MENU_ITEMS: readonly HideableRow[] = [
   { id: 'icon', label: 'Set icon' },
   { id: 'duplicate', label: 'Duplicate' },
   { id: 'snap-zone', label: 'Snap to zone' },
-  { id: 'collapse', label: 'Collapse / Expand' },
+  { id: 'collapse', label: 'Minimize / Restore' },
   { id: 'pin', label: 'Pin / Unpin' },
   { id: 'markdown-view', label: 'Markdown view' },
   { id: 'refresh-terminal', label: 'Refresh terminal' }
