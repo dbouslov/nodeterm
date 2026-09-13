@@ -1,0 +1,120 @@
+// `retire --successor <id>`: a retiring chat hands its place on the canvas to a session it opened,
+// then closes. MAIN decides whether it may (this file); the renderer decides the geometry
+// (`src/renderer/lib/retire.ts`). The decision is main-side for the `browser` verb's reason: the
+// proof lives here, and the renderer is the more attackable half.
+import { IPC } from '../shared/ipc'
+import { dryRunRequested } from '../shared/control-verbs'
+import type { CorePlatform } from './platform'
+import { strictRefusalFor } from './agents/node-identity-policy'
+
+/** The verbs whose reply names the session nodes the call created (`result.ids`). */
+const OPEN_VERBS: ReadonlySet<string> = new Set(['open-terminal', 'open-claude', 'open-agent'])
+
+/**
+ * Which node's open call created which node, THIS app run — the only proof `retire` accepts.
+ *
+ * Never project.json and never the persisted opener rope: both are git-shared and hand-editable, so
+ * a cloned project could name any node as opened by any caller. In memory only, so it is empty after
+ * a restart and retire fails closed until the caller opens a fresh successor.
+ *
+ * Keyed by node id, NOT by pane: an off-screen park (the PTY client is killed, tmux lives) and its
+ * re-mount (an attach) never touch it. Only a real close or a restart ends a proof — see
+ * `forgetOnClose`.
+ */
+export class OpenerLedger {
+  /** created node id → the node whose open call created it */
+  private readonly openerOf = new Map<string, string>()
+
+  record(openerId: string, ids: readonly string[]): void {
+    for (const id of ids) this.openerOf.set(id, openerId)
+  }
+
+  opened(openerId: string, nodeId: string): boolean {
+    return this.openerOf.get(nodeId) === openerId
+  }
+
+  /** `nodeId` really closed: it is nobody's successor now, and nothing it opened is its any more. */
+  forget(nodeId: string): void {
+    this.openerOf.delete(nodeId)
+    for (const [id, opener] of this.openerOf) if (opener === nodeId) this.openerOf.delete(id)
+  }
+}
+
+/**
+ * Record the nodes a successful open call created — only when the caller's identity verdict for
+ * THIS request was `verified` (main's own verdict, never a wire field), as the browser ledger does.
+ * A dry run created nothing, and a reply without a string `ids` array records nothing.
+ */
+export function recordOpenReply(
+  ledger: OpenerLedger,
+  req: { verb: string; nodeId: string; args: Record<string, string>; verified: boolean },
+  reply: { ok: boolean; result?: unknown }
+): void {
+  if (!OPEN_VERBS.has(req.verb) || !req.verified || !reply.ok || dryRunRequested(req.args)) return
+  const ids = (reply.result as { ids?: unknown } | undefined)?.ids
+  if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) ledger.record(req.nodeId, ids)
+}
+
+/**
+ * May `nodeId` retire into `args.successor`? `null` = forward it: the renderer checks the rest (on
+ * the canvas, a session node, this project) against the live canvas. Otherwise, the refusal.
+ */
+export function retireRefusal(
+  ledger: OpenerLedger,
+  req: { nodeId: string; args: Record<string, string>; verified: boolean }
+): string | null {
+  // The belt to hook-server's strict bucket, which refuses an unverified retire before any handler.
+  if (!req.verified) return strictRefusalFor('retire')
+  // Parsed JSON, whatever the type says: a non-string would throw at .trim() and reach the route's
+  // catch, which answers an empty 204.
+  const raw: unknown = req.args.successor ?? ''
+  if (typeof raw !== 'string') return 'retire: --successor must be a node id string — nothing changed'
+  const successor = raw.trim()
+  if (!successor) return 'retire requires --successor <id>'
+  if (successor === req.nodeId) {
+    return `retire: --successor names you (${successor}) — name the session that replaces you`
+  }
+  if (!ledger.opened(req.nodeId, successor)) {
+    return (
+      `retire: ${successor} is not a session you opened during this app run — open your successor ` +
+      'with open-claude, open-agent or open-terminal, then retire into it. The proof ends when either ' +
+      'of you closes or restarts, or when the app restarts. Nothing changed.'
+    )
+  }
+  return null
+}
+
+/** A control reply, as main's handler returns it. */
+export interface ControlReply {
+  ok: boolean
+  message?: string
+  result?: unknown
+  error?: string
+}
+
+/**
+ * Main's whole retire wiring, as ONE call around its renderer round-trip, so the gate cannot be
+ * dropped without dropping the forward with it: a refused `retire` never reaches the renderer, and
+ * every verified open call's reply is recorded on the way back.
+ */
+export async function withOpenerLedger(
+  ledger: OpenerLedger,
+  req: { verb: string; nodeId: string; args: Record<string, string>; verified: boolean },
+  forward: () => Promise<ControlReply>
+): Promise<ControlReply> {
+  if (req.verb === 'retire') {
+    const refusal = retireRefusal(ledger, req)
+    if (refusal) return { ok: false, error: refusal, message: refusal }
+  }
+  const reply = await forward()
+  recordOpenReply(ledger, req, reply)
+  return reply
+}
+
+/** End proofs on a real close (`ptyDestroy`) and on a restart (`ptyRecycle`): a recycle mints a
+ *  fresh identity, so the proof fails closed there, as project grants do. Not `ptyKill` (a park)
+ *  and not `ptyCreate` (a re-mount): both leave the same session on the canvas. */
+export function forgetOnClose(platform: Pick<CorePlatform, 'on'>, ledger: OpenerLedger): void {
+  platform.on(IPC.ptyDestroy, (nodeId: string) => ledger.forget(nodeId))
+  platform.on(IPC.ptyRecycle, (nodeId: string) => ledger.forget(nodeId))
+}

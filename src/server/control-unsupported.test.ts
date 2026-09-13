@@ -160,6 +160,20 @@ describe('the Server Edition refuses canvas control by name', () => {
       message: controlUnsupportedMessage('list')
     })
   })
+
+  it('`retire` gets the named, permanent refusal with Server canvas control off AND on', async () => {
+    // Retire needs the desktop's live canvas and its current-run opener ledger; neither exists here.
+    expect(await serverEditionControlHandler({ verb: 'retire' })).toEqual({
+      ok: false,
+      error: CONTROL_UNSUPPORTED_ERROR,
+      message: controlUnsupportedMessage('retire')
+    })
+    const enabled = createServerEditionControlHandler({} as never)
+    const reply = await enabled({ verb: 'retire', nodeId: 'n-r', args: { successor: 'n-s' }, verified: true })
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toBe(CONTROL_UNSUPPORTED_ERROR)
+    expect((reply as { message?: string }).message).toContain('do not retry')
+  })
 })
 
 describe('the Server Edition wires it at boot', () => {

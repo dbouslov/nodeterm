@@ -242,8 +242,13 @@ export const TOLERANT_CONTROL_VERBS = new Set(['list'])
  * WHAT IT COSTS: cross-instance failover loses browser control. A second instance's token is a
  * foreign kid, therefore `legacy`, therefore refused. Accepted. A verb must NEVER be moved from
  * here into TOLERANT_CONTROL_VERBS.
+ *
+ * **`retire` joined in the PR that created it** (a chat handing its canvas place to a session it
+ * opened, then closing itself). Same reasoning as `browser`: a NEW verb with no legacy population,
+ * whose whole authorization is "the verified caller opened the successor this run" — a claim a caller
+ * with no identity cannot make, so no window, latch or hatch may admit one.
  */
-export const STRICT_CONTROL_VERBS: ReadonlySet<string> = new Set(['browser'])
+export const STRICT_CONTROL_VERBS: ReadonlySet<string> = new Set(['browser', 'retire'])
 
 /**
  * The refusal for a strict verb: one sentence, no diagnosis, no hint about tokens or kids.
@@ -251,6 +256,15 @@ export const STRICT_CONTROL_VERBS: ReadonlySet<string> = new Set(['browser'])
  * `forged` case, applied to the whole non-`verified` set.
  */
 export const STRICT_CONTROL_REFUSAL = 'Browser control refused.'
+
+/** Same posture for `retire`, named for what was refused: "browser control refused" answering a
+ *  retire would be a diagnosis-delaying lie (the reason `verifiedRefusalFor` words each verb). */
+export const RETIRE_CONTROL_REFUSAL = 'Retire refused.'
+
+/** The strict refusal, worded for the verb that was refused. */
+export function strictRefusalFor(verb: string): string {
+  return verb === 'retire' ? RETIRE_CONTROL_REFUSAL : STRICT_CONTROL_REFUSAL
+}
 
 /**
  * The verb `/context-link/*` presents to `controlPolicy`.

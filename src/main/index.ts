@@ -169,6 +169,7 @@ import {
   workingNodes
 } from '../core/agent-status-mirror'
 import { paneOwnerProject } from '../core/agents/pane-ownership'
+import { OpenerLedger, forgetOnClose, withOpenerLedger } from '../core/retire-verb'
 import { createPushNotify, createLiveUpdatePush } from '../core/push-notify'
 import { createGrantsAccessor, type PushGrant } from '../core/push-grants'
 import { createRemoteGrantsCache } from '../core/remote-push-grants'
@@ -3282,6 +3283,11 @@ app.whenReady().then(async () => {
   // open-project. App restart clears the whole in-memory ledger by construction.
   corePlatform.on(IPC.ptyDestroy, (nodeId: string) => clearProjectGrants(nodeId))
   corePlatform.on(IPC.ptyRecycle, (nodeId: string) => clearProjectGrants(nodeId))
+  // Which sessions each caller's open call created this run — the only proof `retire` accepts.
+  // Cleared by a real close or a restart, like the grants above; a park and its re-mount leave it
+  // (core/retire-verb.ts).
+  const openerLedger = new OpenerLedger()
+  forgetOnClose(corePlatform, openerLedger)
   // App quit: detach every debugger lease. A second `before-quit` listener alongside the module-
   // level flush one (both fire); scoped here so it can reach `browserRevocation`. No push — the
   // window is going away. LIFECYCLE, so no tombstone (the in-memory ledger is gone on quit anyway).
@@ -3501,7 +3507,9 @@ app.whenReady().then(async () => {
     if (!target) return { ok: false, error: 'window unavailable' }
     const requestId = randomUUID()
     if (snapshotTicket) pendingSnapshots.set(requestId, snapshotTicket)
-    const result = await new Promise<{ ok: boolean; message?: string; result?: unknown; error?: string }>((resolve) => {
+    // The renderer round-trip, wrapped by `retire`'s gate (before) and the opener record (after) —
+    // one call, so neither can be dropped without the forward (core/retire-verb.ts).
+    const forward = () => new Promise<{ ok: boolean; message?: string; result?: unknown; error?: string }>((resolve) => {
       const timer = setTimeout(() => {
         pendingControl.delete(requestId)
         // Name the timeout and say it is retryable. A DENIAL is a different answer with different
@@ -3519,6 +3527,7 @@ app.whenReady().then(async () => {
       pendingControl.set(requestId, { resolve, timer })
       target.webContents.send(IPC.agentControl, { requestId, sourceNodeId: nodeId, verb, args })
     })
+    const result = await withOpenerLedger(openerLedger, { verb, nodeId, args, verified }, forward)
     // Redeemed or not, a snapshot ticket never outlives its request (reply and timeout both land here).
     pendingSnapshots.delete(requestId)
     // Record browser ownership the moment an open-browser succeeds — and ONLY when the caller's

@@ -22,8 +22,8 @@ import {
   IDENTITY_RESTART_NOTE,
   IDENTITY_UNMINTABLE_NOTE,
   IDENTITY_UNMINTABLE_WARN_NOTE,
-  STRICT_CONTROL_REFUSAL,
   STRICT_CONTROL_VERBS,
+  strictRefusalFor,
   type IdentityDecision
 } from './node-identity-policy'
 import { posixQuote } from '../../shared/ssh'
@@ -640,7 +640,7 @@ class HookServer {
             // a verified caller, and naming tokens or restarts there is advice to whoever is
             // probing. See STRICT_CONTROL_VERBS.
             const note = STRICT_CONTROL_VERBS.has(verb)
-              ? STRICT_CONTROL_REFUSAL
+              ? strictRefusalFor(verb)
               : this.identityRefusalNote(nodeId)
             if (wantsText) {
               res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })

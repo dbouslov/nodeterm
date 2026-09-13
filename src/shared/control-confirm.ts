@@ -15,7 +15,9 @@
 // is a different mechanism, not a weaker copy of this one. Nothing here loosens it, and a waiver
 // must never be plumbed into it: the server's rule does not ask a human at all, so "the human
 // said don't ask again" has nothing to attach to. Mobile is N/A (the phone issues no control
-// verbs).
+// verbs). `retire` is a second desktop delete path with NO dialog, by decision: it closes only its
+// own verified caller (`src/core/retire-verb.ts`), never another node, and ⇧⌘T can still bring
+// that node back. No waiver here applies to it, and none is needed.
 //
 // IN `src/shared` for the same two-sided reason as `control-verbs.ts`: the renderer decides
 // (Canvas.tsx + the Settings section) and main owns the request timeout the expiry reads, and

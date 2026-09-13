@@ -157,6 +157,7 @@ export type ControlVerb =
   | 'close'
   | 'board'
   | 'assign'
+  | 'retire'
   | 'send'
   | 'reply'
   | 'notify'
@@ -201,6 +202,7 @@ const VERBS: ControlVerb[] = [
   'close',
   'board',
   'assign',
+  'retire',
   'send',
   'reply',
   'notify',
@@ -290,6 +292,7 @@ export function parseControlRequest(
   if (v === 'verify' && !args.node) return { error: 'verify requires --node <id>' }
   if (v === 'spawn-team' && !args.team) return { error: 'spawn-team requires --team <json>' }
   if (v === 'assign' && !args.node) return { error: 'assign requires --node <id>' }
+  if (v === 'retire' && !args.successor) return { error: 'retire requires --successor <id>' }
   if (v === 'open-worktree' && !args.branch) return { error: 'open-worktree requires --branch <name>' }
   if (v === 'close-worktree' && !args.group) return { error: 'close-worktree requires --group <id>' }
   if (v === 'branch' && !args.node) return { error: 'branch requires --node <id>' }
@@ -570,6 +573,15 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  `--before <nodeId>` drops it above that card within the column. This is board metadata only — it',
     '  never moves the node on the canvas or changes its group. Use it to reflect progress: move a card',
     '  to your "In Progress"/"Done" column as work advances.',
+    '- `retire --successor <id>` — hand YOUR place on the canvas to a session you opened, then close',
+    '  yourself: the successor takes your logical rect (your position plus your expanded, un-maximized',
+    '  size) and frame (touched frames are refit as with `move`; a pinned frame keeps its place and',
+    '  shrinks back only if the successor was already inside it) and your kanban column. The successor',
+    '  must be a session node in THIS project that you opened (open-claude, open-agent or open-terminal)',
+    '  during this app run — the proof ends when either of you closes or restarts, or when the app',
+    '  restarts; anything else is refused and nothing changes. Verified callers only. No confirm',
+    '  dialog: you close only yourself. The reply reaches you before your session is torn down —',
+    '  treat it as your last output. Server Edition refuses it by name (permanent, do not retry).',
     ...browserVerbDocLines(),
     '',
     ...messagingGuidanceLines(),
@@ -1141,6 +1153,16 @@ ${snapshotVerbDocLines().join('\n')}
   within the column. This is board metadata ONLY — it never moves the node on the canvas, changes
   its group, or touches the running session. Use it to reflect progress: as a station finishes,
   move its card into your "In Progress" / "Done" column so the board tells the real story.
+- \`retire --successor <id>\` — hand YOUR place on the canvas to a session you opened, then close
+  yourself. The successor takes your logical rect — your position plus your expanded, un-maximized
+  size — and frame (every frame this touches is refit as \`move\` refits it; a pinned frame keeps its
+  position and children, and shrinks back to hug them only if the successor was already inside it)
+  and your kanban column. It must be a session (terminal/agent) node in THIS project that you opened
+  with open-claude, open-agent or open-terminal during this app run — the proof ends when either of
+  you closes or restarts, or when the app restarts. Anything else (not yours, missing, you,
+  not a session, another project) is refused and nothing changes. Verified callers only. No confirm
+  dialog: you close only yourself. The reply reaches you BEFORE your session is torn down — treat it
+  as your last output. Server Edition refuses it by name — permanent, do not retry.
 ${browserVerbDocLines().join('\n')}
 
 ${messagingGuidanceLines().join('\n')}

@@ -1790,6 +1790,30 @@ export function fitGroupToChildren(
 }
 
 /**
+ * The shrink-only mirror of `fitGroupToChildren`'s pinned branch, for a pinned frame a node has
+ * LEFT (`retire`): it keeps its position and every child where it is, and gives back only the
+ * width/height its children no longer need — never grows, never moves. No-op for a missing/non-group
+ * id or a frame with no children. Pure.
+ */
+export function shrinkPinnedGroupToChildren(
+  nodes: CanvasNode[],
+  groupId: string,
+  grid = 0
+): CanvasNode[] {
+  const group = nodes.find((n) => n.id === groupId)
+  if (!group || group.type !== 'group') return nodes
+  const children = nodes.filter((n) => n.parentId === groupId)
+  if (children.length === 0) return nodes
+  const pad = grid > 0 ? Math.max(GROUP_PAD, grid) : GROUP_PAD
+  const width = Math.min(nodeW(group), Math.max(...children.map((c) => c.position.x + nodeW(c) + pad)))
+  const height = Math.min(nodeH(group), Math.max(...children.map((c) => c.position.y + nodeH(c) + pad)))
+  if (width === nodeW(group) && height === nodeH(group)) return nodes
+  return nodes.map((n) =>
+    n.id === groupId ? { ...n, width, height, style: { ...n.style, width, height } } : n
+  )
+}
+
+/**
  * Removes a group frame, promoting its DIRECT children into the frame's own parent (the top
  * level for an unnested frame) without moving them on canvas. A nested frame's children land in
  * the grandparent, not at the root — sending them to the root would move them by the whole
