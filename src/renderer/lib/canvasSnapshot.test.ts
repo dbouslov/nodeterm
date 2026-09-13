@@ -8,6 +8,7 @@ import {
   snapshotReplyMessage,
   runSnapshot,
   SNAPSHOT_EMPTY_CANVAS,
+  SNAPSHOT_IN_PROGRESS,
   SNAPSHOT_NOT_ON_SCREEN,
   type SnapshotNode,
   type SnapshotRunDeps
@@ -215,12 +216,29 @@ describe('runSnapshot — frame, paint, capture, then hand the view back', () =>
     expect(view()).toEqual(USER_VIEW)
   })
 
-  it('restores the previous view when the capture throws', async () => {
+  it('restores the previous view when the capture throws, and a later snapshot still runs', async () => {
     const { deps, view } = setup(async () => {
       throw new Error('ipc gone')
     })
     await expect(runSnapshot(deps)).rejects.toThrow('ipc gone')
     expect(view()).toEqual(USER_VIEW)
+    const next = setup(async () => ({ ok: true, path: '/u/s.png', width: 2000, height: 1600 }))
+    expect((await runSnapshot(next.deps)).ok).toBe(true)
+  })
+
+  it('a second snapshot while one is being taken is refused by name, and the user view ends where it began', async () => {
+    const { deps, calls, view } = setup(async () => ({ ok: true, path: '/u/s.png', width: 2000, height: 1600 }))
+    // Canvas.tsx runs control events concurrently. Unguarded, the second would save the first's
+    // borrowed framing as "previous" and hand THAT back last, leaving the user off their own view.
+    const first = runSnapshot(deps)
+    const second = runSnapshot({ ...deps, frame: 'outer' })
+    expect(await second).toEqual({ ok: false, error: SNAPSHOT_IN_PROGRESS })
+    expect((await first).ok).toBe(true)
+    expect(calls).toEqual(['set -100,-120,2', 'paint', 'capture 300,40,1000,800', 'set 7,9,0.5'])
+    expect(view()).toEqual(USER_VIEW)
+    // Unlike the other refusals, this one is worth retrying — and once the first is done, it runs.
+    expect(SNAPSHOT_IN_PROGRESS).toContain('retry in a moment')
+    expect((await runSnapshot({ ...deps, frame: 'outer' })).ok).toBe(true)
   })
 
   it('refuses before touching the view: unknown frame, empty canvas, no pane', async () => {

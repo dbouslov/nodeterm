@@ -150,12 +150,30 @@ export type SnapshotRunResult =
     }
   | { ok: false; error: string }
 
+export const SNAPSHOT_IN_PROGRESS = 'snapshot refused: a snapshot is already in progress — retry in a moment'
+
+/** One snapshot at a time. Canvas.tsx runs control events concurrently, and a second run started
+ *  mid-snapshot saves the first's borrowed framing as "previous": both shots come out framed wrong
+ *  and the user is left on the first shot's framing instead of their own view. */
+let snapshotInFlight = false
+
+export async function runSnapshot(d: SnapshotRunDeps): Promise<SnapshotRunResult> {
+  if (snapshotInFlight) return { ok: false, error: SNAPSHOT_IN_PROGRESS }
+  snapshotInFlight = true
+  try {
+    return await frameCaptureRestore(d)
+  } finally {
+    // Released only once the view is handed back, so the next snapshot saves the user's view.
+    snapshotInFlight = false
+  }
+}
+
 /**
  * Frame → paint → capture → restore. Every refusal this module can make comes BEFORE the view is
  * touched; once it is, the user's exact previous viewport is put back in `finally`, whatever the
  * capture answered or threw.
  */
-export async function runSnapshot(d: SnapshotRunDeps): Promise<SnapshotRunResult> {
+async function frameCaptureRestore(d: SnapshotRunDeps): Promise<SnapshotRunResult> {
   const target = snapshotTarget(d.nodes, d.frame)
   if (!target.ok) return target
   const pane = d.pane

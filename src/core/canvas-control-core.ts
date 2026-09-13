@@ -121,7 +121,9 @@ function snapshotVerbDocLines(): string[] {
     "  to look. A snapshot never switches the user's view, so it is REFUSED — ask the user, do not",
     '  retry — when your project is not the one on screen, the window is minimized or hidden, the',
     '  kanban board or Network overview is open, or the `--frame` id is not a frame (pass a group',
-    '  id from `list`). Verified callers only; there is no snapshot on the Server Edition.'
+    '  id from `list`). One snapshot runs at a time: a second one sent while the first is still being',
+    '  taken is refused as already in progress — that one you DO retry, in a moment. Verified callers',
+    '  only; there is no snapshot on the Server Edition.'
   ]
 }
 

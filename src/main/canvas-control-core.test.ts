@@ -345,6 +345,8 @@ describe('parseControlRequest', () => {
       for (const why of ['not the one on screen', 'minimized or hidden', 'kanban board', 'not a frame']) {
         expect(body, why).toContain(why)
       }
+      // The one refusal a caller SHOULD retry: another snapshot was still being taken.
+      expect(body).toContain('refused as already in progress — that one you DO retry')
     }
   })
 
