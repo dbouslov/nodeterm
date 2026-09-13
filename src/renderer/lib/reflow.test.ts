@@ -125,11 +125,12 @@ describe('reflow: growth', () => {
   })
 
   it('a node that grows upward pushes the sibling above it up, and nothing below it moves', () => {
-    // The top handle: a's top rises 100, its bottom stays.
-    const start = [node('c', 0, 0, 400, 300), node('a', 0, 340, 400, 300), node('e', 0, 680, 400, 300)]
+    // The top handle: a's top rises 100, its bottom stays. c lay above a, overlapping its column by
+    // only 20: it goes up (100), the way it lay, though sideways would be shorter (60).
+    const start = [node('c', 380, 0, 200, 300), node('a', 0, 340, 400, 300), node('e', 0, 680, 400, 300)]
     const nodes = start.map((n) => (n.id === 'a' ? { ...n, position: { x: 0, y: 240 }, height: 400 } : n))
     const out = reflow(nodes, 'a', { x: 0, y: 340, width: 400, height: 300 })
-    expect(pos(out, 'c')).toEqual({ x: 0, y: -100 })
+    expect(pos(out, 'c')).toEqual({ x: 380, y: -100 })
     expect(pos(out, 'e')).toEqual({ x: 0, y: 680 })
     expect(overlaps(out)).toEqual([])
   })
