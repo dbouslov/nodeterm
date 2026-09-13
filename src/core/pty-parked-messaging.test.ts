@@ -212,7 +212,7 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
   })
 
   /** Open the node, then let its last view go: exactly what parking an off-screen pane does. */
-  async function parked(): Promise<PtyManager> {
+  async function parked(ownerProjectId?: string): Promise<PtyManager> {
     const { PtyManager } = await import('./pty-manager')
     const m = new PtyManager()
     m.init(() => DEFAULT_SETTINGS)
@@ -221,7 +221,8 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
     const { sessionId } = (await fake.handlers[IPC.ptyCreate](ALICE, {
       cols: 80,
       rows: 24,
-      persistKey: NODE
+      persistKey: NODE,
+      ownerProjectId
     })) as { sessionId: string }
     fake.senderListeners[IPC.ptyKill](ALICE, sessionId)
     // The state the bug report measured: the painter is gone, the tmux session is not.
@@ -457,10 +458,12 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
 
     it('a chat this run only attached to (opened before a restart) is still refused', async () => {
       // `parked()` finds the tmux session already up at its first create: an attach, not a spawn.
-      const m = await parked()
+      // The create names its project, so the fresh gate is the one thing that keeps it unrecorded.
+      const m = await parked('p1')
 
       const { outcome } = await deliverFromControl(req(), deps(m, { paneOwnerProject }))
 
+      expect(paneOwnerProject(NODE)).toBeUndefined()
       expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
       expect(pastes()).toEqual([])
     })
