@@ -1930,6 +1930,19 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   `list` rows print `· role:`. Pure helpers in `shared/node-annotation.ts`, validated at both
   serializer seams like `icon`. Server Edition: `HeadlessNodeFactory.annotate`, creator-owned like
   `rename`.
+  **`snapshot [--frame <groupId>] [--out <path>]`** (2026-09-12) — a PNG of the whole canvas (every
+  node in view) or one frame, taken in-app with `webContents.capturePage(rect)`, so it needs no
+  macOS Screen Recording grant (which an ad-hoc build loses on every rebuild). MAIN gates before
+  forwarding (`main/canvas-snapshot.ts` `prepareSnapshot`: a closed/minimized/hidden window is
+  refused, `--out` is jailed with the browser `--screenshot` guard) and keeps a ticket per request
+  id — the renderer's capture call (`IPC.canvasSnapshotCapture`) carries only that id and a rect,
+  never a path. The RENDERER refuses an off-screen project (it never travels — G5) or a canvas
+  covered by the kanban board/Network overview, then `lib/canvasSnapshot.runSnapshot` sets a
+  COMPUTED viewport (never `fitView`), waits two frames, has main capture the `.flow-wrap` rect
+  (scaled by the page zoom) and restores the exact previous viewport in `finally`. Default file
+  `<userData>/snapshots/<projectId>-<UTC stamp>.png`, pruned to the newest `SNAPSHOT_KEEP` (20).
+  Verified-only (`requiresVerified`: the picture shows every pane). Server Edition: refused by name
+  (`SNAPSHOT_UNSUPPORTED_CLAUSE` — no window); the relay/browser bridge stub refuses too.
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim

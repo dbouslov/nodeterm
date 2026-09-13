@@ -19,10 +19,11 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { renameAtomic, tempNameFor } from '../core/fs-atomic'
 import type { CanvasSnapshotCaptureResult } from '../shared/types'
+import { SNAPSHOT_KEEP } from '../core/canvas-control-core'
 import { resolveScreenshotPath, SCREENSHOT_NO_PROJECT_DIR, type ScreenshotPathDeps } from './browser-screenshot'
 
-/** The default folder keeps this many snapshots, newest first; older ones are deleted. */
-export const SNAPSHOT_KEEP = 20
+// The default folder's cap lives with the verb model, so the agent-facing docs render the same number.
+export { SNAPSHOT_KEEP }
 
 export const SNAPSHOT_NO_WINDOW =
   'snapshot refused: the nodeterm window is closed — ask the user to open it, then retry'

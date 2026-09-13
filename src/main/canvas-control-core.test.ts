@@ -6,7 +6,8 @@ import {
   buildCanvasControlInstructions,
   buildCanvasSkillBody,
   CONTROL_SHIM_SCRIPT,
-  CONTROL_UNREACHABLE_MSG
+  CONTROL_UNREACHABLE_MSG,
+  SNAPSHOT_KEEP
 } from '../core/canvas-control-core'
 import {
   CODEX_SANDBOX_BLOCKED_LINE,
@@ -330,6 +331,21 @@ describe('parseControlRequest', () => {
       error: 'snapshot: --out needs a path'
     })
     expect(isDestructiveVerb('snapshot')).toBe(false)
+  })
+
+  it('both agent-facing texts document the snapshot verb, where the file lands, and its refusals', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('`snapshot [--frame <groupId>] [--out <path>]`')
+      expect(body).toContain('no Screen Recording permission')
+      expect(body).toContain('snapshots/<projectId>-<time>.png')
+      expect(body).toContain(`newest ${SNAPSHOT_KEEP} are kept`)
+      expect(body).toContain('inside the project directory')
+      expect(body).toContain('never switches the user')
+      // Named so a caller asks the user instead of retrying into the same refusal.
+      for (const why of ['not the one on screen', 'minimized or hidden', 'kanban board', 'not a frame']) {
+        expect(body, why).toContain(why)
+      }
+    }
   })
 
   it('sticky requires --node plus exactly one of --text/--append, and is not destructive', () => {
