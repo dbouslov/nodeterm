@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { COLLAPSED_HEIGHT, fitGroupToChildren, rootPosition, type CanvasNode } from '../state/workspace'
+import {
+  COLLAPSED_HEIGHT,
+  fitGroupToChildren,
+  maximizeNodeToRect,
+  rootPosition,
+  type CanvasNode
+} from '../state/workspace'
 import { assignNode, assignedTo, defaultKanban } from './kanban'
 import { planRetire, type RetirePlan } from './retire'
 
@@ -168,6 +174,30 @@ describe('planRetire — the successor takes the caller\'s LOGICAL rect, not its
       // The collapse toggle expands back to `expandedHeight`: a stale one would undo the handover.
       expect(succ.data.expandedHeight, state).toBe(420)
     }
+  })
+
+  it('a maximized successor is restored first, so every frame its maximize grew refits back down', () => {
+    // succ sits in `i`, nested in `o`; its maximize grew both. Retire pulls it out of `i`, and the
+    // planner refits only `i` (its direct frame), so `o` comes back only if the maximize is undone first.
+    const inner = { ...frame('i', 20, 40, 1, 1), parentId: 'o', extent: 'parent' } as CanvasNode
+    const flat = [
+      frame('o', 0, 0, 1, 1),
+      inner,
+      term('succ', 20, 40, 300, 200, 'i'),
+      term('other', 20, 260, 300, 200, 'i'),
+      term('caller', 2000, 100, 640, 420)
+    ]
+    const before = fitGroupToChildren(fitGroupToChildren(flat, 'i'), 'o')
+    const outerBefore = byId(before, 'o')
+    const maximized = maximizeNodeToRect(before, 'succ', { x: -500, y: -400, width: 3000, height: 2000 })
+    expect(byId(maximized, 'o').width).toBeGreaterThan(outerBefore.width as number)
+
+    const outer = byId(applied(plan(maximized)).nodes, 'o')
+    expect([outer.position, outer.width, outer.height]).toEqual([
+      outerBefore.position,
+      outerBefore.width,
+      outerBefore.height
+    ])
   })
 })
 

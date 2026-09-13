@@ -51,10 +51,10 @@ export function planRetire(input: RetireInput): RetirePlan {
   if (successor.type !== 'terminal') {
     return { error: `retire: ${successorId} is not a session (terminal or agent) node — nothing changed` }
   }
-  // The caller's LOGICAL rect, not its display rect. A maximized caller is first put back where its
-  // restore toggle would put it (every frame the maximize grew refits back down); a collapsed caller
-  // hands over the height it expands to. The successor ends expanded and un-maximized.
-  const base = restoreMaximizedNode(live, callerId)
+  // The caller's LOGICAL rect, not its display rect. A maximized caller or successor is first put
+  // back where its restore toggle would put it (every frame the maximize grew refits back down); a
+  // collapsed caller hands over the height it expands to. The successor ends expanded and un-maximized.
+  const base = restoreMaximizedNode(restoreMaximizedNode(live, callerId), successorId)
   const caller = base.find((n) => n.id === callerId)
   if (!caller) return { error: 'retire: your node is not on this canvas — nothing changed' }
 
@@ -72,7 +72,7 @@ export function planRetire(input: RetireInput): RetirePlan {
           // Drop the stale measurement, as withNodeRect does: persistence prefers `measured`.
           measured: undefined,
           // The collapse toggle expands back to `expandedHeight`: a stale one would undo the handover.
-          data: { ...n.data, collapsed: false, expandedHeight: height, premaxRect: undefined }
+          data: { ...n.data, collapsed: false, expandedHeight: height }
         }
       : n
   )
