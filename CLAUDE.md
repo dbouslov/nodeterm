@@ -1291,6 +1291,14 @@ the wire never see any of it):
   a cap slot). `BACKGROUND_WEBVIEW_MAX` (8) hard-caps live background guests, evicting
   longest-retired first; `activateProject` runs BEFORE `retireProject` on every switch so a
   returning page sheds its background clock before that eviction can pick it.
+- **Never leave a guest focused while the window is in the background (Fix #16).** On macOS
+  Electron activates the whole app when a `<webview>` guest takes focus (measured on 42.10.1: a
+  focused guest whose page reloads, or the embedder focusing a webview, brought a background app to
+  the front). A dashboard web node with `<meta http-equiv="refresh">` that the user once clicked
+  into pulled nodeterm over other apps on every reload. Main's `win.on('blur')` sends
+  `IPC.appWindowBlur`, and the renderer (`lib/webviewFocus.ts`, installed in Canvas) blurs a
+  focused `<webview>`. Not the page's own `blur`: that fires as soon as focus moves INTO a guest.
+  Never `.focus()` a webview from code that can run while the window is in the background.
 - E2E-verified under Xvfb (CDP): same webContents across Alpha→Beta→Alpha, typed form text + JS
   state + tick counter continuous, zero reloads; wrapper + webview DOM elements identity-stable in
   both directions. Server Edition: inert (no `<webview>` in a plain browser — ghosts are empty
@@ -1967,7 +1975,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   resize), and it resizes only the listed nodes, never frames or neighbours. Requests resolve in
   `shared/minimize.ts`: an unknown id, a group frame or another kind refuses the WHOLE list, naming
   it; no-ops are said in the reply. No dialog (non-destructive, like `rename`); not store-answered,
-  so an off-screen caller travels as for `rename`/`pin`. `list` rows print `(minimized)` — both
+  so an off-screen caller is refused as for `rename`/`pin` (Fix #16). `list` rows print `(minimized)` — both
   `list` answers print through `listRowText`. Server Edition: `HeadlessNodeFactory.minimize`,
   creator-owned, flips the persisted `collapsed` only (`size.height` already is the height to
   restore).
@@ -1987,8 +1995,8 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   the renderer replies BEFORE `deleteNodes([caller])`. Touched frames refit as `move` refits them,
   except a pinned frame, which keeps its position and children and never grows. It shrinks back to
   hug them (`shrinkPinnedGroupToChildren`) only when the successor was already inside it; a frame
-  the successor entered from outside is left alone. It travels like `move` (it needs
-  measured sizes). Server Edition: named refusal (not in `SERVER_V1_VERBS`).
+  the successor entered from outside is left alone. Off screen it is refused like `move` (it needs
+  measured sizes; Fix #16). Server Edition: named refusal (not in `SERVER_V1_VERBS`).
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim
@@ -2061,13 +2069,19 @@ still sees a station that finished before a relaunch; see Dependency edges, item
     `--group`, which is why this set owes no worktree question; a verb joining it that does would,
     because `cwdForNewNodeIn` subtracts `staleGroupIds`, which is epoch-scoped to the ACTIVE
     project.
-  Everything else keeps travelling **on purpose**: `write`/`close`/`group`/`move`/`arrange`/
-  `align`/`verify`/`spawn-team`/`open-worktree` read live canvas state the serialized copy does not
-  carry (measured node sizes, worktree staleness, the React Flow edge arrays). **`browser` is the
-  pair worth stating beside `open-browser`**: it NAVIGATES a mounted `<webview>` guest, which
-  exists only while its project is on screen, so it travels; `open-browser` merely places the node
-  and its guest is created when that project is next shown, exactly as a cold-opened terminal's PTY
-  is. Route `active` is byte-identical to before.
+  Everything else is **REFUSED while its project is not on screen** (Fix #16, 2026-09-13):
+  `write`/`close`/`group`/`move`/`arrange`/`align`/`assign`/`board`/`rename`/`verify`/`spawn-team`/
+  `open-worktree`… read live canvas state the serialized copy does not carry (measured node sizes,
+  worktree staleness, the React Flow edge arrays), and they used to TRAVEL there — the G5 hijack,
+  and the whole of Fix #16's first symptom: an orchestrator in one project closing its stations or
+  moving its own kanban card pulled the user off the tab they were reading, again and again.
+  `offScreenRefusal` answers the agent (where its canvas is; retry once it is open) and raises a
+  sticky notice on the tab the user IS on naming the agent and the project; its **Go there** button
+  (`travelToProjectRef`) is the only travel left, and it is the user's click. **`browser` is the
+  pair worth stating beside `open-browser`**: it NAVIGATES a mounted `<webview>` guest, while
+  `open-browser` merely places the node. Its resolve no longer travels either, so a background
+  agent drives its page only while that page's guest is alive (a keep-alive ghost counts), and
+  main refuses by name when it is not. Route `active` is byte-identical to before.
   **The human is told, once, in the other voice.** The reply goes to the agent; without a strip the
   person sees nothing at all, and the whole point of not travelling is that the choice to go and
   look stays theirs — a choice they can only make if they are told there is something to look at.

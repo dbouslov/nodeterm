@@ -3264,6 +3264,10 @@ export interface NodeTerminalApi {
   openNotificationSettings(): Promise<void>
   /** Fires when a notification is clicked, asking the renderer to focus a node. Returns unsubscribe. */
   onFocusNode(listener: (nodeId: string) => void): () => void
+  /** Fires when the main window loses OS focus, so the renderer can let go of a focused `<webview>`
+   *  (on macOS a guest taking focus again activates the whole app — renderer/lib/webviewFocus.ts).
+   *  Returns unsubscribe. Server Edition: never fires (a browser tab has no `<webview>`). */
+  onWindowBlur(listener: () => void): () => void
   /** Fires when the shell's memory-pressure monitor (core/memory-pressure.ts) sees the host — or
    *  this process's own RSS — cross a watermark: the renderer answers by running its reclaim
    *  levers (hidden WebGL contexts, parked terminals). At most one fire a minute, so the levers

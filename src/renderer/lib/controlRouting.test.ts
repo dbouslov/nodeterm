@@ -9,6 +9,7 @@ import {
   storedNodeListing,
   listRowText,
   answerBrowserResolve,
+  offScreenRefusal,
   type ControlProject,
   type BrowserResolveProject
 } from './controlRouting'
@@ -65,6 +66,58 @@ describe('routeControlSource', () => {
     // consults the router when the live canvas MISSED it, so an active-project id must not be
     // reported as travel-worthy.
     expect(routeControlSource(projects, 'p-open', 'term-b-1')).toEqual({ kind: 'active' })
+  })
+})
+
+// Fix #16 (2026-09-13): David was moved from tab to tab with no click. Each move was a verb from an
+// agent in a project he was NOT looking at (`close --compact`, `assign --column Done`, `group`):
+// the dispatch travelled to the caller's project before answering. A verb that needs the LIVE
+// canvas of a project that is not on screen is now refused, and the human is told on the tab they
+// ARE looking at — the move to that project is theirs to make.
+describe('offScreenRefusal — a background agent never moves the user to its tab', () => {
+  const projects = [
+    { id: 'p-school', name: 'School', nodes: [{ id: 'term-po', title: 'PO · School' }] },
+    { id: 'p-code', name: 'Code', nodes: [{ id: 'term-lead', title: 'LEAD · retire' }] },
+    { id: 'p-parked', name: 'Research', closed: true, nodes: [{ id: 'term-sr', title: 'SR screener' }] }
+  ]
+  const offScreen = { kind: 'switch', projectId: 'p-code' } as const
+
+  it('refuses every verb that needs the live canvas, naming the project to the agent and to the user', () => {
+    for (const verb of ['close', 'write', 'assign', 'group', 'move', 'arrange', 'align', 'rename', 'board']) {
+      const r = offScreenRefusal(projects, offScreen, verb, 'term-lead')
+      expect(r, verb).not.toBeNull()
+      expect(r!.error).toContain('"Code"')
+      expect(r!.error).toContain('not on screen')
+      expect(r!.notice.projectId).toBe('p-code')
+      expect(r!.notice.text).toContain('LEAD · retire')
+      expect(r!.notice.text).toContain('"Code"')
+      expect(r!.notice.text).toContain(verb)
+    }
+  })
+
+  it('leaves alone every verb another tier already answers without that canvas', () => {
+    for (const verb of ['list', 'geometry', 'sticky', 'annotate', 'open-claude', 'open-terminal', 'show-web', 'open-browser']) {
+      expect(offScreenRefusal(projects, offScreen, verb, 'term-lead'), verb).toBeNull()
+    }
+  })
+
+  it('is not consulted when the caller is on the live canvas, unknown, or blocked', () => {
+    expect(offScreenRefusal(projects, { kind: 'active' }, 'close', 'term-po')).toBeNull()
+    expect(offScreenRefusal(projects, { kind: 'unknown' }, 'close', 'term-x')).toBeNull()
+    expect(offScreenRefusal(projects, { kind: 'blocked', projectId: 'p-code' }, 'close', 'term-lead')).toBeNull()
+  })
+
+  it('says a CLOSED project is closed, and its button still leads there', () => {
+    const r = offScreenRefusal(projects, { kind: 'reopen', projectId: 'p-parked' }, 'close', 'term-sr')
+    expect(r!.error).toContain('"Research"')
+    expect(r!.error).toContain('closed')
+    expect(r!.notice.projectId).toBe('p-parked')
+  })
+
+  it('falls back to ids when the project or the node carries no name', () => {
+    const r = offScreenRefusal([{ id: 'p-bare', nodes: [{ id: 'term-bare' }] }], { kind: 'switch', projectId: 'p-bare' }, 'close', 'term-bare')
+    expect(r!.error).toContain('"p-bare"')
+    expect(r!.notice.text).toContain('term-bare')
   })
 })
 

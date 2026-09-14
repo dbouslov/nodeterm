@@ -1100,6 +1100,14 @@ function createWindow(): BrowserWindow {
   // The main window is a regular app window; establishing its Dock presence explicitly means the
   // later focusable:false Notch HUD panel can never leave the app looking like an accessory.
   win.on('show', () => assertRegularDockPresence())
+  // Tell the renderer the window lost OS focus, so it lets go of a focused <webview> (Fix #16): a
+  // guest taking focus again — its page reloading itself, a ghost page coming back on screen —
+  // activates the whole app on macOS, in front of whatever the user switched to. Only main can say
+  // this; the page's own `blur` also fires when focus merely moves INTO a guest.
+  // See renderer/lib/webviewFocus.ts.
+  win.on('blur', () => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.appWindowBlur)
+  })
 
   // macOS: closing the window hides it instead of destroying it. The app deliberately
   // outlives its window (tmux sessions, hook server, updater); destroying the window

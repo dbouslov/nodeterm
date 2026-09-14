@@ -420,9 +420,13 @@ serialized one will do" — `open-terminal`, `open-claude`, `open-agent`, which 
 project's stored nodes with their launch armed and report `queued: true`) and `answersOffCanvas`
 ("…and there is nothing to defer" — `show-image`, `show-video`, `show-web`, `open-browser`, whose
 node has no session behind it and is finished the moment it is written, so it reports `offCanvas:
-true` and never `queued`). Everything that acts on nodes which already exist still travels, because
-it reads live state the serialized copy does not carry — `browser` included, which navigates a
-mounted `<webview>` guest, unlike `open-browser`, which only places the node.
+true` and never `queued`). Everything that acts on nodes which already exist reads live state the
+serialized copy does not carry, so off screen it is REFUSED (Fix #16): `offScreenRefusal` answers
+the agent and puts a sticky notice with a **Go there** button on the tab the user is on. Nothing
+travels on an agent's say-so any more — `browser` included, which navigates a mounted `<webview>`
+guest and now drives it only while that guest is alive. And never leave a `<webview>` focused while
+the window is in the background: on macOS a guest taking focus again activates the whole app
+(`renderer/lib/webviewFocus.ts`).
 
 Three things to carry over when you put a verb in one of the two off-screen tiers. **The acting
 project is the SOURCE's**: `ctlProject` decides the ssh flag, the browser session key and the media

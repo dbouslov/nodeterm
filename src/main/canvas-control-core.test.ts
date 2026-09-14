@@ -239,6 +239,16 @@ describe('parseControlRequest', () => {
     expect(body.toLowerCase()).toContain('confirm')
   })
 
+  // Fix #16: a verb on existing nodes from a project that is not on screen is refused instead of
+  // switching the user's tab. An agent that is not told so reads the refusal as a fault and loops.
+  it('both agent-facing texts say an off-screen verb on existing nodes is refused, never travelled', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('needs your project ON SCREEN')
+      expect(body).toContain("never switches the user's view for an agent")
+      expect(body).toContain('retry once they have opened your project')
+    }
+  })
+
   // The parser change in this commit's sibling is only half a fix: an agent that never learns the
   // `=` form simply cannot express a value beginning with `--`, and the failure stays silent for it.
   // So both agent-facing texts must carry the rule, not just one of them.

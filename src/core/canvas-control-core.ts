@@ -463,6 +463,12 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  Nothing is queued: unlike a session, a page or an image is finished the moment it is placed,',
     '  so there is nothing to wait for and nothing to poll. Say where it went rather than assuming',
     '  the user saw it.',
+    '- Verbs that act on nodes that ALREADY exist (`write`, `close`, `rename`, `color`, `group`, `move`,',
+    '  `arrange`, `align`, `assign`, `board`, `link`, `restructure`, `retire`, …): each one',
+    '  needs your project ON SCREEN. If it is not, the call is refused, because nodeterm',
+    "  never switches the user's view for an agent. The user is shown a notice naming your project,",
+    '  with a button to go there. Do not loop on the refusal: retry once they have opened your project,',
+    '  or tell them what you need.',
     '- `group --nodes <id,id> [--label L] [--color C]` — wrap sibling nodes or sibling groups in a new labeled frame.',
     '  Every id must share one container. `ungroup --group <id>` dissolves a frame and promotes its direct',
     '  children into the frame\'s parent. `move --nodes <id,id> [--group <id>]` reparents nodes or groups INTO an',
@@ -992,6 +998,12 @@ Verbs:
   render on the DESKTOP: \`show-image\` and \`show-video\` still work with a host path (the
   file is read/fetched back over the connection), but \`show-web --file/--html\` is refused —
   use \`--url\`, or copy the file to the desktop first.
+- Verbs that act on nodes that ALREADY exist (\`write\`, \`close\`, \`rename\`, \`color\`, \`group\`, \`move\`,
+  \`arrange\`, \`align\`, \`assign\`, \`board\`, \`link\`, \`restructure\`, \`retire\`, …): each one
+  needs your project ON SCREEN. If it is not, the call is refused, because nodeterm
+  never switches the user's view for an agent. The user is shown a notice naming your project,
+  with a button to go there. Do not loop on the refusal: retry once they have opened your project,
+  or tell them what you need.
 - \`group --nodes <id,id> [--label "Frontend Team"] [--color C]\` — wrap sibling nodes or sibling groups in a
   new labeled frame. Every id must share one container; an ancestor cannot be grouped with its descendant.
 - \`ungroup --group <id>\` — dissolve a group frame, promoting its direct children into the frame's
