@@ -10,8 +10,9 @@
 // in the live canvas alone therefore rejected every agent outside the project the app happened to
 // come up on — reported as "source node is not a control-capable agent", which is what a node
 // carrying a non-control agent gets, so the failure read as a lost capability rather than as the
-// wrong canvas answering. Resolve the OWNING project instead, then travel to it (or, for a verb
-// that reads and changes nothing, answer straight out of its serialized nodes).
+// wrong canvas answering. Resolve the OWNING project instead, then answer out of its serialized
+// nodes where one of the tiers below allows, and refuse otherwise (`offScreenRefusal`). It is never
+// travelled to (Fix #16).
 
 import { canControlCanvas, type AgentId } from '@shared/agents/config'
 import { normalizeNodeAnnotation } from '@shared/node-annotation'
@@ -43,8 +44,9 @@ export interface StoredNode {
 /**
  * Where a control request must be applied:
  * - `active`  — the source is on the live canvas (or its project is already active): apply here.
- * - `switch`  — an open project's canvas: activate that tab first.
- * - `reopen`  — a closed project (its sessions still run): restore the tab, then activate it.
+ * - `switch`  — another OPEN project, not on screen: answered from its store where a tier allows,
+ *               else refused (`offScreenRefusal`). Its tab is never activated for it (Fix #16).
+ * - `reopen`  — the same for a CLOSED project (its sessions still run); its tab is never reopened.
  * - `blocked` — a project whose files are unreadable: travelling there would show an empty canvas.
  * - `unknown` — no open project owns this node id.
  */
@@ -175,8 +177,9 @@ export function needsLiveCanvas(verb: string): boolean {
  * Deliberately NOT here: every verb that acts on nodes that already exist (`write`, `close`,
  * `group`, `move`, `arrange`, `align`, `verify`, `spawn-team`, `open-worktree`). They read live
  * canvas state — measured node sizes, worktree staleness, the React Flow edge arrays — that the
- * serialized copy does not carry, so they keep travelling. The verbs that create a node with no
- * session behind it are the third set below.
+ * serialized copy does not carry, so off screen they are refused (`offScreenRefusal`, Fix #16);
+ * they used to travel. The verbs that create a node with no session behind it are the third set
+ * below.
  */
 const COLD_OPENABLE_VERBS: ReadonlySet<string> = new Set([
   'open-terminal',
@@ -221,6 +224,54 @@ const OFF_CANVAS_VERBS: ReadonlySet<string> = new Set([
 
 export function answersOffCanvas(verb: string): boolean {
   return OFF_CANVAS_VERBS.has(verb)
+}
+
+/**
+ * What a request gets INSTEAD of travelling (Fix #16, 2026-09-13), or `null` when it needs nothing
+ * instead: its caller is on the live canvas (`active`), has no canvas to go to (`unknown`,
+ * `blocked`), or its verb is answered without that project's live canvas by one of the three
+ * tiers above.
+ *
+ * Every other verb — `write`, `close`, `assign`, `group`, `move`, `arrange`, `rename`, `board`… —
+ * reads LIVE canvas state (measured sizes, the React Flow edge arrays, the board as displayed), so
+ * the dispatch used to switch the tab to the caller's project before answering. That is the G5
+ * hijack in its plainest form, and it was the first symptom of Fix #16: an orchestrator in one
+ * project closing its stations or moving its own kanban card pulled the user off the tab they were
+ * reading, again and again. Bringing that project back on screen also brought back any web node the
+ * user had focused there, which on macOS pulled the window in front of other apps
+ * (`lib/webviewFocus.ts`).
+ *
+ * So it is refused, in two voices: `error` tells the agent where its canvas is and that nodeterm
+ * will not move the user there for it; `notice` is the strip on the tab the user IS on, naming the
+ * agent and the project, and its button (`projectId`) makes the move theirs.
+ */
+export interface OffScreenRefusal {
+  error: string
+  notice: { text: string; projectId: string }
+}
+
+export function offScreenRefusal(
+  projects: readonly { id: string; name?: string; nodes: readonly { id: string; title?: string }[] }[],
+  route: ControlRoute,
+  verb: string,
+  sourceNodeId: string
+): OffScreenRefusal | null {
+  if (route.kind !== 'switch' && route.kind !== 'reopen') return null
+  if (!needsLiveCanvas(verb) || canColdOpen(verb) || answersOffCanvas(verb)) return null
+  const owner = projects.find((p) => p.id === route.projectId)
+  const name = owner?.name || route.projectId
+  const agent = owner?.nodes.find((n) => n.id === sourceNodeId)?.title || sourceNodeId
+  const closed = route.kind === 'reopen' ? ' (it is closed)' : ''
+  return {
+    error:
+      `${verb} needs the canvas of project "${name}", which is not on screen${closed}. ` +
+      "nodeterm does not switch the user's view for an agent; the user was shown a notice. " +
+      'Retry after they open that project, or tell them what you need.',
+    notice: {
+      text: `Agent "${agent}" in "${name}" asked to ${verb}. That project is not on screen.`,
+      projectId: route.projectId
+    }
+  }
 }
 
 /** Test-only view of the three sets, so their disjointness can be asserted rather than eyeballed. */

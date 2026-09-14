@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs'
 const src = readFileSync(new URL('./Canvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 /** The cold-open block: from its `if (canColdOpen(verb))` guard to the off-canvas guard that
- *  follows it. Bounded by that guard rather than by the travel call further down, so the pins
+ *  follows it. Bounded by that guard rather than by the refusal further down, so the pins
  *  below judge THIS block and never inherit a passing verdict from the one after it — the two are
  *  separate branches with separate contracts (`control-off-canvas.source.test.ts`). */
 function coldOpenBody(): string {
@@ -31,28 +31,29 @@ function coldOpenBody(): string {
 }
 
 describe('the cold-open dispatch block (source pins)', () => {
-  it('stands IN FRONT of the travel call — an open verb never reaches it', () => {
-    // The travel call is what moved the user's screen. Scoped to the dispatch's source-routing
-    // block (Canvas has one other, unrelated travel for the browser-verb guest lookup), the
-    // cold-open guard must precede the single travel in it, or the block is dead code sitting
-    // behind the very thing it replaces.
+  it('stands IN FRONT of the off-screen refusal — an open verb never reaches it', () => {
+    // The travel call that moved the user's screen is gone (Fix #16); the source-routing block now
+    // ends in the refusal. The cold-open guard must precede it, or the block is dead code sitting
+    // behind a refusal of every open. (The refusal's "Go there" button travels on the user's click,
+    // with its own `projectId`, which is not the call pinned absent here.)
     const from = src.indexOf('routeControlSource(projects, activeId, sourceNodeId)')
     expect(from, 'the source-routing lookup').toBeGreaterThan(-1)
     const to = src.indexOf('waitForCanvasNode(', from)
     expect(to, 'the post-routing canvas wait').toBeGreaterThan(from)
     const routing = src.slice(from, to)
-    expect(routing.match(/travelToProjectRef\.current\(route\.projectId\)/g)?.length).toBe(1)
+    expect(routing).not.toMatch(/travelToProjectRef\.current\(route\.projectId\)/)
+    expect(routing.match(/offScreenRefusal\(projects, route, verb, sourceNodeId\)/g)?.length).toBe(1)
     const guard = routing.indexOf('if (canColdOpen(verb)) {')
-    const travel = routing.indexOf('travelToProjectRef.current(route.projectId)')
+    const refusal = routing.indexOf('offScreenRefusal(projects, route, verb, sourceNodeId)')
     expect(guard, 'the cold-open guard inside the routing block').toBeGreaterThan(-1)
-    expect(guard).toBeLessThan(travel)
-    // …and it RETURNS, so control cannot fall through to the travel after writing the node.
+    expect(guard).toBeLessThan(refusal)
+    // …and it RETURNS, so control cannot fall through to the refusal after writing the node.
     expect(coldOpenBody()).toMatch(/queuedIds: coldIds\s*\}\s*\}\)\s*return\s*\}/)
   })
 
-  it('the guard polarity is not inverted — a NON-cold verb must still travel', () => {
+  it('the guard polarity is not inverted — a NON-cold verb must still reach the refusal', () => {
     // `if (!canColdOpen(verb))` would cold-write `write`/`close`/`group` into a serialized project
-    // (silently doing nothing useful) and travel for every open — the exact swap of the fix.
+    // (silently doing nothing useful) and refuse every open — the exact swap of the fix.
     expect(src).toContain('if (canColdOpen(verb)) {')
     expect(src).not.toContain('if (!canColdOpen(verb))')
   })

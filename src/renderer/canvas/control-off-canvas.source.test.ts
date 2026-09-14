@@ -18,13 +18,13 @@ import { readFileSync } from 'node:fs'
  */
 const src = readFileSync(new URL('./Canvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-/** The off-canvas block: from its `if (answersOffCanvas(verb))` guard to the travel call it stands
- *  in front of. */
+/** The off-canvas block: from its `if (answersOffCanvas(verb))` guard to the off-screen refusal it
+ *  stands in front of (the travel call it once stood in front of is gone — Fix #16). */
 function offCanvasBody(): string {
   const start = src.indexOf('if (answersOffCanvas(verb)) {')
   expect(start, 'the off-canvas guard').toBeGreaterThan(-1)
-  const end = src.indexOf('travelToProjectRef.current(route.projectId)', start)
-  expect(end, 'the travel call after the block').toBeGreaterThan(start)
+  const end = src.indexOf('offScreenRefusal(projects, route, verb, sourceNodeId)', start)
+  expect(end, 'the refusal after the block').toBeGreaterThan(start)
   return src.slice(start, end)
 }
 
@@ -46,24 +46,25 @@ function addAndConnectBody(): string {
 }
 
 describe('the off-canvas dispatch block (source pins)', () => {
-  it('stands IN FRONT of the travel call — a display verb never reaches it', () => {
-    // The travel call is what moved the user's screen. Scoped to the dispatch's source-routing
-    // block (Canvas has one other, unrelated travel for the browser-verb guest lookup), the
-    // off-canvas guard must precede the single travel in it, or the block is dead code sitting
-    // behind the very thing it replaces.
+  it('stands IN FRONT of the off-screen refusal — a display verb never reaches it', () => {
+    // The travel call that moved the user's screen is gone (Fix #16); the source-routing block now
+    // ends in the refusal. The off-canvas guard must precede it, or the block is dead code sitting
+    // behind a refusal of every display verb.
     const from = src.indexOf('routeControlSource(projects, activeId, sourceNodeId)')
     expect(from, 'the source-routing lookup').toBeGreaterThan(-1)
     const to = src.indexOf('waitForCanvasNode(', from)
     expect(to, 'the post-routing canvas wait').toBeGreaterThan(from)
     const routing = src.slice(from, to)
-    expect(routing.match(/travelToProjectRef\.current\(route\.projectId\)/g)?.length).toBe(1)
+    expect(routing).not.toMatch(/travelToProjectRef\.current\(route\.projectId\)/)
     const guard = routing.indexOf('if (answersOffCanvas(verb)) {')
-    const travel = routing.indexOf('travelToProjectRef.current(route.projectId)')
+    const refusal = routing.indexOf('offScreenRefusal(projects, route, verb, sourceNodeId)')
     expect(guard, 'the off-canvas guard inside the routing block').toBeGreaterThan(-1)
-    expect(guard).toBeLessThan(travel)
-    // …and the travel is its ELSE, so the two are exclusive by construction rather than by a
+    expect(guard).toBeLessThan(refusal)
+    // …and the refusal is its ELSE, so the two are exclusive by construction rather than by a
     // `return` someone can move.
-    expect(routing).toMatch(/\} else \{\s*travelToProjectRef\.current\(route\.projectId\)/)
+    expect(routing).toMatch(
+      /\} else \{\s*(?:\/\/[^\n]*\n\s*)*const refusal = offScreenRefusal\(projects, route, verb, sourceNodeId\)/
+    )
   })
 
   it('the guard polarity is not inverted', () => {

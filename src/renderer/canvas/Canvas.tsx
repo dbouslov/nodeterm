@@ -224,6 +224,7 @@ import {
 } from '../lib/globalKeybindings'
 import { isTerminalTarget, type ContextElement } from '../lib/keyContext'
 import { installTerminalFocusMirror } from '../lib/terminalFocusMirror'
+import { installWebviewFocusKeeper } from '../lib/webviewFocus'
 import { nodeToRefocus } from '../lib/focusRestore'
 import { openDialogCount } from '../components/dialog-stack'
 import {
@@ -263,7 +264,9 @@ import {
   storedNodeListing,
   listRowText,
   answerBrowserResolve,
-  type BrowserResolveProject
+  offScreenRefusal,
+  type BrowserResolveProject,
+  type OffScreenRefusal
 } from '../lib/controlRouting'
 import {
   coldFileIntoFrame,
@@ -6225,8 +6228,24 @@ export function Canvas() {
   }, [onWorktreeAction])
 
   // Same reason as worktreeControlRef below: the agent-control handler needs the CURRENT
-  // travelToProject (defined far below, after the project actions it composes).
+  // travelToProject (defined far below, after the project actions it composes) — for its refusal
+  // notice's "Go there" button only. The handler itself never travels (Fix #16).
   const travelToProjectRef = useRef<(projectId: string) => void>(() => {})
+  /** The human half of an off-screen refusal (Fix #16): a sticky strip on the tab the user IS on,
+   *  whose "Go there" is the only travel left, and it is their click. Once per agent per tab on
+   *  screen, so a background agent that retries or polls cannot re-raise a strip already seen. */
+  const offScreenNoticedRef = useRef(new Set<string>())
+  const showOffScreenRefusal = (sourceNodeId: string, notice: OffScreenRefusal['notice']): void => {
+    const key = `${useProjects.getState().activeProjectId ?? ''}|${sourceNodeId}`
+    if (offScreenNoticedRef.current.has(key)) return
+    offScreenNoticedRef.current.add(key)
+    setNotice({
+      kind: 'info',
+      sticky: true,
+      text: notice.text,
+      action: { label: 'Go there', run: () => travelToProjectRef.current(notice.projectId) }
+    })
+  }
   /** Latest `travelToNode`, for the agent-control handler's off-canvas notice — same reason as
    *  travelToProjectRef: that effect mounts ONCE, so it cannot close over the callback. */
   const travelToNodeRef = useRef<(nodeId: string) => void>(() => {})
@@ -7851,8 +7870,9 @@ export function Canvas() {
   // Terminal focus is pointer-driven (the hover guard blurs xterm on `mouseleave`), so a pointer
   // parked on a second display leaves the app with NO terminal focused, and returning gives the
   // canvas dispatcher every keystroke, where a bare Backspace is `canvas.deleteSelection`. The
-  // refusals (a modal, the board or the settings page is up, a text surface or a terminal already
-  // holds focus) are the pure `nodeToRefocus`; this effect is the DOM read plus the request.
+  // refusals (a modal, the board or the settings page is up, a text surface, a terminal or a web
+  // page holds focus or is about to) are the pure `nodeToRefocus`; this effect is the DOM read plus
+  // the request.
   //
   // Deferred by a macrotask rather than read inline: Chromium restores its own previously focused
   // element around window activation, and deciding before it has settled would read `<body>` and
@@ -7878,17 +7898,31 @@ export function Canvas() {
           openDialogs: openDialogCount(),
           boardOpen: isOverlayViewOpen(activeProjectId),
           settingsOpen: settingsOpenRef.current,
-          liveIds
+          liveIds,
+          webPageHeld: keeper.holding()
         })
         if (target) {
           useTerminalFocus.getState().request(target, { ack: false })
         }
       }, 0)
     }
+    // Fix #16, in this effect because it steers the restore above: when the window loses OS focus a
+    // focused <webview> is let go of (on macOS a guest taking focus again activates the whole app
+    // in front of whatever the user switched to), and main's window-focus signal gives it back.
+    // While a page is held the restore stands down; when the page cannot take the keyboard back,
+    // the restore runs as for any other return. See lib/webviewFocus.ts.
+    const keeper = installWebviewFocusKeeper(window.nodeTerminal, {
+      mayGiveBack: () =>
+        openDialogCount() === 0 &&
+        !isOverlayViewOpen(useProjects.getState().activeProjectId) &&
+        !settingsOpenRef.current,
+      onNotGivenBack: onWindowFocus
+    })
     window.addEventListener('focus', onWindowFocus)
     return () => {
       if (timer) clearTimeout(timer)
       window.removeEventListener('focus', onWindowFocus)
+      keeper.dispose()
     }
   }, [])
 
@@ -9352,17 +9386,26 @@ export function Canvas() {
   // The `browser` verb's resolve round-trip (S8 PR 7). Main intercepts `browser` and asks us the
   // two-and-a-half things ONLY the renderer knows: which project owns the source node, whether that
   // source is a control-capable agent, and whether the per-project browser-control capability is on
-  // RIGHT NOW (read live via projectCapabilityGrantedFor). We answer over the SAME source routing
-  // every verb uses — travelling to the owning project so its <webview> guest is live for main to
-  // drive — and we NEVER run a CDP command. Main makes the security decision (owner + capability +
-  // the CDP allowlist) and does the driving itself (browser-drive.ts / browser-actions.ts).
+  // RIGHT NOW (read live via projectCapabilityGrantedFor). We NEVER run a CDP command. Main makes
+  // the security decision (owner + capability + the CDP allowlist) and does the driving itself
+  // (browser-drive.ts / browser-actions.ts). A source whose project is not on screen is refused
+  // like every other verb that needs the live canvas (Fix #16): it used to travel there so the
+  // guest would be live, which switched the user's tab, and without the travel the guest may not
+  // exist, which main would misreport as a page released to save memory.
   useEffect(() => {
     return api.onBrowserControlResolve(({ requestId, sourceNodeId, browserNodeId }) => {
       const { projects, activeProjectId } = useProjects.getState()
-      const route = routeControlSource(projects, activeProjectId, sourceNodeId)
-      // Bring the owning project's canvas up so main can find the live guest (needsLiveCanvas is true
-      // for `browser`). A closed/blocked/unknown owner just yields the refusal below.
-      if (route.kind === 'switch' || route.kind === 'reopen') travelToProjectRef.current(route.projectId)
+      const refusal = offScreenRefusal(
+        projects,
+        routeControlSource(projects, activeProjectId, sourceNodeId),
+        'browser',
+        sourceNodeId
+      )
+      if (refusal) {
+        showOffScreenRefusal(sourceNodeId, refusal.notice)
+        api.sendBrowserControlResolveResult({ requestId, ok: false, refusal: refusal.error })
+        return
+      }
       const owner = projects.find((p) => p.nodes.some((n) => n.id === sourceNodeId))
       // `browserNodeId` is passed so the answer can carry the browser node's title for the cookie
       // trace; the security decision main makes never reads it.
@@ -9599,7 +9642,7 @@ export function Canvas() {
       // travelling (B4): the live canvas owns the ACTIVE project (a store write there would be
       // clobbered by the next commitCanvas), the projects store owns every other. A target equal
       // to the caller's OWN project falls through to the legacy path unchanged — exactly as if
-      // the flag were omitted (B3a), travel included.
+      // the flag were omitted (B3a).
       if (
         (verb === 'open-terminal' || verb === 'open-claude' || verb === 'open-agent') &&
         args.project !== undefined
@@ -9764,8 +9807,8 @@ export function Canvas() {
       // project's tmux sessions keep running and are re-adopted on the next app start — so after a
       // restart the agents of every project the app did NOT come up on were answered by a canvas
       // that had never heard of them, and got the capability rejection below. Resolve the OWNING
-      // project and travel to it first (lib/controlRouting); `list` changes nothing, so it is
-      // answered out of that project's serialized nodes rather than yanking the user's view.
+      // project (lib/controlRouting). One that is not on screen is never travelled to (Fix #16): its
+      // verb is answered out of that project's serialized nodes when a tier allows, else refused.
       let src = nodesRef.current.find((n) => n.id === sourceNodeId)
       if (!src) {
         const { projects, activeProjectId: activeId } = useProjects.getState()
@@ -10281,15 +10324,24 @@ export function Canvas() {
             // no `measured` (nothing rendered it), which `placeBelow` already falls back for.
             src = nodeStatesToFlow([ocSrc])[0] as CanvasNode
           } else {
-            travelToProjectRef.current(route.projectId)
+            // Fix #16: never TRAVEL here. Every verb still here reads the LIVE canvas of a project
+            // the user is not looking at, and switching their tab on an agent's say-so is the G5
+            // hijack (it moved David off his tab, and brought a focused web node back on screen,
+            // which pulled the window over other apps). Refuse, and tell the human on the tab they
+            // ARE on; the button makes the move theirs. See `offScreenRefusal`.
+            const refusal = offScreenRefusal(projects, route, verb, sourceNodeId)
+            if (refusal) {
+              showOffScreenRefusal(sourceNodeId, refusal.notice)
+              reply({ ok: false, error: refusal.error })
+              return
+            }
           }
         }
-        // Wait for the node to show up on the canvas: after a travel, because the active-project
-        // effect hydrates React Flow a tick later; on `active`, because a control call can land
-        // while the BOOT load of the owning project is still in flight — the very moment a
-        // re-adopted agent starts talking again. `unknown`/`blocked` have no canvas to wait for.
-        // An off-canvas answer has its source already and is deliberately NOT waiting for a
-        // canvas: waiting for one is what travelling was for.
+        // Wait for the node to show up on the canvas on `active`: a control call can land while the
+        // BOOT load of the owning project is still in flight — the very moment a re-adopted agent
+        // starts talking again. `unknown`/`blocked` have no canvas to wait for. An off-canvas
+        // answer has its source already; nothing else off screen gets here (Fix #16: it is refused
+        // above, never travelled to).
         if (!offCanvas && route.kind !== 'unknown' && route.kind !== 'blocked') {
           src = await waitForCanvasNode(() => nodesRef.current.find((n) => n.id === sourceNodeId))
         }
@@ -10319,7 +10371,8 @@ export function Canvas() {
       // Off canvas the two are different projects, and this one decides the ssh flag, the browser
       // session key and the media allowlist route. Reading `activeProjectId` there would answer a
       // background agent's call with whatever the human happens to be looking at; on every other
-      // path the travel has already made the two the same project, so nothing changes.
+      // path the source is on the canvas on screen (Fix #16: nothing else off screen gets this
+      // far), so the two are the same project.
       const ctlProject =
         offCanvas?.project ??
         (() => {
