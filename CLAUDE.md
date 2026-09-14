@@ -1298,7 +1298,14 @@ the wire never see any of it):
   into pulled nodeterm over other apps on every reload. Main's `win.on('blur')` sends
   `IPC.appWindowBlur`, and the renderer (`lib/webviewFocus.ts`, installed in Canvas) blurs a
   focused `<webview>`. Not the page's own `blur`: that fires as soon as focus moves INTO a guest.
-  Never `.focus()` a webview from code that can run while the window is in the background.
+  Main's `win.on('focus')` sends `IPC.appWindowFocus`, and the same keeper gives the page back,
+  synchronously in that listener (a password manager's autotype lands right after the return),
+  unless it left the DOM, something else took focus meanwhile, or a modal, the board or settings
+  is up. While a page is held, the #557 terminal restore (`nodeToRefocus`, `webPageHeld`) stands
+  down: the release itself fires the host page's window `focus` while the app is still in the
+  background (measured), and restoring then would put the last terminal in the page's way. Never
+  `.focus()` a webview from code that can run while the window is in the background; main's focus
+  signal is the only safe trigger (`document.hasFocus()` is true in the background after a release).
 - E2E-verified under Xvfb (CDP): same webContents across Alpha→Beta→Alpha, typed form text + JS
   state + tick counter continuous, zero reloads; wrapper + webview DOM elements identity-stable in
   both directions. Server Edition: inert (no `<webview>` in a plain browser — ghosts are empty

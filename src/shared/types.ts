@@ -3268,6 +3268,10 @@ export interface NodeTerminalApi {
    *  (on macOS a guest taking focus again activates the whole app — renderer/lib/webviewFocus.ts).
    *  Returns unsubscribe. Server Edition: never fires (a browser tab has no `<webview>`). */
   onWindowBlur(listener: () => void): () => void
+  /** Fires when the main window gains OS focus again, so the renderer can give the `<webview>` it
+   *  let go of on `onWindowBlur` its focus back (renderer/lib/webviewFocus.ts). Returns unsubscribe.
+   *  Server Edition: never fires (a browser tab has no `<webview>`). */
+  onWindowFocus(listener: () => void): () => void
   /** Fires when the shell's memory-pressure monitor (core/memory-pressure.ts) sees the host — or
    *  this process's own RSS — cross a watermark: the renderer answers by running its reclaim
    *  levers (hidden WebGL contexts, parked terminals). At most one fire a minute, so the levers

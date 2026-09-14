@@ -224,7 +224,7 @@ import {
 } from '../lib/globalKeybindings'
 import { isTerminalTarget, type ContextElement } from '../lib/keyContext'
 import { installTerminalFocusMirror } from '../lib/terminalFocusMirror'
-import { installWebviewFocusRelease } from '../lib/webviewFocus'
+import { installWebviewFocusKeeper } from '../lib/webviewFocus'
 import { nodeToRefocus } from '../lib/focusRestore'
 import { openDialogCount } from '../components/dialog-stack'
 import {
@@ -7870,8 +7870,9 @@ export function Canvas() {
   // Terminal focus is pointer-driven (the hover guard blurs xterm on `mouseleave`), so a pointer
   // parked on a second display leaves the app with NO terminal focused, and returning gives the
   // canvas dispatcher every keystroke, where a bare Backspace is `canvas.deleteSelection`. The
-  // refusals (a modal, the board or the settings page is up, a text surface or a terminal already
-  // holds focus) are the pure `nodeToRefocus`; this effect is the DOM read plus the request.
+  // refusals (a modal, the board or the settings page is up, a text surface, a terminal or a web
+  // page holds focus or is about to) are the pure `nodeToRefocus`; this effect is the DOM read plus
+  // the request.
   //
   // Deferred by a macrotask rather than read inline: Chromium restores its own previously focused
   // element around window activation, and deciding before it has settled would read `<body>` and
@@ -7897,24 +7898,33 @@ export function Canvas() {
           openDialogs: openDialogCount(),
           boardOpen: isOverlayViewOpen(activeProjectId),
           settingsOpen: settingsOpenRef.current,
-          liveIds
+          liveIds,
+          webPageHeld: keeper.holding()
         })
         if (target) {
           useTerminalFocus.getState().request(target, { ack: false })
         }
       }, 0)
     }
+    // Fix #16, in this effect because it steers the restore above: when the window loses OS focus a
+    // focused <webview> is let go of (on macOS a guest taking focus again activates the whole app
+    // in front of whatever the user switched to), and main's window-focus signal gives it back.
+    // While a page is held the restore stands down; when the page cannot take the keyboard back,
+    // the restore runs as for any other return. See lib/webviewFocus.ts.
+    const keeper = installWebviewFocusKeeper(window.nodeTerminal, {
+      mayGiveBack: () =>
+        openDialogCount() === 0 &&
+        !isOverlayViewOpen(useProjects.getState().activeProjectId) &&
+        !settingsOpenRef.current,
+      onNotGivenBack: onWindowFocus
+    })
     window.addEventListener('focus', onWindowFocus)
     return () => {
       if (timer) clearTimeout(timer)
       window.removeEventListener('focus', onWindowFocus)
+      keeper.dispose()
     }
   }, [])
-
-  // Fix #16: when the window loses OS focus, let go of a focused <webview>. On macOS a guest taking
-  // focus again (its page reloading itself, a ghost page coming back on screen) activates the whole
-  // app in front of whatever the user switched to. See lib/webviewFocus.ts.
-  useEffect(() => installWebviewFocusRelease(window.nodeTerminal.onWindowBlur), [])
 
   // Active session → native window title (issue #414, opt-in `settings.windowTitleActiveSession`):
   // lets window-title-based time trackers (ActivityWatch) tell sessions apart. Two latest-wins

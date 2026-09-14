@@ -131,6 +131,9 @@ export const IPC = {
    *  renderer lets go of a focused `<webview>`: on macOS a guest taking focus again activates the
    *  whole app (Fix #16, renderer/lib/webviewFocus.ts). No payload. */
   appWindowBlur: 'app:window-blur',
+  /** Main → renderer: the main window became key again. The renderer gives the `<webview>` it
+   *  let go of on `appWindowBlur` its focus back (Fix #16, renderer/lib/webviewFocus.ts). No payload. */
+  appWindowFocus: 'app:window-focus',
   appSetBadge: 'app:set-badge',
   /** Main → renderer: the host (or this process's own RSS) crossed a memory-pressure watermark,
    *  so the renderer should run its reclaim levers now (hidden WebGL contexts, parked terminals).

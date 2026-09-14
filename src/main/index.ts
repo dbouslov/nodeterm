@@ -1108,6 +1108,12 @@ function createWindow(): BrowserWindow {
   win.on('blur', () => {
     if (!win.isDestroyed()) win.webContents.send(IPC.appWindowBlur)
   })
+  // ...and the return, where the renderer gives that page its focus back. Only main can say this
+  // too: the release hands the page's document focus while the app is still in the background, so
+  // the page's own window `focus` fires there, where focusing a guest is the steal.
+  win.on('focus', () => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.appWindowFocus)
+  })
 
   // macOS: closing the window hides it instead of destroying it. The app deliberately
   // outlives its window (tmux sessions, hook server, updater); destroying the window

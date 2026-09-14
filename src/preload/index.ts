@@ -742,6 +742,7 @@ const api: NodeTerminalApi = {
     return () => ipcRenderer.removeListener(IPC.appFocusNode, handler)
   },
   onWindowBlur: subscribe(IPC.appWindowBlur),
+  onWindowFocus: subscribe(IPC.appWindowFocus),
   onMemoryPressure: (listener) => {
     const handler = (_e: unknown, severity: 'warning' | 'critical') => listener(severity)
     ipcRenderer.on(IPC.appMemoryPressure, handler)

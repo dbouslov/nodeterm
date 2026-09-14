@@ -426,7 +426,8 @@ the agent and puts a sticky notice with a **Go there** button on the tab the use
 travels on an agent's say-so any more — `browser` included, which is refused off screen the same
 way. And never leave a `<webview>` focused while
 the window is in the background: on macOS a guest taking focus again activates the whole app
-(`renderer/lib/webviewFocus.ts`).
+(`renderer/lib/webviewFocus.ts`). That module gives the page its focus back on main's window-focus
+signal (`onWindowFocus`) and nowhere else; the page's own window `focus` fires in the background.
 
 Three things to carry over when you put a verb in one of the two off-screen tiers. **The acting
 project is the SOURCE's**: `ctlProject` decides the ssh flag, the browser session key and the media

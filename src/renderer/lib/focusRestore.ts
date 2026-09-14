@@ -38,6 +38,11 @@ export interface FocusRestoreState {
    * guesses: `nodesRef` is only trustworthy while its epoch tag still matches the active project.
    */
   liveIds: ReadonlySet<string>
+  /**
+   * A web page that had the keyboard when the window lost OS focus was released, and gets it back
+   * from main's window-focus signal (`WebviewFocusKeeper.holding()`, lib/webviewFocus.ts).
+   */
+  webPageHeld: boolean
 }
 
 /**
@@ -57,6 +62,12 @@ export interface FocusRestoreState {
  *   user having left the app from a text field; it is not ours to override.
  * - **A terminal already has focus**: the pointer never left, so nothing was lost. Restoring
  *   would be a no-op at best and could move focus to a DIFFERENT node at worst.
+ * - **A web page has the keyboard, or is about to get it back** (Fix #16): a focused `<webview>`
+ *   is released when the window loses OS focus, and the release hands the host document focus
+ *   while the app is still in the background, which fires the very window `focus` this runs on
+ *   (measured, Electron 42.10.1). The page gets the keyboard back from main's focus signal; a
+ *   terminal restored meanwhile would take it first. When the page cannot take it back, the
+ *   keeper runs this restore in its place.
  * - **The remembered node is not on the canvas we are looking at**: `lastNodeId` deliberately
  *   survives a project switch, and a request for an unmounted node is not dropped, it stays
  *   LATENT until that node mounts (`TerminalNode`'s `lastFocusReqRef` starts at 0, and only the
@@ -65,7 +76,8 @@ export interface FocusRestoreState {
  *   what keeps the restore bound to the canvas the activation actually returned to.
  */
 export function nodeToRefocus(state: FocusRestoreState): string | null {
-  const { lastNodeId, activeElement, openDialogs, boardOpen, settingsOpen, liveIds } = state
+  const { lastNodeId, activeElement, openDialogs, boardOpen, settingsOpen, liveIds, webPageHeld } =
+    state
   if (!lastNodeId || openDialogs > 0) {
     return null
   }
@@ -76,6 +88,9 @@ export function nodeToRefocus(state: FocusRestoreState): string | null {
     return null
   }
   if (isTerminalTarget(activeElement) || isTypingTarget(activeElement)) {
+    return null
+  }
+  if (webPageHeld || activeElement?.tagName === 'WEBVIEW') {
     return null
   }
   return lastNodeId
