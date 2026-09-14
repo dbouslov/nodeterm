@@ -464,7 +464,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  so there is nothing to wait for and nothing to poll. Say where it went rather than assuming',
     '  the user saw it.',
     '- Verbs that act on nodes that ALREADY exist (`write`, `close`, `rename`, `color`, `group`, `move`,',
-    '  `arrange`, `align`, `assign`, `board`, `link`, `restructure`, `retire`, …): each one',
+    '  `arrange`, `align`, `assign`, `board`, `link`, `restructure`, `retire`, `browser`, …), and',
+    '  `spawn-team` / `open-worktree` (unlike the open verbs above, these do not open cold): each one',
     '  needs your project ON SCREEN. If it is not, the call is refused, because nodeterm',
     "  never switches the user's view for an agent. The user is shown a notice naming your project,",
     '  with a button to go there. Do not loop on the refusal: retry once they have opened your project,',
@@ -999,7 +1000,8 @@ Verbs:
   file is read/fetched back over the connection), but \`show-web --file/--html\` is refused —
   use \`--url\`, or copy the file to the desktop first.
 - Verbs that act on nodes that ALREADY exist (\`write\`, \`close\`, \`rename\`, \`color\`, \`group\`, \`move\`,
-  \`arrange\`, \`align\`, \`assign\`, \`board\`, \`link\`, \`restructure\`, \`retire\`, …): each one
+  \`arrange\`, \`align\`, \`assign\`, \`board\`, \`link\`, \`restructure\`, \`retire\`, \`browser\`, …), and
+  \`spawn-team\` / \`open-worktree\` (unlike the open verbs above, these do not open cold): each one
   needs your project ON SCREEN. If it is not, the call is refused, because nodeterm
   never switches the user's view for an agent. The user is shown a notice naming your project,
   with a button to go there. Do not loop on the refusal: retry once they have opened your project,

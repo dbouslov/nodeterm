@@ -2065,7 +2065,8 @@ still sees a station that finished before a relaunch; see Dependency edges, item
     display node has nothing to read, so a bridge there would grant a context link the live path
     never draws. **`ctlProject` resolves from the SOURCE's project**, not the active one — off
     canvas it decides the ssh flag, the browser session key and the media allowlist route; on
-    every other path the travel has already made the two the same project. None of the four takes
+    every other path the source is on the canvas on screen (nothing else off screen gets past the
+    routing, Fix #16), so the two are the same project. None of the four takes
     `--group`, which is why this set owes no worktree question; a verb joining it that does would,
     because `cwdForNewNodeIn` subtracts `staleGroupIds`, which is epoch-scoped to the ACTIVE
     project.
@@ -2079,9 +2080,11 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   sticky notice on the tab the user IS on naming the agent and the project; its **Go there** button
   (`travelToProjectRef`) is the only travel left, and it is the user's click. **`browser` is the
   pair worth stating beside `open-browser`**: it NAVIGATES a mounted `<webview>` guest, while
-  `open-browser` merely places the node. Its resolve no longer travels either, so a background
-  agent drives its page only while that page's guest is alive (a keep-alive ghost counts), and
-  main refuses by name when it is not. Route `active` is byte-identical to before.
+  `open-browser` merely places the node. Off screen its resolve is refused the same way, with the
+  same notice: the travel was what made its guest live, and without it main would misreport a
+  missing guest as a page released to save memory. The notice shows once per agent per tab on
+  screen (`showOffScreenRefusal`), so an agent that retries or polls cannot re-raise a strip the
+  user dismissed. Route `active` is byte-identical to before.
   **The human is told, once, in the other voice.** The reply goes to the agent; without a strip the
   person sees nothing at all, and the whole point of not travelling is that the choice to go and
   look stays theirs — a choice they can only make if they are told there is something to look at.

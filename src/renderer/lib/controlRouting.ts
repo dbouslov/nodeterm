@@ -10,8 +10,9 @@
 // in the live canvas alone therefore rejected every agent outside the project the app happened to
 // come up on — reported as "source node is not a control-capable agent", which is what a node
 // carrying a non-control agent gets, so the failure read as a lost capability rather than as the
-// wrong canvas answering. Resolve the OWNING project instead, then travel to it (or, for a verb
-// that reads and changes nothing, answer straight out of its serialized nodes).
+// wrong canvas answering. Resolve the OWNING project instead, then answer out of its serialized
+// nodes where one of the tiers below allows, and refuse otherwise (`offScreenRefusal`). It is never
+// travelled to (Fix #16).
 
 import { canControlCanvas, type AgentId } from '@shared/agents/config'
 import { normalizeNodeAnnotation } from '@shared/node-annotation'
@@ -43,8 +44,9 @@ export interface StoredNode {
 /**
  * Where a control request must be applied:
  * - `active`  — the source is on the live canvas (or its project is already active): apply here.
- * - `switch`  — an open project's canvas: activate that tab first.
- * - `reopen`  — a closed project (its sessions still run): restore the tab, then activate it.
+ * - `switch`  — another OPEN project, not on screen: answered from its store where a tier allows,
+ *               else refused (`offScreenRefusal`). Its tab is never activated for it (Fix #16).
+ * - `reopen`  — the same for a CLOSED project (its sessions still run); its tab is never reopened.
  * - `blocked` — a project whose files are unreadable: travelling there would show an empty canvas.
  * - `unknown` — no open project owns this node id.
  */

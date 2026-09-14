@@ -12,8 +12,10 @@
  *
  * The signal is MAIN's window blur (`onWindowBlur`), not the page's own `blur`: the page's window
  * blurs the moment focus moves INTO a guest (a child browsing context), so releasing on that would
- * make every web page untypeable. The cost: back in nodeterm, a page is no longer focused until it
- * is clicked.
+ * make every web page untypeable. Main's blur also fires when a sheet or DevTools takes the key
+ * window; releasing then is harmless. The cost: coming back, the page no longer has focus, so the
+ * app's usual focus restore (`nodeToRefocus`) hands the keyboard to the last terminal (a
+ * `<webview>` is not a typing target there). Click the page to type into it again.
  */
 export function releaseWebviewFocus(doc: Pick<Document, 'activeElement'>): boolean {
   const el = doc.activeElement as HTMLElement | null

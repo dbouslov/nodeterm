@@ -423,8 +423,8 @@ node has no session behind it and is finished the moment it is written, so it re
 true` and never `queued`). Everything that acts on nodes which already exist reads live state the
 serialized copy does not carry, so off screen it is REFUSED (Fix #16): `offScreenRefusal` answers
 the agent and puts a sticky notice with a **Go there** button on the tab the user is on. Nothing
-travels on an agent's say-so any more — `browser` included, which navigates a mounted `<webview>`
-guest and now drives it only while that guest is alive. And never leave a `<webview>` focused while
+travels on an agent's say-so any more — `browser` included, which is refused off screen the same
+way. And never leave a `<webview>` focused while
 the window is in the background: on macOS a guest taking focus again activates the whole app
 (`renderer/lib/webviewFocus.ts`).
 

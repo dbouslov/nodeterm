@@ -265,7 +265,8 @@ import {
   listRowText,
   answerBrowserResolve,
   offScreenRefusal,
-  type BrowserResolveProject
+  type BrowserResolveProject,
+  type OffScreenRefusal
 } from '../lib/controlRouting'
 import {
   coldFileIntoFrame,
@@ -6230,6 +6231,21 @@ export function Canvas() {
   // travelToProject (defined far below, after the project actions it composes) — for its refusal
   // notice's "Go there" button only. The handler itself never travels (Fix #16).
   const travelToProjectRef = useRef<(projectId: string) => void>(() => {})
+  /** The human half of an off-screen refusal (Fix #16): a sticky strip on the tab the user IS on,
+   *  whose "Go there" is the only travel left, and it is their click. Once per agent per tab on
+   *  screen, so a background agent that retries or polls cannot re-raise a strip already seen. */
+  const offScreenNoticedRef = useRef(new Set<string>())
+  const showOffScreenRefusal = (sourceNodeId: string, notice: OffScreenRefusal['notice']): void => {
+    const key = `${useProjects.getState().activeProjectId ?? ''}|${sourceNodeId}`
+    if (offScreenNoticedRef.current.has(key)) return
+    offScreenNoticedRef.current.add(key)
+    setNotice({
+      kind: 'info',
+      sticky: true,
+      text: notice.text,
+      action: { label: 'Go there', run: () => travelToProjectRef.current(notice.projectId) }
+    })
+  }
   /** Latest `travelToNode`, for the agent-control handler's off-canvas notice — same reason as
    *  travelToProjectRef: that effect mounts ONCE, so it cannot close over the callback. */
   const travelToNodeRef = useRef<(nodeId: string) => void>(() => {})
@@ -9360,15 +9376,26 @@ export function Canvas() {
   // The `browser` verb's resolve round-trip (S8 PR 7). Main intercepts `browser` and asks us the
   // two-and-a-half things ONLY the renderer knows: which project owns the source node, whether that
   // source is a control-capable agent, and whether the per-project browser-control capability is on
-  // RIGHT NOW (read live via projectCapabilityGrantedFor). We answer from the store WITHOUT
-  // travelling to the owning project (Fix #16: an agent never switches the user's tab), so a
-  // background agent drives its page only while that page's guest is alive — a keep-alive ghost
-  // counts — and main refuses by name when it is not. We NEVER run a CDP command. Main makes the
-  // security decision (owner + capability + the CDP allowlist) and does the driving itself
-  // (browser-drive.ts / browser-actions.ts).
+  // RIGHT NOW (read live via projectCapabilityGrantedFor). We NEVER run a CDP command. Main makes
+  // the security decision (owner + capability + the CDP allowlist) and does the driving itself
+  // (browser-drive.ts / browser-actions.ts). A source whose project is not on screen is refused
+  // like every other verb that needs the live canvas (Fix #16): it used to travel there so the
+  // guest would be live, which switched the user's tab, and without the travel the guest may not
+  // exist, which main would misreport as a page released to save memory.
   useEffect(() => {
     return api.onBrowserControlResolve(({ requestId, sourceNodeId, browserNodeId }) => {
-      const { projects } = useProjects.getState()
+      const { projects, activeProjectId } = useProjects.getState()
+      const refusal = offScreenRefusal(
+        projects,
+        routeControlSource(projects, activeProjectId, sourceNodeId),
+        'browser',
+        sourceNodeId
+      )
+      if (refusal) {
+        showOffScreenRefusal(sourceNodeId, refusal.notice)
+        api.sendBrowserControlResolveResult({ requestId, ok: false, refusal: refusal.error })
+        return
+      }
       const owner = projects.find((p) => p.nodes.some((n) => n.id === sourceNodeId))
       // `browserNodeId` is passed so the answer can carry the browser node's title for the cookie
       // trace; the security decision main makes never reads it.
@@ -9605,7 +9632,7 @@ export function Canvas() {
       // travelling (B4): the live canvas owns the ACTIVE project (a store write there would be
       // clobbered by the next commitCanvas), the projects store owns every other. A target equal
       // to the caller's OWN project falls through to the legacy path unchanged — exactly as if
-      // the flag were omitted (B3a), travel included.
+      // the flag were omitted (B3a).
       if (
         (verb === 'open-terminal' || verb === 'open-claude' || verb === 'open-agent') &&
         args.project !== undefined
@@ -10294,13 +10321,7 @@ export function Canvas() {
             // ARE on; the button makes the move theirs. See `offScreenRefusal`.
             const refusal = offScreenRefusal(projects, route, verb, sourceNodeId)
             if (refusal) {
-              const { projectId } = refusal.notice
-              setNotice({
-                kind: 'info',
-                sticky: true,
-                text: refusal.notice.text,
-                action: { label: 'Go there', run: () => travelToProjectRef.current(projectId) }
-              })
+              showOffScreenRefusal(sourceNodeId, refusal.notice)
               reply({ ok: false, error: refusal.error })
               return
             }
@@ -10340,7 +10361,8 @@ export function Canvas() {
       // Off canvas the two are different projects, and this one decides the ssh flag, the browser
       // session key and the media allowlist route. Reading `activeProjectId` there would answer a
       // background agent's call with whatever the human happens to be looking at; on every other
-      // path the travel has already made the two the same project, so nothing changes.
+      // path the source is on the canvas on screen (Fix #16: nothing else off screen gets this
+      // far), so the two are the same project.
       const ctlProject =
         offCanvas?.project ??
         (() => {

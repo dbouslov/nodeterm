@@ -83,7 +83,7 @@ describe('offScreenRefusal — a background agent never moves the user to its ta
   const offScreen = { kind: 'switch', projectId: 'p-code' } as const
 
   it('refuses every verb that needs the live canvas, naming the project to the agent and to the user', () => {
-    for (const verb of ['close', 'write', 'assign', 'group', 'move', 'arrange', 'align', 'rename', 'board']) {
+    for (const verb of ['close', 'write', 'assign', 'group', 'move', 'arrange', 'align', 'rename', 'board', 'browser', 'spawn-team', 'open-worktree']) {
       const r = offScreenRefusal(projects, offScreen, verb, 'term-lead')
       expect(r, verb).not.toBeNull()
       expect(r!.error).toContain('"Code"')
