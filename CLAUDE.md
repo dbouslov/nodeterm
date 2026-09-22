@@ -1291,6 +1291,14 @@ the wire never see any of it):
   a cap slot). `BACKGROUND_WEBVIEW_MAX` (8) hard-caps live background guests, evicting
   longest-retired first; `activateProject` runs BEFORE `retireProject` on every switch so a
   returning page sheds its background clock before that eviction can pick it.
+- **Show the main window on its FIRST `ready-to-show` only (Fix #33, `showOnFirstReady` in
+  `main/main-window.ts`).** The main window's `ready-to-show` fires again on every renderer reload
+  and on every `<webview>` guest load inside it (measured on 42.10.1, stack-traced in the real app),
+  and on macOS `win.show()` activates the app even when the window is already on screen. With
+  `win.on('ready-to-show', () => win.show())`, every web-node load pulled nodeterm over the app the
+  user was typing in (a 30 s meta-refresh dashboard stole the keyboard every 30 s; an agent's
+  Artifact publish opening a web node stole it once). Never call `show()`, `restore()` or
+  `app.focus({ steal })` from anything but a user action (Dock click, notification click, a drop).
 - **Never leave a guest focused while the window is in the background (Fix #16).** On macOS
   Electron activates the whole app when a `<webview>` guest takes focus (measured on 42.10.1: a
   focused guest whose page reloads, or the embedder focusing a webview, brought a background app to

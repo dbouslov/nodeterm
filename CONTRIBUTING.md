@@ -428,6 +428,11 @@ way. And never leave a `<webview>` focused while
 the window is in the background: on macOS a guest taking focus again activates the whole app
 (`renderer/lib/webviewFocus.ts`). That module gives the page its focus back on main's window-focus
 signal (`onWindowFocus`) and nowhere else; the page's own window `focus` fires in the background.
+Main never brings its window forward on its own either (Fix #33): the main window's `ready-to-show`
+fires again on every reload and every `<webview>` page load, and `win.show()` activates the app on
+macOS even when the window is already visible, so the window is shown on the first one only
+(`showOnFirstReady`, `main/main-window.ts`). `show()`, `restore()` and `app.focus({ steal })` belong
+to user actions only: a Dock click, a notification click, a drop.
 
 Three things to carry over when you put a verb in one of the two off-screen tiers. **The acting
 project is the SOURCE's**: `ctlProject` decides the ssh flag, the browser session key and the media

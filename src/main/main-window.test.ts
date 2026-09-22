@@ -7,6 +7,7 @@ import {
   shouldHideOnClose,
   closeAction,
   createCrashReloadPolicy,
+  showOnFirstReady,
   type MainWindowLike
 } from './main-window'
 
@@ -174,5 +175,52 @@ describe('closeAction', () => {
   it('never intercepts on other platforms, fullscreen included', () => {
     expect(closeAction('linux', false, true)).toBe('default')
     expect(closeAction('win32', false, true)).toBe('default')
+  })
+})
+
+describe('showOnFirstReady', () => {
+  // Fix #33: the main window's `ready-to-show` also fires on every <webview> guest load and every
+  // renderer reload (measured, Electron 42.10.1), and `show()` activates the app on macOS even
+  // when the window is already on screen. Showing on each one pulled nodeterm in front of the app
+  // the user was typing in whenever a web node reloaded.
+  function fakeReadyWindow(): { show: ReturnType<typeof vi.fn>; emitReady(): void } & Parameters<
+    typeof showOnFirstReady
+  >[0] {
+    const listeners: (() => void)[] = []
+    const win = {
+      show: vi.fn(),
+      on: (event: 'ready-to-show', cb: () => void) => {
+        if (event === 'ready-to-show') listeners.push(cb)
+      },
+      once: (event: 'ready-to-show', cb: () => void) => {
+        if (event !== 'ready-to-show') return
+        const wrapped = (): void => {
+          listeners.splice(listeners.indexOf(wrapped), 1)
+          cb()
+        }
+        listeners.push(wrapped)
+      },
+      emitReady: () => {
+        for (const cb of [...listeners]) cb()
+      }
+    }
+    return win
+  }
+
+  it('shows the window on its first ready-to-show', () => {
+    const win = fakeReadyWindow()
+    showOnFirstReady(win)
+    expect(win.show).not.toHaveBeenCalled()
+    win.emitReady()
+    expect(win.show).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not show it again when a web page or a reload fires ready-to-show later', () => {
+    const win = fakeReadyWindow()
+    showOnFirstReady(win)
+    win.emitReady()
+    win.emitReady()
+    win.emitReady()
+    expect(win.show).toHaveBeenCalledTimes(1)
   })
 })

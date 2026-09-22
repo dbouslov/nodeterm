@@ -91,3 +91,19 @@ export function closeAction(
   if (!shouldHideOnClose(platform, quitting)) return 'default'
   return isFullScreen ? 'leave-fullscreen-then-hide' : 'hide'
 }
+
+/**
+ * Show a freshly created window once its first page has painted, and never again from that event.
+ * The main window's `ready-to-show` does not fire just once: measured on Electron 42.10.1 it fires
+ * again on every renderer reload AND every <webview> guest load inside the window. On macOS
+ * `show()` activates the app even when the window is already on screen, so an `on` listener pulled
+ * nodeterm in front of whatever app the user was typing in each time a web node loaded — every
+ * 30 s for a dashboard with a meta refresh (Fix #33). Coming back is the user's to do: the Dock
+ * click (`activate`) and a notification click still show the window.
+ */
+export function showOnFirstReady(win: {
+  once(event: 'ready-to-show', cb: () => void): void
+  show(): void
+}): void {
+  win.once('ready-to-show', () => win.show())
+}
