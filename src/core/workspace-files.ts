@@ -14,6 +14,12 @@ import { projectCapabilityFields, readProjectCapabilities } from '../shared/proj
 import { loadedAgentBrowserPartition } from '../shared/browser-partition'
 import { sanitizeProjectIcon, type ProjectIcon } from '../shared/project-icon'
 import { sanitizeTriggerSpec } from '../shared/trigger'
+import {
+  pruneLayoutViewports,
+  sanitizeLayouts,
+  type CanvasLayout,
+  type LayoutViewports
+} from '../shared/canvas-layout'
 
 /**
  * Drop a browser node's persisted `partition` unless it is exactly the jar THIS project (its
@@ -145,8 +151,23 @@ export interface ProjectFileV1 {
   /** Per-project capability switch (@shared/project-capabilities): agents may message other agent
    *  nodes in this project. Git-shared like `agentBrowserControl`, read with the same strictness. */
   agentMessaging?: boolean
+  /** Per-project capability switch (@shared/project-capabilities): agents may file GitHub issues
+   *  for product gaps they hit. Git-shared like the two above, read with the same strictness —
+   *  and the only one of the three whose effect leaves this machine, so a stranger's `true` here
+   *  buys nothing until this machine's user answers its notice. */
+  agentIssueReporting?: boolean
   dinoHighScore?: number
   kanban?: ProjectKanban
+  /**
+   * Named geometry snapshots for this canvas (@shared/canvas-layout). CONTENT, exactly like
+   * `kanban`: an arrangement is a fact about the nodes this file already carries, and restoring
+   * one writes those same node fields, so a teammate's checkout is entitled to it.
+   *
+   * Re-sanitized in BOTH directions (`fileToProject` on the way in, `projectToFile` on the way
+   * out), see `sanitizeLayouts`. The per-layout CAMERA is not here and never will be: it is
+   * machine-local and rides `IndexEntryV3.layoutViewports`, the same rule as `viewport`.
+   */
+  layouts?: CanvasLayout[]
   // NOTE: closedSessions is deliberately NOT here — see `Project.closedSessions` /
   // `IndexEntryV3.closedSessions`. It is machine-local, like `viewport`/`breadcrumbs`.
 }
@@ -203,6 +224,14 @@ export interface IndexEntryV3 {
   /** MACHINE-LOCAL camera navigation history for a ref'd project. Same rule as `viewport`: this
    *  user's "where was I" is not something a repo shares. See NavStop. */
   breadcrumbs?: NavStop[]
+  /**
+   * MACHINE-LOCAL camera per canvas layout, keyed by layout id (@shared/canvas-layout). The
+   * layouts themselves are shared CONTENT in the project file; where THIS user was looking when
+   * they saved one is not, same rule as `viewport` and `breadcrumbs` above. Pruned against the
+   * live layouts on every load and save (`pruneLayoutViewports`), because workspace.json is
+   * forever and a canvas churns through ids.
+   */
+  layoutViewports?: LayoutViewports
   /**
    * MACHINE-LOCAL closed-session history for a ref'd project (folder or ssh) — see
    * `Project.closedSessions`. Whose trash can holds what deleted nodes is a per-machine fact, not
@@ -327,6 +356,12 @@ export function projectToFile(
     stripSharedNodeExec(p.cwd ? toPortableNodes(p.nodes, p.cwd) : p.nodes)
   )
   const icon = sanitizeProjectIcon(p.icon)
+  // The SECOND seam for layouts. Live project data is reachable by a peer canvas mutation and by a
+  // hand edit that already got past a read, and whatever we write is what the next machine trusts:
+  // the same reason `normalizeNodeIcon` and `sanitizeNodeTriggers` validate on the way OUT as well
+  // as IN. Validating one direction only passes every round-trip test while leaving the other one
+  // open. See @shared/canvas-layout.
+  const layouts = sanitizeLayouts(p.layouts)
   return {
     version: 1,
     rev,
@@ -345,7 +380,10 @@ export function projectToFile(
     // the acknowledgment is machine-local (IndexEntryV3.capabilityAck) and must never travel.
     ...projectCapabilityFields(p),
     ...(p.dinoHighScore ? { dinoHighScore: p.dinoHighScore } : {}),
-    ...(p.kanban ? { kanban: p.kanban } : {})
+    ...(p.kanban ? { kanban: p.kanban } : {}),
+    // `layoutViewports` is deliberately absent: a field of that name in the shared file is a
+    // forgery (a repo carrying one person's camera), and `fileToProject` never reads one.
+    ...(layouts ? { layouts } : {})
   }
 }
 
@@ -471,6 +509,10 @@ export function fileToProject(
     capabilityAck?: import('../shared/project-capability-consent').CapabilityAckMap
     /** This machine's navigation history for this entry (never from the file). */
     breadcrumbs?: NavStop[]
+    /** This machine's camera per canvas layout for this entry. Taken from the index entry ONLY: a
+     *  field of this name in the shared file is a forgery and is never read. Pruned below against
+     *  the layouts the file actually carries. */
+    layoutViewports?: LayoutViewports
     /** This machine's closed-session history for this entry (never from the file) — already
      *  validated/capped/trigger-sanitized by the caller (`sanitizeLoadedClosedSessions`). */
     closedSessions?: ClosedSessionEntry[]
@@ -482,6 +524,11 @@ export function fileToProject(
 ): Project {
   const defaultAccountId = base.defaultAccountId ?? f.defaultAccountId
   const icon = sanitizeProjectIcon(f.icon)
+  const layouts = sanitizeLayouts(f.layouts)
+  // A camera for a layout the file no longer carries names nothing: a teammate deleted the layout
+  // (they are shared content, the cameras are not), or a hand edit dropped it. Pruning on the way
+  // in as well as out is what stops workspace.json accumulating orphans forever.
+  const layoutViewports = pruneLayoutViewports(base.layoutViewports, layouts)
   return {
     id: base.id,
     // A project whose stored name IS its own path is one this machine (or a teammate's) created
@@ -529,7 +576,10 @@ export function fileToProject(
     ...(base.breadcrumbs?.length ? { breadcrumbs: base.breadcrumbs } : {}),
     // Machine-local, from the index entry ONLY, same rule as `breadcrumbs`: a file field named
     // `closedSessions` is never read here — the shared file cannot carry this machine's trash can.
-    ...(base.closedSessions?.length ? { closedSessions: base.closedSessions } : {})
+    ...(base.closedSessions?.length ? { closedSessions: base.closedSessions } : {}),
+    ...(layouts ? { layouts } : {}),
+    // Machine-local, from the index entry ONLY, same rule as `breadcrumbs`.
+    ...(layoutViewports ? { layoutViewports } : {})
   }
 }
 
@@ -629,6 +679,7 @@ export function splitWorkspace(
     // empty stand-in, and writing it would forget where the user actually was; `WorkspaceStore.save`
     // restores both from the previous entry instead, exactly as it does for `cache`/`localExec`.
     // Inline entries need none of this: they store the whole Project verbatim.
+    const layoutViews = pruneLayoutViewports(p.layoutViewports, sanitizeLayouts(p.layouts))
     const localState = {
       ...(p.viewport ? { viewport: p.viewport } : {}),
       ...(p.defaultAccountId ? { defaultAccountId: p.defaultAccountId } : {}),
@@ -641,7 +692,10 @@ export function splitWorkspace(
       // written back uncapped.
       ...(p.closedSessions?.length
         ? { closedSessions: p.closedSessions.slice(0, CLOSED_SESSIONS_CAP) }
-        : {})
+        : {}),
+      // The layouts themselves are content and ride the file; only this machine's camera per
+      // layout is kept here, pruned against the layouts that will actually be written.
+      ...(layoutViews ? { layoutViewports: layoutViews } : {})
     }
     if (p.unavailable) {
       // Placeholder (folder missing / server unreachable at load): its nodes:[] is not real

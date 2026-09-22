@@ -223,6 +223,10 @@ export interface HookEventMeta {
  * terminals included — and it writes a file; a caller the app cannot name gets neither. NEW verb,
  * so fail-closed from day one strands nobody.
  *
+ * `settings` (@shared/settings-verb) joins for the same reason again: its `--set` raises a dialog
+ * that names the requesting node, and the user's click grants what the requester asked for — a
+ * requester nobody can verify is a requester the dialog would be lying about. NEW verb.
+ *
  * Consulted in the `/control/` route BEFORE `identityGate`'s decision is, so no future change to
  * the policy table can widen it; `messaging-verified-only.test.ts` drives the route on both sides
  * of every hatch and is the test that fails if either half of this comment stops being true.
@@ -234,7 +238,11 @@ export const requiresVerified: ReadonlySet<string> = new Set([
   'sticky',
   'annotate',
   'open-project',
-  'snapshot'
+  'snapshot',
+  'settings',
+  // Publishes text from this machine to a repository. `legacy` means "we cannot judge this
+  // caller", and an unjudgeable caller must never be the one that files.
+  'report-issue'
 ])
 
 /**
@@ -258,8 +266,16 @@ export const ANNOTATE_CONTROL_REFUSAL = 'Annotation write refused.'
 /** Same posture for the verified-only `snapshot` verb. */
 export const SNAPSHOT_CONTROL_REFUSAL = 'Snapshot refused.'
 
+/** Same posture for `settings`: a caller that cannot prove which node it is must not read this
+ *  machine's settings, and must never be the one a settings dialog names as the requester. */
+export const SETTINGS_CONTROL_REFUSAL = 'Settings access refused.'
+/** One sentence, names what was refused, no diagnosis — house style for every refusal here. */
+export const REPORT_ISSUE_CONTROL_REFUSAL = 'Issue reporting refused.'
+
 /** The verified-only refusal, worded for the verb that was refused. */
 export function verifiedRefusalFor(verb: string): string {
+  if (verb === 'settings') return SETTINGS_CONTROL_REFUSAL
+  if (verb === 'report-issue') return REPORT_ISSUE_CONTROL_REFUSAL
   if (verb === 'sticky') return STICKY_CONTROL_REFUSAL
   if (verb === 'open-project') return OPEN_PROJECT_CONTROL_REFUSAL
   if (verb === 'annotate') return ANNOTATE_CONTROL_REFUSAL

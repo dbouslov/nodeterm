@@ -416,6 +416,16 @@ export const IconMore = () => (
   </svg>
 )
 
+/** Vertical ellipsis: the per-row overflow menu, where a horizontal one would read as a separator
+ *  between the label beside it and what follows. */
+export const IconMoreVertical = () => (
+  <svg {...S} fill="currentColor" stroke="none">
+    <circle cx="12" cy="5.5" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="12" cy="18.5" r="1.6" />
+  </svg>
+)
+
 /** Bare checkmark. IconCircleCheck is the badged variant and means something else: a completed
  *  thing, not a selected one. */
 export const IconCheck = () => (

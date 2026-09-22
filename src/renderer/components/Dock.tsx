@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { AGENT_CONFIG, BUILTIN_AGENT_IDS, type AgentId, type BuiltinAgentId } from '@shared/agents/config'
+import type { CanvasLayout } from '@shared/canvas-layout'
 import type { CustomAgent } from '@shared/types'
 import { formatShortcut, isHoldChord } from '@shared/shortcut'
 import { hasSpeechModel } from '@shared/speech'
@@ -9,6 +10,7 @@ import { useSettings } from '../state/settings'
 import { useProjects } from '../state/projects'
 import { accountsForProject, sshAccountsHint } from '../state/workspace'
 import { CONTENT_ADD_ITEMS, contentAddItemsToDockRows, type AddHandlers } from '../lib/addMenuSpec'
+import { layoutSubtitle, sortedLayouts } from '../lib/canvasLayoutView'
 import { ZOOM_PRESETS, activeZoomPreset } from '../lib/zoomPresets'
 import { Tooltip } from './Tooltip'
 
@@ -44,6 +46,15 @@ interface DockProps {
   onGoForward: () => void
   onSave: () => void
   onFitView: () => void
+  /** Saves the current arrangement under a name the user is asked for. */
+  onSaveLayout: () => void
+  /** Puts the canvas back the way `layout` recorded it. No confirm: it moves nodes and nothing
+   *  else, and the undo stack picks it up like any other placement. */
+  onRestoreLayout: (layout: CanvasLayout) => void
+  /** Overwrites `layout` with the arrangement now on screen, keeping its name. */
+  onUpdateLayout: (layout: CanvasLayout) => void
+  onRenameLayout: (layout: CanvasLayout) => void
+  onDeleteLayout: (layout: CanvasLayout) => void
   onZoomIn: () => void
   onZoomOut: () => void
   /** Jump to an exact zoom (a preset percentage), holding the screen centre still. */
@@ -83,6 +94,11 @@ export function Dock({
   onGoForward,
   onSave,
   onFitView,
+  onSaveLayout,
+  onRestoreLayout,
+  onUpdateLayout,
+  onRenameLayout,
+  onDeleteLayout,
   onZoomIn,
   onZoomOut,
   onZoomTo,
@@ -91,6 +107,7 @@ export function Dock({
 }: DockProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false)
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
   // Which builtin's flyout submenu is open (at most one). A builtin earns a flyout only when it has
   // ≥1 inheriting custom agent (one with a `baseAgent` matching it); otherwise it stays a flat
   // button, byte-identical to before this nesting existed.
@@ -143,6 +160,20 @@ export function Dock({
     setZoomMenuOpen(false)
   }
 
+  const pickLayout = (fn: () => void) => () => {
+    fn()
+    setLayoutMenuOpen(false)
+  }
+
+  // A relay tab is a live connection to another machine, never a workspace on this disk, so there
+  // is nothing here to write a layout into. Disabled with the reason rather than hidden - the rule
+  // this repo sets for the cwd-less add-menu rows and the trigger card.
+  const layoutsDisabled = !!activeProject?.remote
+  // Re-asked at render, not only at the click: switching to a relay tab while the menu is open
+  // would otherwise leave it (and its backdrop) standing over a canvas it cannot act on.
+  const layoutMenuVisible = layoutMenuOpen && !layoutsDisabled
+  const layoutRows = sortedLayouts(activeProject?.layouts)
+
   // The preset the readout currently sits on, or null between two — the menu's tick.
   const activePreset = activeZoomPreset(zoomPct)
 
@@ -173,12 +204,13 @@ export function Dock({
 
   return (
     <>
-      {(menuOpen || zoomMenuOpen) && (
+      {(menuOpen || zoomMenuOpen || layoutMenuVisible) && (
         <div
           className="dock-backdrop"
           onClick={() => {
             setMenuOpen(false)
             setZoomMenuOpen(false)
+            setLayoutMenuOpen(false)
           }}
         />
       )}
@@ -316,6 +348,7 @@ export function Dock({
             aria-label="Add node"
             onClick={() => {
               setZoomMenuOpen(false)
+              setLayoutMenuOpen(false)
               setMenuOpen((v) => !v)
             }}
           >
@@ -364,6 +397,102 @@ export function Dock({
             <FrameIcon />
           </button>
         </Tooltip>
+        {/* An arrangement is view state, not a node you add, so it sits in the view cluster rather
+            than behind the "+". */}
+        <div className="dock-layouts-wrap">
+          {layoutMenuVisible && (
+            <div className="dock-menu dock-layouts-menu">
+              {layoutRows.length === 0 ? (
+                // Never an empty popover: a menu that opens onto nothing reads as broken rather
+                // than as empty.
+                <button disabled>
+                  <span>No layouts saved yet</span>
+                </button>
+              ) : (
+                layoutRows.map((layout) => (
+                  <div key={layout.id} className="dock-menu__row">
+                    <button
+                      className="dock-menu__row-main"
+                      onClick={pickLayout(() => onRestoreLayout(layout))}
+                    >
+                      <LayoutsIcon />
+                      <span className="dock-menu__row-text">
+                        <span className="dock-menu__row-name">{layout.name}</span>
+                        <span className="dock-menu__row-sub">{layoutSubtitle(layout)}</span>
+                      </span>
+                    </button>
+                    <span className="dock-menu__row-actions">
+<Tooltip label="Update to the arrangement on screen" placement="right">
+                        <button
+                          className="dock-menu__row-act"
+                          aria-label={`Update layout ${layout.name} to the current arrangement`}
+                          onClick={(e) => {
+                            // The row itself restores; these three must not.
+                            e.stopPropagation()
+                            setLayoutMenuOpen(false)
+                            onUpdateLayout(layout)
+                          }}
+                        >
+                          <UpdateIcon />
+                        </button>
+                      </Tooltip>
+                      <Tooltip label="Rename" placement="right">
+                        <button
+                          className="dock-menu__row-act"
+                          aria-label={`Rename layout ${layout.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setLayoutMenuOpen(false)
+                            onRenameLayout(layout)
+                          }}
+                        >
+                          <PencilIcon />
+                        </button>
+                      </Tooltip>
+                      <Tooltip label="Delete" placement="right">
+                        <button
+                          className="dock-menu__row-act"
+                          aria-label={`Delete layout ${layout.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setLayoutMenuOpen(false)
+                            onDeleteLayout(layout)
+                          }}
+                        >
+                          <CrossIcon />
+                        </button>
+                      </Tooltip>
+                    </span>
+                  </div>
+                ))
+              )}
+              <span className="dock-menu__rule" />
+              <button onClick={pickLayout(onSaveLayout)}>
+                <PlusSmallIcon />
+                <span>Save current layout…</span>
+              </button>
+            </div>
+          )}
+          <Tooltip
+            label={layoutsDisabled ? 'Layouts are managed on the host' : 'Layouts'}
+            placement="top"
+          >
+            <button
+              className={`dock-btn${layoutMenuOpen ? ' active' : ''}`}
+              aria-label="Layouts"
+              aria-haspopup="menu"
+              aria-expanded={layoutMenuOpen}
+              disabled={layoutsDisabled}
+              onClick={() => {
+                setMenuOpen(false)
+                setZoomMenuOpen(false)
+                setLayoutMenuOpen((v) => !v)
+              }}
+            >
+              <LayoutsIcon />
+            </button>
+          </Tooltip>
+        </div>
         <Tooltip
           label={
             dictationOff
@@ -424,6 +553,7 @@ export function Dock({
               aria-expanded={zoomMenuOpen}
               onClick={() => {
                 setMenuOpen(false)
+                setLayoutMenuOpen(false)
                 setZoomMenuOpen((v) => !v)
               }}
             >
@@ -512,6 +642,35 @@ function FrameIcon() {
   return (
     <svg {...S}>
       <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" />
+    </svg>
+  )
+}
+function LayoutsIcon() {
+  return (
+    <svg {...S}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M10 4v16M10 12h11" />
+    </svg>
+  )
+}
+function UpdateIcon() {
+  return (
+    <svg {...S} width={13} height={13}>
+      <path d="M20 11a8 8 0 1 0-2.3 6.3M20 6v5h-5" />
+    </svg>
+  )
+}
+function PencilIcon() {
+  return (
+    <svg {...S} width={13} height={13}>
+      <path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" />
+    </svg>
+  )
+}
+function CrossIcon() {
+  return (
+    <svg {...S} width={13} height={13}>
+      <path d="M6 6l12 12M18 6L6 18" />
     </svg>
   )
 }

@@ -17,6 +17,11 @@ npm run typecheck  # tsc for both the node and web projects — the fastest corr
 npm test           # vitest, unit + integration
 ```
 
+On Windows, run `bootstrap-windows.bat` instead of `npm install`. It verifies the Visual Studio
+C++ workload and its separately installed Spectre-mitigated libraries before compiling `node-pty`.
+It also shields MSVC addon builds from the clang/lld ThinLTO settings inherited from Node 26; a
+plain `npm install` under a stock Node 26 with node-gyp 12 otherwise fails with `LNK1117`.
+
 `npm run server:dev` boots the Server Edition (browser UI) if you are working on that surface.
 
 **If `src/main/node-pty-patch.test.ts` is red, your `node_modules` is unpatched — not your code.**
@@ -44,7 +49,12 @@ The repo is split by Electron process boundary and the split is enforced, not ad
 
 **Put new service logic in `src/core` behind `CorePlatform`, not inline in `src/main`.** That is the
 seam the Server Edition boots from; logic left in `src/main` silently does not exist there, and the
-boundary tests cannot tell you a feature is *missing*.
+boundary tests cannot tell you a feature is *missing*. This keeps happening to the same subsystem:
+the ⌘M transcript read and then the context meter's `context:ensure` both shipped desktop-only, and
+in both cases the browser cast the message into the void and the feature just looked empty. If your
+handler needs something only Electron has (an SSH ControlMaster, a native dialog), make that an
+**injected dep** whose absence is a documented degrade — see `registerTranscriptIpc` /
+`registerContextEnsureIpc` — rather than a reason to keep the whole handler in `src/main`.
 
 ## Three surfaces
 
@@ -97,6 +107,19 @@ lane unaffected.
   PR; copy that really is macOS-specific (the ptmx-limit banner, the notch step) is exempt by name
   with its reason. Comments are not scanned.
 
+- **An overlay you lay over a live terminal steals its wheel — give it `pointer-events: none`.**
+  Wheel routing is a per-packet hit test on `closest('.nowheel')` (ours in `Canvas.tsx`, and React
+  Flow's own `panOnScroll` independently), so the element under the pointer decides, not the node.
+  `.term-node__xterm` carries the class and covers the whole body, so a banner drawn ON a running
+  terminal takes those pixels out of the terminal's wheel area and hands them to the canvas — the
+  user scrolls and the canvas slides instead. `.term-node__upload` and `.term-copy-pill` were
+  already `pointer-events: none` for this; `.term-node__stalecwd` was not (issue #767), and
+  `canvas/terminal-wheel-boundary.test.ts` now fails on the next one. An overlay that REPLACES a
+  dead view keeps the canvas wheel on purpose — there is nothing underneath to scroll. Same rule
+  one layer up: do not "fix" a routing question by moving `nowheel` outward, because a second
+  consumer reads the class and no per-element opt-out can reach it. Deep version: CLAUDE.md §
+  Terminal node lifecycle.
+
 - **The node colour palette is ONE list, and it is also the control boundary.**
   `src/shared/node-colors.ts` is what every picker draws and what `nodeterm color --color C`
   validates against — so a colour the UI offers and a colour the CLI accepts cannot drift apart.
@@ -131,12 +154,32 @@ lane unaffected.
 
 - **Every loosening of a security gate must be a SETTING the user can see and revoke.** A "don't
   ask again" that lives only in a dialog is a permission granted once and never findable again. The
-  canvas-control destructive confirm is the pattern to copy (`@shared/control-confirm`): the dialog
-  can grant only an APP-RUN waiver (in-memory — not `settings.json`, not `localStorage`, so
-  quitting restores the gate), the permanent one exists only in Settings where the option says
-  "permanently", a CANCEL never grants anything, and a waived action still announces itself on
-  screen. Which gates may be waived at all is a TABLE, not an `if` at each call site — so "this one
-  can never be waived" is a tested fact rather than a line somebody forgot to write.
+  canvas-control destructive confirm is the pattern to copy (`@shared/control-confirm`): a CANCEL
+  never grants anything, a waived action still announces itself on screen and NAMES the waiver that
+  let it through, and which gates may be waived at all is a TABLE, not an `if` at each call site —
+  so "this one can never be waived" is a tested fact rather than a line somebody forgot to write.
+  **What a dialog may grant is bounded by SCOPE, not by permanence.** It offers "while nodeterm is
+  running" (in-memory — not `settings.json`, not `localStorage`, so quitting restores the gate) or
+  "always in this project" (machine-local, keyed by project id, pruned like
+  `settings.sidebarCollapsedItems`). The machine-WIDE waiver stays Settings-only, because that is
+  the one a stray click in a dialog that appeared under the user's hands must not be able to grant.
+  Offering only the app-run one was its own failure: it is not what a user who ticks "don't ask
+  again" means, so the real choices were "be asked forever" or "turn it off everywhere". Two rules
+  come with the project scope: it is keyed on the project the call ACTS ON (canvas control routes
+  by source, so that is often not the project on screen), and it is machine-local — never
+  `.nodeterm/project.json`, which is git-shared, or a cloned repo could switch someone's confirms
+  off.
+
+- **An agent may only reach settings through an ALLOWLIST, and every change asks.** The
+  canvas-control `settings` verb (`src/shared/settings-verb.ts`) reads and asks to change a short
+  table of keys; anything off the table is refused by name, and a forbidden set (permission modes,
+  accounts/credentials, node identity, browser control, telemetry, keybindings, confirm waivers)
+  outranks the table — its test walks the table against the set AND a name pattern, so an entry that
+  would let an agent grant itself a power goes red even when added on purpose. `settings` is outside
+  `CONFIRM_WAIVABLE_VERBS`: a CLI that could waive its own confirm would make the confirm decorative.
+  A capability change must land through the UI's own setter (`setProjectCapability`: file flag AND
+  this machine's `'kept'` answer), never a hand-rolled flag write. Adding a key is one line in the
+  table plus a `why`. The Server Edition has no dialog, so it refuses every `--set` by name.
 
 - **A permission mode (or anything else) that rides `project.json` is GIT-SHARED — never key a
   local gate on it alone.** `project.defaultPermissionMode` travels to everyone who clones the
@@ -146,6 +189,26 @@ lane unaffected.
   act only on the user's own machine-local choice — and keep `default` distinct from `global`,
   because reading an unset setting as a deliberate choice is reading consent into silence. Anything
   machine-local goes in `settings.json`; nothing that grants a capability goes in `project.json`.
+  A machine-local DEFAULT for a project capability (`agentMessagingDefault`) is allowed only because
+  it answers ABSENCE: an explicit `true` in `project.json` still needs this machine's recorded
+  answer, an explicit `false` still wins, and "off" must therefore be written as a literal `false`.
+  Read grants through `projectCapabilityGrantedFor(project, cap, settings)` — never the file bit.
+
+- **Nothing an agent asks for may take the user's screen.** Canvas control routes by SOURCE: the
+  request names the agent's own node, and the dispatch has to find the canvas that owns it. For
+  years "that canvas is not on screen" was answered by switching the project tab — so a background
+  agent's `close` moved a user who was typing in another project, applied that project's saved
+  viewport, and took their camera and typing focus for a call they did not make. Every verb now has
+  a decided off-screen behaviour (`src/shared/control-off-screen.ts`) and none of them is "travel":
+  it is answered against the owning project's serialized nodes, or REFUSED with a reason the agent
+  can act on. If you add a verb, give it an entry — a refusal beats a hijack, and a verb with no
+  entry falls into the generic refusal, which is fail-closed but is nobody's decision. Two traps
+  the old shape hid: a verb body that resolves `--node` against the live `nodesRef.current` while
+  answering for another project silently acts on whatever the human is looking at (use
+  `ctlNodes()`), and reading `activeProjectId` inside a verb has the same bug (use `ctlProject`).
+  The guard is `test/acceptance/control-verb-disposition.test.ts`, which walks main's verb table
+  against the renderer's dispositions — deliberately cross-layer, because that is the only way
+  "every verb" is checked rather than remembered.
 
 - **`data.tags` is retired; never write node metadata there.** The kanban label migration
   (`migrateProjectTags`, `renderer/lib/kanban.ts`) strips it from every node on every canvas load,
@@ -164,7 +227,21 @@ lane unaffected.
   refusal was retryable, retried into it in a loop. If you raise a dialog for a bounded request,
   give it the deadline (`ConfirmState.expiresAt`), import the bound rather than re-typing it, have
   it expire slightly AFTER the requester gives up, and answer with "expired" — never "denied by
-  user", which claims a decision the human never made.
+  user", which claims a decision the human never made. Reach for the existing
+  `useExpiringDialog` hook rather than a second effect: the worktree-removal dialog needed the
+  identical rule a day later, and two copies is how one of them quietly misses the next fix. Give
+  the deadline only to a dialog an AGENT raised — one the user opened themselves must never vanish
+  under them — and remember that clearing a dialog is not always just nulling its state (that one
+  also has to release the ref its own busy-guard reads).
+
+- **An error must not name a remedy nobody measured — and the remedy needs its own test.** The
+  `unproven-target-owner` refusal told its caller *"Re-open the target node so its owner is
+  recorded, then try again"*, and re-opening is precisely the attach that records nothing
+  (ownership is recorded only on a genuine fresh spawn), so a caller that obeyed got the identical
+  refusal forever. It shipped because no test read the sentence. When you write a refusal, pin its
+  claim against the MECHANISM it describes — assert the remedy's precondition by calling the
+  function that decides it, so the copy goes red when the behaviour moves — and remember who reads
+  it: telling a language model to do something only a human can do is not advice.
 
 - **Anything path-shaped: Windows is a delivery target.** Most of this was written on
   macOS/Linux, so the recurring defect is code that is genuinely correct on POSIX —
@@ -175,6 +252,33 @@ lane unaffected.
   core that owns the files, and keep an unobserved host unknown rather than guessing. Conversely,
   on POSIX a backslash is legal filename text — do not treat both separators as interchangeable
   unless the owning filesystem is known to be Windows.
+
+- **Anything tmux does for us on POSIX, the session host owes on Windows.** The two delivery paths
+  are not symmetric and the missing half fails in the direction that LOOKS like success: `sendText`
+  rides `tmux paste-buffer -p` on POSIX, which frames the payload from the pane's real
+  bracketed-paste state and submits with a separate `send-keys Enter`; the session host answered the
+  same call with one raw `text + '\r'`, so a paste-aware composer swallowed the Enter as pasted
+  content and an injected prompt sat there unsubmitted (issue #686). Before adding a delivery, a
+  probe or a pane query, check what the tmux leg does with it and write the host's equivalent in the
+  same change. The host can usually answer more precisely than tmux, because its headless emulator
+  sees the pane app's own bytes — see CLAUDE.md's "We have our own VT emulator" for the one place
+  that reasoning is inverted.
+
+- **Finding a Windows executable is not the same as being able to spawn it.** A PATH lookup may
+  correctly resolve an npm CLI to `<name>.cmd`, but Node's `execFile`/`spawn` cannot execute that
+  shim directly. For short-lived app-owned subprocesses, pass the resolved path and argv through
+  `directExecutableInvocation` (`src/core/exec-path.ts`): it uses hidden `cmd.exe` with explicit
+  escaping, verbatim arguments and delayed expansion off. Do not fix this with `shell: true`;
+  prompts and other user-controlled arguments would become shell syntax. `.bat`/`.ps1`, CR/LF/NUL
+  arguments and lines above cmd's limit fail explicitly. Keep stdin direct: PowerShell's text
+  pipeline changes Unicode and line endings under Windows PowerShell 5.1.
+
+- **The phone reaches a Windows desktop through the relay only.** Everything the iOS app sends over
+  SSH is POSIX sh plus tmux, and Windows OpenSSH hands out `cmd.exe`, so Windows pairing installs no
+  SSH key and requires remote access instead of an SSH server (`src/shared/pairing-gate.ts`). Do not
+  "fix" this by installing the key into `administrators_authorized_keys`. The phone tries SSH before
+  the relay, so a key that works locks it onto a path that cannot work. CLAUDE.md, "Remote access",
+  has the details.
 
 - **Normalize BOTH sides of a path comparison, through one function.** A marker normalized where
   it is built and matched raw where it is used is a no-op on the machine you wrote it on and a
@@ -415,14 +519,16 @@ caller's project before answering. For an OPEN that was a screen hijack: the use
 project B, an agent in project A runs `open-claude`, the tab switches and A's saved viewport is
 applied, so the camera appears to jump and zoom. The rule now has three tiers, all membership lists
 in `renderer/lib/controlRouting.ts`: `STORE_ANSWERED_VERBS` ("no canvas is needed at either end" —
-`list`, `geometry`, `send`, `reply`, `sticky`, `open-project`), `canColdOpen` ("a canvas IS needed, but the
+`list`, `geometry`, `send`, `reply`, `sticky`, `open-project`, `settings`), `canColdOpen` ("a canvas IS needed, but the
 serialized one will do" — `open-terminal`, `open-claude`, `open-agent`, which write into the owning
 project's stored nodes with their launch armed and report `queued: true`) and `answersOffCanvas`
 ("…and there is nothing to defer" — `show-image`, `show-video`, `show-web`, `open-browser`, whose
 node has no session behind it and is finished the moment it is written, so it reports `offCanvas:
-true` and never `queued`). Everything that acts on nodes which already exist reads live state the
-serialized copy does not carry, so off screen it is REFUSED (Fix #16): `offScreenRefusal` answers
-the agent and puts a sticky notice with a **Go there** button on the tab the user is on. Nothing
+true` and never `queued`). Since v0.3.9 the table is `@shared/control-off-screen`, with a fourth
+set (`answersFromStoredNodes`: `write`, `close`, `rename`, `color`, `link`, `board`, `assign`)
+answered from the owning project's stored nodes. The structural verbs read live state the
+serialized copy does not carry, so off screen they are REFUSED (Fix #16): `offScreenRefusal` answers
+the agent and `offScreenNotice` puts a sticky notice with a **Go there** button on the tab the user is on. Nothing
 travels on an agent's say-so any more — `browser` included, which is refused off screen the same
 way. And never leave a `<webview>` focused while
 the window is in the background: on macOS a guest taking focus again activates the whole app
@@ -431,7 +537,7 @@ signal (`onWindowFocus`) and nowhere else; the page's own window `focus` fires i
 Main never brings its window forward on its own either (Fix #33): the main window's `ready-to-show`
 fires again on every reload and every `<webview>` page load, and `win.show()` activates the app on
 macOS even when the window is already visible, so the window is shown on the first one only
-(`showOnFirstReady`, `main/main-window.ts`). `show()`, `restore()` and `app.focus({ steal })` belong
+(`win.once('ready-to-show', …)` in `main/index.ts`). `show()`, `restore()` and `app.focus({ steal })` belong
 to user actions only: a Dock click, a notification click, a drop.
 
 Three things to carry over when you put a verb in one of the two off-screen tiers. **The acting
@@ -505,6 +611,16 @@ second edge family for a relation a rope already carries: `--after` is a **rope*
 and the context bridge it also writes stays hidden underneath it. One `open-claude --after` used
 to land three edges on one node. `src/renderer/canvas/edge-model.source.test.ts` pins both halves.
 
+**A canvas layout is GEOMETRY, and its two halves live in different files.** A saved layout moves
+nodes and nothing else: it never creates, deletes, renames, reparents or respawns one, and never
+touches a tmux session. The snapshot itself (`Project.layouts`) is CONTENT and rides the git-shared
+`.nodeterm/project.json`, while this machine's camera per layout (`Project.layoutViewports`) is
+machine-local and rides `workspace.json` beside `viewport` and `breadcrumbs`. Restoring applies its
+camera with `setViewport`, per the `fitView` rule below. Deleting a layout and updating one to the
+arrangement on screen both confirm first, because layout edits are not in the undo stack; restoring
+does not, because it is. Whether a dialog claims the edit reaches other people comes from
+`layoutIsShared`, which is true for an SSH project as well as a folder one.
+
 **React Flow's `fitView` is queued, not immediate — never use it to frame something automatically.**
 Calling it sets `fitViewQueued` and the fit runs from a later `setNodes` (only once every node is
 measured) or the next `updateNodeInternals`, against whatever the node lookup holds by then; a fit
@@ -512,6 +628,36 @@ set that comes out empty parks the canvas origin in the middle of the screen. Co
 yourself and apply it with `setViewport` (`renderer/lib/nodeFocus.ts`, `canvas/fit-view.ts`), which
 lands now and against the canvas you meant. `fitAll` is the one deliberate exception: an explicit
 user gesture on a settled canvas.
+
+**A context menu is two levels deep, and the third level is discarded in silence.**
+`ContextMenu` renders a submenu's children with
+`if (child.type === 'colors' || child.type === 'submenu') return null` — no error, no warning,
+nothing on screen. That matters most where you cannot see it: Claude's and Codex's **account
+pickers are themselves submenus**, so moving one of those rows into another submenu deletes the
+account picker for exactly the users who have managed accounts, and looks perfect to everyone
+else. If you group rows in an add menu, get the decision from `isPinnedAgentEntry`
+(`renderer/lib/addMenuSpec`) rather than judging by eye — and never spell an agent id there: which
+rows stay at the top is derived from the row's own shape plus `ACCOUNT_CAPABLE_AGENT_IDS`, so a new
+agent is handled the day it is added. The cap is measured in
+`components/ContextMenu.submenu-depth.test.tsx`; if you teach the component a third level, that
+test tells you which pin to revisit.
+
+**Adding a node kind means touching the add menus once, not four times.**
+`renderer/lib/addMenuSpec` owns which kinds are addable and how they are grouped, for the canvas
+pane right-click, the sessions-sidebar "+" and the Dock. `ADD_ITEM_GROUP` is a total `Record` over
+the kind union, so a new kind is a **compile error** until you route it. The kanban column's
+"+ New session" is deliberately not a consumer — it can only offer kinds that become a card — and
+`addMenuSpec.surfaces.test.ts` pins that split so "make them all consistent" stays a decision
+rather than a reflex.
+
+**A setting read at mount reads the DEFAULT, not the user's.** `useSettings` starts on
+`DEFAULT_SETTINGS` and hydrates from disk asynchronously, while `<Canvas />` is mounted before that
+lands. A `useState(() => settings.foo ? ...)` initializer therefore reads the shipped default and
+never looks again, so an opt-in feature ships inert with a green suite and no error anywhere. Gate
+on `hydrated` (the first-launch consent dialog and `settings.rememberCanvasLock` are the worked
+examples). If the same effect also WRITES, latch its first run: otherwise switching the setting on
+mid-session applies stored state to whatever the user is doing right then, which is a different
+feature from the one they asked for.
 
 ## Testing
 
@@ -564,6 +710,17 @@ name at once. Write real-tmux suites the normal way — pick your own socket nam
 tmux without carrying `TMUX_TMPDIR` into it, which is the one way left to escape the sandbox.
 `src/core/tmux-socket-isolation.guard.test.ts` holds the short allowlist of suites that name a
 production socket on purpose; adding a third is a review conversation, not a checkbox.
+
+**An `infinite` CSS animation is a frame loop, and it runs whether or not anyone is looking.** A
+running animation makes the compositor produce a frame every vsync — 120/s on a ProMotion display —
+and re-raster the window each time; measured on a 40-terminal canvas, ONE visible pulsing node took
+idle CPU from 1.5 % to 33 %, and twenty took it to 101 %. The cost is paid once for the window, so
+the step is at the FIRST animation, not the twentieth. Two consequences when you add one: give it
+`animation-play-state: var(--nt-anim-state);` right after the shorthand so it joins the idle-window
+gate (`src/renderer/styles.animation-gate.test.ts` fails if you forget, because one ungated
+animation takes the whole win back), and prefer a static state to a pulse wherever the pulse is not
+carrying information the user needs at a glance. The full measurement table and the reasoning are
+in CLAUDE.md § Idle energy.
 
 ## Pull requests
 

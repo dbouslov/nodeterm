@@ -109,6 +109,8 @@ export interface ServerEditionControlActions {
   sticky(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   annotate(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   minimize(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
+  /** Reads only; `--set` is refused by name (src/server/settings-control.ts). */
+  settings(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   deliver(input: {
     verb: 'send' | 'reply' | 'notify'
     sourceNodeId: string
@@ -131,7 +133,8 @@ const SERVER_V1_VERBS: ReadonlySet<string> = new Set([
   'notify',
   'sticky',
   'annotate',
-  'minimize'
+  'minimize',
+  'settings'
 ])
 
 /** A permanent, verb-specific refusal used only while canvas control itself is enabled. */
@@ -197,6 +200,8 @@ export function createServerEditionControlHandler(actions: ServerEditionControlA
         return actions.annotate(nodeId, command.args)
       case 'minimize':
         return actions.minimize(nodeId, command.args)
+      case 'settings':
+        return actions.settings(nodeId, command.args)
       case 'send':
       case 'reply':
       case 'notify':

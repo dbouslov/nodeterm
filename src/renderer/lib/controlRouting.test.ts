@@ -4,12 +4,15 @@ import {
   needsLiveCanvas,
   canColdOpen,
   answersOffCanvas,
+  answersFromStoredNodes,
+  offScreenDisposition,
+  offScreenRefusal,
   controlVerbSetsForTests,
   sourceIsControlCapable,
   storedNodeListing,
   listRowText,
   answerBrowserResolve,
-  offScreenRefusal,
+  offScreenNotice,
   type ControlProject,
   type BrowserResolveProject
 } from './controlRouting'
@@ -71,10 +74,10 @@ describe('routeControlSource', () => {
 
 // Fix #16 (2026-09-13): David was moved from tab to tab with no click. Each move was a verb from an
 // agent in a project he was NOT looking at (`close --compact`, `assign --column Done`, `group`):
-// the dispatch travelled to the caller's project before answering. A verb that needs the LIVE
-// canvas of a project that is not on screen is now refused, and the human is told on the tab they
-// ARE looking at — the move to that project is theirs to make.
-describe('offScreenRefusal — a background agent never moves the user to its tab', () => {
+// the dispatch travelled to the caller's project before answering. Nothing travels now (upstream
+// v0.3.9 made that a table, `@shared/control-off-screen`); a verb that is REFUSED off screen is
+// also shown to the human on the tab they ARE looking at — the move to that project is theirs.
+describe('offScreenNotice — the human half of an off-screen refusal', () => {
   const projects = [
     { id: 'p-school', name: 'School', nodes: [{ id: 'term-po', title: 'PO · School' }] },
     { id: 'p-code', name: 'Code', nodes: [{ id: 'term-lead', title: 'LEAD · retire' }] },
@@ -82,42 +85,40 @@ describe('offScreenRefusal — a background agent never moves the user to its ta
   ]
   const offScreen = { kind: 'switch', projectId: 'p-code' } as const
 
-  it('refuses every verb that needs the live canvas, naming the project to the agent and to the user', () => {
-    for (const verb of ['close', 'write', 'assign', 'group', 'move', 'arrange', 'align', 'rename', 'board', 'browser', 'spawn-team', 'open-worktree']) {
-      const r = offScreenRefusal(projects, offScreen, verb, 'term-lead')
-      expect(r, verb).not.toBeNull()
-      expect(r!.error).toContain('"Code"')
-      expect(r!.error).toContain('not on screen')
-      expect(r!.notice.projectId).toBe('p-code')
-      expect(r!.notice.text).toContain('LEAD · retire')
-      expect(r!.notice.text).toContain('"Code"')
-      expect(r!.notice.text).toContain(verb)
+  it('names the agent, the project and the verb for every verb refused off screen', () => {
+    for (const verb of ['group', 'move', 'arrange', 'align', 'browser', 'spawn-team', 'open-worktree', 'retire', 'minimize', 'restructure', 'pin', 'snapshot']) {
+      const n = offScreenNotice(projects, offScreen, verb, 'term-lead')
+      expect(n, verb).not.toBeNull()
+      expect(n!.projectId).toBe('p-code')
+      expect(n!.text).toContain('LEAD · retire')
+      expect(n!.text).toContain('"Code"')
+      expect(n!.text).toContain(verb)
     }
   })
 
-  it('leaves alone every verb another tier already answers without that canvas', () => {
-    for (const verb of ['list', 'geometry', 'sticky', 'annotate', 'open-claude', 'open-terminal', 'show-web', 'open-browser']) {
-      expect(offScreenRefusal(projects, offScreen, verb, 'term-lead'), verb).toBeNull()
+  it('stays quiet for every verb answered off screen', () => {
+    for (const verb of ['list', 'geometry', 'sticky', 'annotate', 'open-claude', 'open-terminal', 'show-web', 'open-browser', 'close', 'write', 'assign', 'rename', 'board']) {
+      expect(offScreenNotice(projects, offScreen, verb, 'term-lead'), verb).toBeNull()
     }
   })
 
   it('is not consulted when the caller is on the live canvas, unknown, or blocked', () => {
-    expect(offScreenRefusal(projects, { kind: 'active' }, 'close', 'term-po')).toBeNull()
-    expect(offScreenRefusal(projects, { kind: 'unknown' }, 'close', 'term-x')).toBeNull()
-    expect(offScreenRefusal(projects, { kind: 'blocked', projectId: 'p-code' }, 'close', 'term-lead')).toBeNull()
+    expect(offScreenNotice(projects, { kind: 'active' }, 'group', 'term-po')).toBeNull()
+    expect(offScreenNotice(projects, { kind: 'unknown' }, 'group', 'term-x')).toBeNull()
+    expect(offScreenNotice(projects, { kind: 'blocked', projectId: 'p-code' }, 'group', 'term-lead')).toBeNull()
   })
 
-  it('says a CLOSED project is closed, and its button still leads there', () => {
-    const r = offScreenRefusal(projects, { kind: 'reopen', projectId: 'p-parked' }, 'close', 'term-sr')
-    expect(r!.error).toContain('"Research"')
-    expect(r!.error).toContain('closed')
-    expect(r!.notice.projectId).toBe('p-parked')
+  it('says a CLOSED project is closed', () => {
+    const n = offScreenNotice(projects, { kind: 'reopen', projectId: 'p-parked' }, 'group', 'term-sr')
+    expect(n!.text).toContain('"Research"')
+    expect(n!.text).toContain('closed')
+    expect(n!.projectId).toBe('p-parked')
   })
 
   it('falls back to ids when the project or the node carries no name', () => {
-    const r = offScreenRefusal([{ id: 'p-bare', nodes: [{ id: 'term-bare' }] }], { kind: 'switch', projectId: 'p-bare' }, 'close', 'term-bare')
-    expect(r!.error).toContain('"p-bare"')
-    expect(r!.notice.text).toContain('term-bare')
+    const n = offScreenNotice([{ id: 'p-bare', nodes: [{ id: 'term-bare' }] }], { kind: 'switch', projectId: 'p-bare' }, 'group', 'term-bare')
+    expect(n!.text).toContain('"p-bare"')
+    expect(n!.text).toContain('term-bare')
   })
 })
 
@@ -451,5 +452,83 @@ describe('listRowText — one `list` row, live canvas or stored project alike', 
     expect(
       listRowText({ id: 'term-1', kind: 'terminal', title: 'Build', minimized: true, role: 'tests', lastTurnErrored: true })
     ).toBe('term-1 [terminal] Build (minimized) · role: tests — LAST TURN ERRORED')
+  })
+})
+
+describe('the off-screen disposition table (the verbs that used to travel)', () => {
+  it('the verbs that act on existing nodes are answered from the store, not by travelling', () => {
+    // The field report: the user was typing in another project, a background agent issued a
+    // `close`, and the app switched their tab. These seven reach a pane, a store writer or the
+    // board file — none of them needs React Flow — so none of them has any business moving a
+    // camera to get there.
+    for (const v of ['write', 'close', 'rename', 'color', 'link', 'board', 'assign']) {
+      expect(answersFromStoredNodes(v), v).toBe(true)
+      expect(offScreenDisposition(v), v).toEqual({ kind: 'stored-node' })
+    }
+  })
+
+  it('the structural verbs refuse, and each says WHY in its own words', () => {
+    // A refusal an agent can act on beats hijacking the human's screen. The reasons are per verb
+    // because the caller's next move differs: an `arrange` can wait for the human, a `branch`
+    // cannot happen at all until that terminal is mounted.
+    const why = (v: string) => {
+      const d = offScreenDisposition(v)
+      expect(d.kind, v).toBe('refuse')
+      return d.kind === 'refuse' ? d.why : ''
+    }
+    expect(why('arrange')).toMatch(/measured/)
+    expect(why('group')).toMatch(/measured/)
+    expect(why('branch')).toMatch(/parks the original/)
+    expect(why('verify')).toMatch(/live canvas/)
+    expect(why('open-worktree')).toMatch(/worktree store/)
+    expect(why('browser')).toMatch(/webview/)
+    // …and no two structural verbs share a copy-pasted sentence that names the wrong mechanism.
+    expect(why('move')).toContain('reparenting')
+    expect(why('align')).toContain('aligning')
+  })
+
+  it('an unknown verb refuses — the fail-closed direction', () => {
+    // Someone adds a verb to main's table and forgets this file. It must not fall through to
+    // anything that could act, and it certainly must not travel.
+    expect(offScreenDisposition('teleport-everything')).toEqual({
+      kind: 'refuse',
+      why: 'it needs the live canvas'
+    })
+  })
+
+  it('the three answering paths keep their own kinds', () => {
+    expect(offScreenDisposition('list')).toEqual({ kind: 'store-answered' })
+    expect(offScreenDisposition('send')).toEqual({ kind: 'store-answered' })
+    expect(offScreenDisposition('notify')).toEqual({ kind: 'store-answered' })
+    expect(offScreenDisposition('open-claude')).toEqual({ kind: 'cold-open' })
+    expect(offScreenDisposition('show-web')).toEqual({ kind: 'off-canvas' })
+    // `open-browser` PLACES a node (off canvas); `browser` DRIVES one (refuses). The pair is the
+    // easiest thing in the table to collapse by accident.
+    expect(offScreenDisposition('open-browser')).toEqual({ kind: 'off-canvas' })
+    expect(offScreenDisposition('browser').kind).toBe('refuse')
+  })
+
+  it('the refusal sentence names the project, the reason and the fact that nothing happened', () => {
+    const msg = offScreenRefusal('group', 'web-app')
+    expect(msg.startsWith('group: project "web-app" is not on screen')).toBe(true)
+    expect(msg).toContain('measured node sizes')
+    expect(msg).toContain('Open that project and run this again')
+    expect(msg).toContain('nothing was changed')
+  })
+
+  it('a verb that is ANSWERED off screen still gets a sane sentence if someone asks for one', () => {
+    // `offScreenRefusal` is only called on the refusing branch, but it must not produce nonsense
+    // (or throw) if a future caller reaches for it on another verb.
+    expect(offScreenRefusal('write', 'web-app')).toContain('write:')
+  })
+
+  it('the four sets are disjoint, so the dispatch order cannot silently decide', () => {
+    const { storeAnswered, coldOpenable, offCanvas, storedNode } = controlVerbSetsForTests()
+    const all = [...storeAnswered, ...coldOpenable, ...offCanvas, ...storedNode]
+    expect(new Set(all).size).toBe(all.length)
+    // …and `needsLiveCanvas` stays TRUE for the three sets that DO need a canvas, which is what
+    // keeps `STORE_ANSWERED_VERBS` the narrow "no canvas at either end" claim it documents.
+    for (const v of [...coldOpenable, ...offCanvas, ...storedNode]) expect(needsLiveCanvas(v), v).toBe(true)
+    for (const v of storeAnswered) expect(needsLiveCanvas(v), v).toBe(false)
   })
 })

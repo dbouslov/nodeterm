@@ -198,6 +198,7 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     sticky: vi.fn(async () => ({ ok: true as const, result: { id: 'sticky-new' } })),
     annotate: vi.fn(async () => ({ ok: true as const, result: { annotated: ['term-a'] } })),
     minimize: vi.fn(async () => ({ ok: true as const, message: 'minimized 1: term-a' })),
+    settings: vi.fn(async () => ({ ok: true as const, message: 'settings' })),
     deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
   })
 
@@ -217,6 +218,25 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
       handler({ verb: 'pin', nodeId: 'term-source', args: { node: 'term-source', set: 'on' }, verified: true })
     ).resolves.toMatchObject({ ok: false, error: CONTROL_UNSUPPORTED_ERROR })
     for (const action of Object.values(a)) expect(action).not.toHaveBeenCalled()
+  })
+
+  it('routes settings to its action, after the shared allowlist parse', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await expect(
+      handler({ verb: 'settings', nodeId: 'term-source', args: { get: 'gridSize' }, verified: true })
+    ).resolves.toMatchObject({ ok: true })
+    expect(a.settings).toHaveBeenCalledWith('term-source', { get: 'gridSize' })
+    // A key off the allowlist never reaches the action.
+    await expect(
+      handler({
+        verb: 'settings',
+        nodeId: 'term-source',
+        args: { set: 'claudePermissionMode', value: 'bypassPermissions' },
+        verified: true
+      })
+    ).resolves.toMatchObject({ ok: false, error: expect.stringContaining('settings-key-forbidden') })
+    expect(a.settings).toHaveBeenCalledTimes(1)
   })
 
   it('shares parser validation and forwards source identity to an open', async () => {

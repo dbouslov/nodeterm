@@ -37,6 +37,38 @@ describe('modelGatewayRoutes', () => {
     expect(modelGatewayRoutes('https://example.test/#fragment')).toBeNull()
     expect(modelGatewayRoutes('not a URL')).toBeNull()
   })
+
+  it('appends a supplied discovery path instead of the conventional /v1/models', () => {
+    expect(modelGatewayRoutes('https://bifrost.example.test', '/openai/v1/models')).toEqual({
+      discovery: 'https://bifrost.example.test/openai/v1/models',
+      openai: 'https://bifrost.example.test/openai/v1',
+      anthropic: 'https://bifrost.example.test/anthropic'
+    })
+  })
+
+  it('falls back to /v1/models when the discovery path is absent, empty, or unsafe', () => {
+    // Absent/empty = the conventional suffix. Unsafe values (full URLs — a caller-chosen host
+    // would be a credential-exfiltration oracle — query, fragment, traversal) degrade to the
+    // derived default, never to a fetch somewhere unvetted.
+    expect(modelGatewayRoutes('https://bifrost.example.test', undefined)?.discovery).toBe(
+      'https://bifrost.example.test/v1/models'
+    )
+    expect(modelGatewayRoutes('https://bifrost.example.test', '')?.discovery).toBe(
+      'https://bifrost.example.test/v1/models'
+    )
+    expect(modelGatewayRoutes('https://bifrost.example.test', 'https://evil.test/x')?.discovery).toBe(
+      'https://bifrost.example.test/v1/models'
+    )
+    expect(modelGatewayRoutes('https://bifrost.example.test', '/../etc')?.discovery).toBe(
+      'https://bifrost.example.test/v1/models'
+    )
+    expect(modelGatewayRoutes('https://bifrost.example.test', '/x?y=1')?.discovery).toBe(
+      'https://bifrost.example.test/v1/models'
+    )
+    expect(modelGatewayRoutes('https://bifrost.example.test', '/x#f')?.discovery).toBe(
+      'https://bifrost.example.test/v1/models'
+    )
+  })
 })
 
 describe('parseGatewayModels', () => {
@@ -153,9 +185,19 @@ describe('agent mappings', () => {
 
   it('does not activate Copilot BYOK until a model is selected', () => {
     expect(modelGatewayEnv(gateway, 'copilot')).toEqual({})
-    expect(withAgentModel('copilot --resume=abc', 'copilot', 'openai/gpt-5.5')).toBe(
+    expect(withAgentModel('copilot --resume=abc', 'copilot', undefined)).toBe(
       'copilot --resume=abc'
     )
+  })
+
+  it('selects the Copilot internal model explicitly without changing its gateway wire id', () => {
+    expect(withAgentModel('copilot --resume=abc', 'copilot', 'openai/gpt-5.5')).toBe(
+      "copilot --resume=abc --model 'gpt-5.5'"
+    )
+    expect(withAgentModel('copilot', 'copilot', 'claude-sonnet-4.6')).toBe(
+      "copilot --model 'claude-sonnet-4.6'"
+    )
+    expect(withAgentModel('copilot', 'copilot', 'bad\nmodel')).toBe('copilot')
   })
 
   it('quotes model ids and refuses unsupported/control-bearing values', () => {
@@ -218,7 +260,7 @@ describe('agent mappings', () => {
       })
       expect(
         withAgentModel('copilot-wrapper', 'custom:copilot-proxy', 'openai/gpt-5.5')
-      ).toBe('copilot-wrapper')
+      ).toBe("copilot-wrapper --model 'gpt-5.5'")
     } finally {
       setCustomAgentBaseResolver(null)
     }

@@ -18,6 +18,7 @@ import {
   UNKNOWN_CLAUDE_CLI_CAPS,
   UNKNOWN_GROK_CLI_CAPS,
   UNKNOWN_CODEX_IDENTITY_CAPS,
+  UNKNOWN_CODEX_CLI_CAPS,
   type ClaudeUsage,
   type NodeTerminalApi,
   type NotifyPayload,
@@ -217,6 +218,9 @@ export function buildStubApi(): Omit<
       onProgress: noopUnsub,
       onError: noopUnsub,
       onNotAvailable: noopUnsub,
+      // Server Edition has no updater at all (initUpdater runs only in src/main) and a browser
+      // tab cannot self-install, so there is no channel state to report either way.
+      onNoChannel: noopUnsub,
       check: noop,
       getVersion: U('updates.getVersion'),
       // Boot path awaits this and reads `p.mandatory` UNGUARDED (UpdateCard.tsx), so the old
@@ -295,6 +299,13 @@ export function buildStubApi(): Omit<
       // one the Server Edition gives on purpose (see server/handlers/index.ts): no shared
       // identity, so every Codex launch line stays the bare `codex`.
       identityCaps: () => Promise.resolve(UNKNOWN_CODEX_IDENTITY_CAPS),
+      // A RELAY tab keeps this stub: its sessions run on the GUEST's machine, whose codex is a
+      // different binary from the one this probe could reach, and applying our vocabulary to their
+      // launch line is precisely the cross-machine guess this gate exists to stop. Unknown ⇒ the
+      // baseline vocabulary ⇒ the two values every measured codex accepts; "Ask each time" is
+      // reported as unsupported there rather than gambling `untrusted` on someone else's CLI.
+      // Overridden by the real WS-backed namespace in ws-bridge for the Server Edition.
+      cliCaps: () => Promise.resolve(UNKNOWN_CODEX_CLI_CAPS),
       onIdentity: noopUnsub
     },
     claude: {

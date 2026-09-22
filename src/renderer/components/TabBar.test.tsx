@@ -115,8 +115,29 @@ describe('TabBar caret menu', () => {
     // …and the menu closes behind it, like every other action in this menu.
     expect(document.querySelector('.tab-menu')).toBeNull()
   })
-})
 
+  it('closes on a press anywhere outside it, including the bar the menu hangs from', async () => {
+    // The dismiss backdrop is below the bar so a click on another tab still switches projects,
+    // which leaves the bar itself unable to close the menu without this.
+    expect(document.querySelector('.tab-menu')).not.toBeNull()
+    await act(async () => {
+      host
+        .querySelector('.tabbar')!
+        .dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    })
+    expect(document.querySelector('.tab-menu')).toBeNull()
+  })
+
+  it('leaves the caret to its own toggle, so pressing it while open does not reopen the menu', async () => {
+    const caret = host.querySelector<HTMLButtonElement>('.tab__caret')!
+    await act(async () => {
+      caret.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    })
+    expect(document.querySelector('.tab-menu')).not.toBeNull()
+    await click(caret)
+    expect(document.querySelector('.tab-menu')).toBeNull()
+  })
+})
 describe('TabBar New-project pin', () => {
   let root: Root
   let host: HTMLElement
@@ -177,3 +198,142 @@ describe('TabBar New-project pin', () => {
     expect(onOpenWelcome).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('TabBar drag-reorder', () => {
+  let root: Root
+  let host: HTMLElement
+  let onReorder: ReturnType<typeof vi.fn<(dragged: string, before: string | null) => void>>
+
+  // jsdom has no DragEvent, and React reads `dataTransfer` in onDragStart. One shared stub is
+  // enough: nothing here inspects what was put on it.
+  const drag = async (el: Element, type: string): Promise<void> => {
+    const e = new Event(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(e, 'dataTransfer', { value: { effectAllowed: '', setData: (): void => {} } })
+    await act(async () => {
+      el.dispatchEvent(e)
+    })
+  }
+
+  const tabs = (): Element[] => Array.from(host.querySelectorAll('.tab'))
+
+  beforeEach(async () => {
+    const { TabBar, useProjects } = await load()
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    useProjects.setState({
+      projects: [
+        project(),
+        project({ id: 'p2', name: 'Beta', cwd: '/repo/beta' }),
+        project({ id: 'p3', name: 'Gamma', cwd: '/repo/gamma' })
+      ],
+      activeProjectId: 'p1'
+    })
+    onReorder = vi.fn<(dragged: string, before: string | null) => void>()
+    root = createRoot(host)
+    await act(async () => {
+      root.render(
+        <TabBar
+          onSwitch={vi.fn()}
+          onReconnect={vi.fn()}
+          onReorder={onReorder}
+          onOpenWelcome={vi.fn()}
+          onRename={vi.fn()}
+          onSetFolder={vi.fn()}
+          onCloseProject={vi.fn()}
+          onRemoteAccess={vi.fn()}
+          onSetDefaultAccount={vi.fn()}
+          onSetDefaultPermissionMode={vi.fn()}
+          onOpenProjectSettings={vi.fn()}
+        />
+      )
+    })
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    host.remove()
+  })
+
+  it('drops a tab before the one it was released on', async () => {
+    const [first, , third] = tabs()
+    await drag(third, 'dragstart')
+    await drag(first, 'dragover')
+    await drag(first, 'drop')
+    expect(onReorder).toHaveBeenCalledWith('p3', 'p1')
+  })
+
+  it('marks the hovered tab so the insertion line has something to hang on', async () => {
+    const [first, , third] = tabs()
+    await drag(third, 'dragstart')
+    await drag(first, 'dragover')
+    expect(first.classList.contains('is-drop-before')).toBe(true)
+  })
+
+  it('shows an insertion line for the end zone, which has no tab to hang one off', async () => {
+    const [first] = tabs()
+    await drag(first, 'dragstart')
+    expect(host.querySelector('.tab__dropline')).toBeNull()
+    await drag(host.querySelector('.tabbar__tabs')!, 'dragover')
+    expect(host.querySelector('.tab__dropline')).not.toBeNull()
+  })
+
+  it('drops at the end when released on the strip itself', async () => {
+    const [first] = tabs()
+    await drag(first, 'dragstart')
+    await drag(host.querySelector('.tabbar__tabs')!, 'dragover')
+    await drag(host.querySelector('.tabbar__tabs')!, 'drop')
+    expect(onReorder).toHaveBeenCalledWith('p1', null)
+  })
+})
+
+describe('TabBar options button', () => {
+  let root: Root
+  let host: HTMLElement
+
+  beforeEach(async () => {
+    const { TabBar, useProjects } = await load()
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    useProjects.setState({
+      projects: [project(), project({ id: 'p2', name: 'Beta' })],
+      activeProjectId: 'p1'
+    })
+    root = createRoot(host)
+    await act(async () => {
+      root.render(
+        <TabBar
+          onSwitch={vi.fn()}
+          onReconnect={vi.fn()}
+          onReorder={vi.fn()}
+          onOpenWelcome={vi.fn()}
+          onRename={vi.fn()}
+          onSetFolder={vi.fn()}
+          onCloseProject={vi.fn()}
+          onRemoteAccess={vi.fn()}
+          onSetDefaultAccount={vi.fn()}
+          onSetDefaultPermissionMode={vi.fn()}
+          onOpenProjectSettings={vi.fn()}
+        />
+      )
+    })
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    host.remove()
+  })
+
+  it('sits on every tab, so the menu is reachable without activating it first', () => {
+    expect(host.querySelectorAll('.tab__caret').length).toBe(2)
+  })
+
+  it('opens the menu for the tab it belongs to, active or not', async () => {
+    const inactive = host.querySelectorAll<HTMLButtonElement>('.tab__caret')[1]
+    await act(async () => {
+      inactive.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(document.querySelector('.tab-menu')).not.toBeNull()
+  })
+})
+
