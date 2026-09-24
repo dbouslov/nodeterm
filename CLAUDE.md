@@ -2684,12 +2684,22 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   React Flow holds only the active project, so such a node used to fire only once its project was
   brought back on screen — with two orchestrated projects travelling the screen to their own, a
   review panel sat as bare shells for fourteen minutes after its target finished (2026-09-11).
-  **Not covered — these still wait to be viewed:** a cold-opened armed node (`--project`, or any
-  node never mounted this run; after a relaunch that is every node off screen) waits until its
-  project is viewed, then fires as any on-screen node does — a dep that finished before a relaunch
-  releases it through its persisted clean end (item 5); a closed-but-kept project waits for its
-  reopen; a refused background paste is never retried from the background, only by the on-screen
-  loop and its badge once the project is viewed; and the background pass never warns.
+  **A node that never mounted is STARTED there (#38, 2026-09-24):** a cold open (`--project`, an
+  own-project cold open, a reopen into a stored project; after a relaunch, every armed node off
+  screen) has no session, because only `TerminalNode`'s mount spawned one — a project once sat idle
+  for seven days. `deliverInBackground`'s `start` leg calls `startDetached`
+  (`terminal/background-start.ts`): `transport.create` keyed by the node id under its own viewerId
+  (`background-start`, the kanban modal's pattern, so a mount mid-start co-attaches instead of being
+  detached), waits for the shell to settle, detaches — tmux keeps `nt-<id>` — then the paste goes
+  in by name. The node's mount later reattaches (not fresh, so no cold resume). A non-persistent
+  session (no tmux) is killed and refused. The Canvas trigger is `backgroundArmedSig` (a projects-
+  store selector), because a cold open writes the STORE and `armedDepSig` re-reads only on a hook
+  event. The reply says so (`coldOpenMessage`'s `background`, decided by `startsInBackground`).
+  **Still waits to be viewed:** an SSH project's node or a node with its own `ssh` (its
+  ControlMaster is connected only for the ACTIVE project); a closed-but-kept project (its reopen);
+  a bare terminal with no held launch; a refused background start or paste, never retried from the
+  background, only by the on-screen loop and its badge once the project is viewed; and the
+  background pass never warns.
   A delivery that LANDED, on screen or off, is disarmed on the copy that will be SAVED
   (`disarmDelivered`): the live node while React Flow holds it under the active id
   (`canCommitCanvas`), else the stored copy in the project it was fired from. A switch commits the

@@ -276,6 +276,7 @@ import {
   coldFileIntoFrame,
   coldGroupCwd,
   coldOpenMessage,
+  startsInBackground,
   coldPlaceBelow,
   offCanvasNoticeText,
   offCanvasReplyClause,
@@ -332,7 +333,8 @@ import { sessionPauseOffer, type SessionPauseOffer } from '../lib/sessionPause'
 import { RemoteAccessDialog } from '../components/RemoteAccessDialog'
 import { SshProjectDialog } from '../components/SshProjectDialog'
 import { SshPassphrasePrompt } from '../components/SshPassphrasePrompt'
-import { transport } from '../terminal/local-transport'
+import { LocalTransport, transport } from '../terminal/local-transport'
+import { startDetached } from '../terminal/background-start'
 import { sshFs } from '../terminal/ssh-fs'
 import {
   agentHibernateFns,
@@ -1963,6 +1965,21 @@ export function Canvas() {
   // from the background — the effect re-runs on every `nodes` change, so a dead session would be
   // pasted at on each drag frame — and left to the on-screen loop, which has the backoff and badge.
   const backgroundRefused = useRef<Set<string>>(new Set())
+  // Starts a cold-opened node's session in the background (`startDetached`). Its OWN viewer, the
+  // kanban modal's pattern: should the node mount mid-start, its canvas view co-attaches beside
+  // this one, and the detach at the end leaves that view alone.
+  const backgroundTransport = useMemo(() => new LocalTransport(api, 'background-start'), [api])
+  // A cold open writes an armed node into a project that is not on screen — the STORE, not React
+  // Flow — and `armedDepSig` only re-reads on an agent-status event. This is the store-side trigger,
+  // so the launch effect below starts that node's session now rather than on the next hook event.
+  const backgroundArmedSig = useProjects((s) => {
+    let sig = ''
+    for (const p of s.projects) {
+      if (p.id === nodesProjectIdRef.current || p.closed) continue
+      for (const n of p.nodes) if (n.pendingLaunch) sig += `${n.id},`
+    }
+    return sig
+  })
   // Per-node "the gate is open but nothing has come up to deliver into" timers — the source of the
   // visible `stalled` warning. One per armed node, armed once and cleared the moment the node
   // becomes ready, is delivered, or stops being armed.
@@ -2105,11 +2122,29 @@ export function Canvas() {
         console.warn('[pending-launch] gave up delivering held launch for', f.id)
       })
     }
-    // The projects that are NOT on screen (`storedLaunchesToFire`). Only a session that is already
-    // up is delivered to — a node this run mounted and then parked or released stays typeable by
-    // name — and nothing here warns or retries: a node that has never started (a cold open) keeps
-    // waiting for its project to be viewed, as its reply said, and a refused paste is left to the
-    // loop above, which has the backoff and the badge, for when that project is next on screen.
+    // The projects that are NOT on screen (`storedLaunchesToFire`). A session already up is typed
+    // into by name — a node this run mounted and then parked or released — and a node that never
+    // started (a cold open) has its session started here with no node mounted (`startDetached`,
+    // #38); its mount reattaches to it when the project is viewed. Nothing here warns or retries: a
+    // refused start or paste is left to the loop above, which has the backoff and the badge, for
+    // when that project is next on screen.
+    const start = (id: string, projectId: string): Promise<boolean> => {
+      const project = useProjects.getState().projects.find((p) => p.id === projectId)
+      const node = project?.nodes.find((n) => n.id === id)
+      // An SSH session needs a ControlMaster that only the ACTIVE project connects; it waits.
+      if (!project || project.ssh || !node || node.ssh || node.sshRemoteTmux) return Promise.resolve(false)
+      return startDetached(backgroundTransport, {
+        cols: 80,
+        rows: 24,
+        shell: node.shell,
+        cwd: node.cwd,
+        persistKey: id,
+        ownerProjectId: projectId,
+        agentId: node.agentId,
+        agentModel: node.agentModel,
+        accountId: node.accountId
+      })
+    }
     void deliverInBackground(
       storedLaunchesToFire(
         useProjects.getState().projects,
@@ -2119,10 +2154,10 @@ export function Canvas() {
       ),
       launchInFlight.current,
       backgroundRefused.current,
-      { ...paste, isReady: isSessionReady, disarm }
+      { ...paste, isReady: isSessionReady, disarm, start }
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchNudge are the triggers
-  }, [nodes, armedDepSig, armedSetupSig, launchNudge])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchNudge/backgroundArmedSig are the triggers
+  }, [nodes, armedDepSig, backgroundArmedSig, armedSetupSig, launchNudge])
 
   // Selection state for ephemeral nodes (they live outside React Flow's managed nodes), owned by
   // the agent-nodes store so the cards themselves can set it — see `selectable: false` below.
@@ -10251,7 +10286,9 @@ export function Canvas() {
             // ONE sentence for "queued into a project you are not looking at", shared with the
             // own-project cold open below (lib/coldOpen) so an orchestrator never meets two
             // phrasings for one outcome.
-            message: coldOpenMessage(tgCount, tgWhat, target.name, tgIds),
+            message: coldOpenMessage(tgCount, tgWhat, target.name, tgIds, {
+              background: startsInBackground(tgMade.map(armForColdOpen), target)
+            }),
             // Every node on this branch is armed by `armForColdOpen`, so the whole batch is
             // QUEUED. Said in the reply as a field, not only in the sentence, so an orchestrator
             // does not have to report a session as started when it is not (#569 item 1).
@@ -10739,7 +10776,11 @@ export function Canvas() {
               ok: true,
               message:
                 coldOpenMessage(coldCount, coldWhat, owner.name, coldIds, {
-                  closed: route.kind === 'reopen'
+                  closed: route.kind === 'reopen',
+                  background: startsInBackground(coldMade, {
+                    ssh: owner.ssh,
+                    closed: route.kind === 'reopen'
+                  })
                 }) +
                 (coldPlan.linked.length
                   ? `\ncontext-linked to you: ${coldPlan.linked.join(', ')}`

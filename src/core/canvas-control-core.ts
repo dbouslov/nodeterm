@@ -513,8 +513,10 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     `  status-reporting agent nodes (${statusAgents}, or custom agents based on them) may be waited on; a plain terminal never`,
     '  reports finishing, so waiting on one is refused.',
     '  AN OPEN NEVER SWITCHES THE USER\'S VIEW. If your own project is not the one on screen, the',
-    '  node is opened COLD into it: it is created and saved, and its session starts when the user',
-    '  next views that project. The reply says so and reports `queued: true` — do not poll for it,',
+    '  node is opened COLD into it: it is created and saved, and a session with a launch to run (an',
+    '  agent) starts in the background within seconds; the node attaches when the user views that',
+    '  project. One waiting on `--after`, or in a closed or SSH project, starts when the user next views',
+    '  that project. The reply says which and reports `queued: true` — do not poll for it,',
     '  and do not report the session as started. `--cwd`/`--count`/`--group`/`--after`/`--prompt`',
     '  all still apply. If your project is CLOSED the node is still saved into it and the reply',
     '  says the project is closed; the tab is not reopened for you.',
@@ -522,7 +524,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  project instead of yours. It accepts exactly two things — any other id is refused: your OWN',
     '  project id, which behaves exactly as if the flag were omitted; or an id `open-project`',
     '  returned to YOU in this session. A session opened into a non-active project',
-    '  starts when the user next views that project — do not poll for it.',
+    '  starts in the background, as above (an SSH project\'s starts when the user next views',
+    '  that project) — do not poll for it.',
     '  `--group`/`--after` cannot be combined with `--project`.',
     '  The reply reports whether anything actually started: `queued` is true (and `queuedIds`',
     '  lists which) when a node was opened ARMED — waiting on `--after`, on a worktree\'s',
@@ -1033,16 +1036,19 @@ Verbs:
   were omitted; or an id \`open-project\` returned to YOU
   in this session. Neither switches the user's view. Defaults inside the target are the
   TARGET project's (its cwd, its default account and permission mode). A session opened into a
-  non-active project starts when the user next views that project — do not poll for it; the reply
-  says so. \`--group\`/\`--after\` cannot be combined with \`--project\`.
+  non-active project starts in the background, as below (an SSH project's starts when the user
+  next views that project) — do not poll for it; the reply says so.
+  \`--group\`/\`--after\` cannot be combined with \`--project\`.
   **An open NEVER switches the user's view — not even into your own project.** If the project you
-  are running in is not the one on screen, the node is opened **cold**: created and saved there,
-  with its session starting when the user next views that project. Every flag still applies
+  are running in is not the one on screen, the node is opened **cold**: created and saved there.
+  A session with a launch to run (an agent) **starts in the background** within seconds, and the
+  node attaches when the user views that project; one waiting on \`--after\`, or in a closed or
+  SSH project, starts when the user next views that project. Every flag still applies
   (\`--cwd\`, \`--count\`, \`--group\`, \`--after\`, \`--prompt\`), the rope and the context link
   back to you are still drawn, and the reply says the session is queued. If your project is
   **closed**, the node is still saved into it and the reply says so; the tab is not reopened for
   you. So: opening a station is safe to do at any time, but a station you opened while the user was
-  elsewhere is not running yet — read \`queued\` before you route work to it.
+  elsewhere may not be running yet — read \`queued\` before you route work to it.
   **The reply tells you whether anything actually started.** \`queued\` is true — and
   \`queuedIds\` names which of the returned ids — whenever a node was opened **armed**: waiting on
   \`--after\`, on a worktree's setup script, or on a project the user has not viewed yet (a

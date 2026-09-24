@@ -539,4 +539,52 @@ describe('deliverInBackground — the off-screen pass', () => {
     // Exactly-once: a delivered id never leaves the in-flight set.
     expect([...inFlight]).toEqual(['reviewer'])
   })
+
+  it('starts a session that never mounted (a cold open) in the background, then delivers (#38)', async () => {
+    // A chat opened into a project that is not on screen used to wait for that project to be
+    // viewed: nothing but a mounted node spawned its session. One project sat idle for 7 days.
+    const { log, io } = fakes()
+    const inFlight = new Set<string>()
+    await deliverInBackground([launch], inFlight, new Set(), {
+      ...io,
+      isReady: () => false,
+      start: async (id: string, projectId: string) => {
+        log.push(`start ${projectId}/${id}`)
+        return true
+      }
+    })
+    expect(log).toEqual([
+      'start code/reviewer',
+      'pane reviewer',
+      'send reviewer: echo reviewer',
+      'disarm code/reviewer'
+    ])
+    expect([...inFlight]).toEqual(['reviewer'])
+  })
+
+  it('leaves a launch whose background start failed to the on-screen loop, never pasting', async () => {
+    const { log, io } = fakes()
+    const inFlight = new Set<string>()
+    const refused = new Set<string>()
+    await deliverInBackground([launch], inFlight, refused, {
+      ...io,
+      isReady: () => false,
+      start: async () => false
+    })
+    expect(log).toEqual([])
+    expect([...inFlight]).toEqual([])
+    expect([...refused]).toEqual(['reviewer'])
+  })
+
+  it('does not start a session that is already up', async () => {
+    const { log, io } = fakes()
+    await deliverInBackground([launch], new Set(), new Set(), {
+      ...io,
+      start: async () => {
+        log.push('start')
+        return true
+      }
+    })
+    expect(log).not.toContain('start')
+  })
 })

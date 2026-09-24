@@ -12,8 +12,9 @@
 // The mechanism is not new. `--project`-targeted opens (issue #338, spec §2.2) already insert into
 // a non-active project without travelling: build the node, MOVE its launch command into
 // `pendingLaunch` (`armForColdOpen`), upsert it through `applyNodeMutation`, persist with
-// `writeDisk`, and tell the caller the session starts when that project is next viewed. This
-// module is the pure half of applying that same path to an open whose OWN project is not active.
+// `writeDisk`, and tell the caller the session is queued — Canvas's off-screen launch pass now
+// starts it in the background (#38, `startsInBackground`). This module is the pure half of
+// applying that same path to an open whose OWN project is not active.
 //
 // Everything here is a decision, never a mutation: Canvas wires the store calls. Same reasoning as
 // controlRouting.ts / projectOpen.ts / pendingLaunch.ts — vitest runs in the node environment, so
@@ -242,13 +243,30 @@ export function coldOpenMessage(
   what: string,
   projectName: string,
   ids: readonly string[],
-  opts: { closed?: boolean } = {}
+  opts: { closed?: boolean; background?: boolean } = {}
 ): string {
   return (
     `opened ${count} ${what} session(s) in "${projectName}" (${ids.join(', ')}) — ` +
-    'queued; starts when that project is next viewed' +
+    (opts.background
+      ? 'queued; starting in the background now, and it attaches to the canvas when that project is next viewed'
+      : 'queued; starts when that project is next viewed') +
     (opts.closed ? ' (that project is closed — reopen it from the welcome screen)' : '')
   )
+}
+
+/**
+ * Will the off-screen launch pass start this cold-opened batch at once (#38), rather than when its
+ * project is next viewed? What `coldOpenMessage`'s `background` says, decided from the same facts
+ * the pass reads: every node holds a launch with no `--after` to wait on, and the project is open
+ * (a closed one's launches wait for the reopen) and local (an SSH session needs the ControlMaster
+ * only the ACTIVE project connects). A bare terminal holds no launch, so nothing starts it.
+ */
+export function startsInBackground(
+  nodes: readonly { data: { pendingLaunch?: { after: readonly string[]; command?: string } } }[],
+  project: { closed?: boolean; ssh?: unknown }
+): boolean {
+  if (project.closed || project.ssh || !nodes.length) return false
+  return nodes.every((n) => !!n.data.pendingLaunch?.command && !n.data.pendingLaunch.after.length)
 }
 
 /**
