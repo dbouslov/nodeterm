@@ -50,9 +50,11 @@ export function EdgeHoverCard({ onJump }: { onJump(nodeId: string): void }) {
   const card = useEdgeHoverCard((s) => s.card)
   const nodeId = card?.nodeId
   const data = useStore((s) => (nodeId ? s.nodeLookup.get(nodeId)?.data : undefined))
+  const edgeLive = useStore((s) => (card ? s.edgeLookup.has(card.edgeId) : false))
   const status = useAgentStatus((s) => (nodeId ? s.byId[nodeId] : undefined))
-  // The node went away under the card (deleted, project switch): show nothing, not a stale card.
-  if (!card || !data) return null
+  // The link or its far node went away under the card (removed, deleted, project switch): a removed
+  // element fires no mouseleave, so show nothing rather than a stale card.
+  if (!card || !data || !edgeLive) return null
   const { hold, leave, dismiss } = useEdgeHoverCard.getState()
   return createPortal(
     <EdgeHoverCardView

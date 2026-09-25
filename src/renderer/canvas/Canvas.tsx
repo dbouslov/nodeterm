@@ -3851,6 +3851,7 @@ export function Canvas() {
   const onEdgeDoubleClick = useCallback(
     (_e: React.MouseEvent, edge: Edge) => {
       edgeClickJump.cancel()
+      useEdgeHoverCard.getState().dismiss()
       // Control ropes are removable the same way as context links (ephemeral edges are not).
       if (controlEdgesRef.current.some((b) => b.id === edge.id)) {
         // A rope may be the only DRAWN edge for a pair that also has a context bridge (see
@@ -3894,7 +3895,7 @@ export function Canvas() {
   const onEdgeMouseEnter = useCallback(
     (e: React.MouseEvent, edge: Edge) => {
       useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, edge.id)
-      useEdgeHoverCard.getState().hover({ nodeId: farEndAt(e, edge), x: e.clientX, y: e.clientY })
+      useEdgeHoverCard.getState().hover({ edgeId: edge.id, nodeId: farEndAt(e, edge), x: e.clientX, y: e.clientY })
     },
     [rfStore, farEndAt]
   )
@@ -3902,8 +3903,13 @@ export function Canvas() {
     useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, null)
     useEdgeHoverCard.getState().leave()
   }, [rfStore])
+  // A modifier click is a selection gesture, and the second click of a double click is the removal
+  // gesture: neither jumps.
   const onEdgeClick = useCallback(
-    (e: React.MouseEvent, edge: Edge) => edgeClickJump.click(farEndAt(e, edge)),
+    (e: React.MouseEvent, edge: Edge) => {
+      if (e.shiftKey || e.metaKey || e.ctrlKey || e.detail >= 2) edgeClickJump.cancel()
+      else edgeClickJump.click(farEndAt(e, edge))
+    },
     [edgeClickJump, farEndAt]
   )
 

@@ -2,7 +2,9 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react'
-import { EdgeHoverCardView } from './EdgeHoverCard'
+import { ReactFlowProvider, type Edge, type Node } from '@xyflow/react'
+import { EdgeHoverCard, EdgeHoverCardView } from './EdgeHoverCard'
+import { SHOW_DELAY_MS, useEdgeHoverCard } from './edgeHoverCardModel'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -53,5 +55,41 @@ describe('EdgeHoverCardView', () => {
     )
     act(() => host.querySelector<HTMLElement>('.edge-hover-card')!.click())
     expect(onJump).toHaveBeenCalledExactlyOnceWith('n7')
+  })
+})
+
+describe('EdgeHoverCard', () => {
+  const nodes: Node[] = [
+    { id: 'a', position: { x: 0, y: 0 }, data: { title: 'Alpha' } },
+    { id: 'b', position: { x: 500, y: 0 }, data: { title: 'Beta' } }
+  ]
+  const edges: Edge[] = [{ id: 'e1', source: 'a', target: 'b' }]
+  afterEach(() => {
+    act(() => useEdgeHoverCard.getState().dismiss())
+    vi.useRealTimers()
+  })
+
+  function show(edgeId: string) {
+    vi.useFakeTimers()
+    const host = mount(
+      <ReactFlowProvider initialNodes={nodes} initialEdges={edges}>
+        <EdgeHoverCard onJump={() => {}} />
+      </ReactFlowProvider>
+    )
+    act(() => {
+      useEdgeHoverCard.getState().hover({ edgeId, nodeId: 'b', x: 10, y: 10 })
+      vi.advanceTimersByTime(SHOW_DELAY_MS)
+    })
+    return host
+  }
+
+  it('shows the far node of a live link', () => {
+    show('e1')
+    expect(document.querySelector('.edge-hover-card__title')?.textContent).toBe('Beta')
+  })
+
+  it('shows nothing once its link is gone (a removed link fires no mouseleave)', () => {
+    show('removed')
+    expect(document.querySelector('.edge-hover-card')).toBeNull()
   })
 })

@@ -74,8 +74,8 @@ describe('edgeCardInfo', () => {
 })
 
 describe('useEdgeHoverCard timing', () => {
-  const a = { nodeId: 'a', x: 1, y: 2 }
-  const b = { nodeId: 'b', x: 3, y: 4 }
+  const a = { edgeId: 'e1', nodeId: 'a', x: 1, y: 2 }
+  const b = { edgeId: 'e2', nodeId: 'b', x: 3, y: 4 }
   beforeEach(() => {
     vi.useFakeTimers()
     useEdgeHoverCard.getState().dismiss()

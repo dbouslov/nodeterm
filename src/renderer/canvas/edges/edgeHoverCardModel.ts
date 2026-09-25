@@ -75,6 +75,8 @@ export const SHOW_DELAY_MS = 250
 export const HIDE_DELAY_MS = 250
 
 export interface HoverCardAnchor {
+  /** The link the card came from: when it is gone, so is the card. */
+  edgeId: string
   nodeId: string
   /** Client (screen) coordinates of the pointer when the link was entered. */
   x: number
