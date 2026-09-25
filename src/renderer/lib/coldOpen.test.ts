@@ -3,6 +3,7 @@ import {
   coldFileIntoFrame,
   coldGroupCwd,
   coldOpenMessage,
+  startsInBackground,
   coldPlaceBelow,
   coldResolveAfter,
   coldResolveGroup,
@@ -277,6 +278,32 @@ describe('coldOpenMessage — ONE sentence for both cold-open sites', () => {
     const closed = coldOpenMessage(1, 'terminal', 'Docs', ['t1'], { closed: true })
     expect(closed.startsWith(open)).toBe(true)
     expect(closed).toContain('that project is closed')
+  })
+
+  it('says the session starts NOW when it is started in the background (#38)', () => {
+    expect(coldOpenMessage(1, 'claude', 'School', ['t1'], { background: true })).toBe(
+      'opened 1 claude session(s) in "School" (t1) — queued; starting in the background now, ' +
+        'and it attaches to the canvas when that project is next viewed'
+    )
+  })
+})
+
+describe('startsInBackground — which cold opens the off-screen pass starts at once (#38)', () => {
+  const held = (after: string[] = []) => ({ data: { pendingLaunch: { after, command: 'claude' } } })
+  it('a held launch with nothing to wait for, in an open local project', () => {
+    expect(startsInBackground([held(), held()], {})).toBe(true)
+  })
+  it('not a closed project (no tab to start it from), nor an SSH one (its master is not up)', () => {
+    expect(startsInBackground([held()], { closed: true })).toBe(false)
+    expect(startsInBackground([held()], { ssh: {} })).toBe(false)
+  })
+  it('not a relay/adopted project — its sessions are not this machine\'s to spawn', () => {
+    expect(startsInBackground([held()], { remote: true })).toBe(false)
+  })
+  it('not a node waiting on --after, nor one with no launch to hold (a bare terminal)', () => {
+    expect(startsInBackground([held(['a'])], {})).toBe(false)
+    expect(startsInBackground([held(), { data: {} }], {})).toBe(false)
+    expect(startsInBackground([], {})).toBe(false)
   })
 })
 

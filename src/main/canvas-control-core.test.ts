@@ -1022,6 +1022,15 @@ describe('the --project clause tells the truth about travel (review #363 I-1 + M
     }
   })
 
+  it('both bodies say a cold-opened launch starts in the background, and when it still waits (#38)', () => {
+    // An orchestrator told "starts when the user next views that project" routes around a station
+    // that is in fact running a few seconds later, or reports it as stuck.
+    for (const [name, body] of bodies) {
+      expect(body, name).toMatch(/starts in the background/)
+      expect(body, name).toMatch(/SSH/)
+    }
+  })
+
   it('both bodies document the OWN-project cold open: never switches the view, queued, closed case', () => {
     // The behaviour change this test exists for. All four facts an orchestrator acts on:
     // (1) an open never moves the user, (2) a node opened into a project they are not viewing

@@ -178,7 +178,9 @@ export async function pasteIntoShell(id: string, command: string, io: LaunchPast
  *   at a dead session on each drag frame — the on-screen loop, with its backoff and badge, takes it
  *   when that project is next viewed;
  * - a session is up (`isReady`, i.e. `isSessionReady`): a node mounted this run and then parked or
- *   released stays typeable by name, while a cold open that never mounted waits to be viewed.
+ *   released stays typeable by name. A cold open that never mounted has none; `deliverInBackground`
+ *   asks this with `isReady` true for it when it can start one (`start`), and otherwise it waits to
+ *   be viewed.
  */
 export function canDeliverInBackground(
   id: string,
@@ -195,6 +197,9 @@ export function canDeliverInBackground(
  * out skips it. A launch that lands is disarmed where it was fired from (`disarm`) and stays in flight
  * for good; a refusal, a pane that is not at a shell prompt included, leaves flight and joins
  * `refused`, for the on-screen loop to take when its project is viewed. Nothing here warns or retries.
+ *
+ * `start` brings up the session of a node that never mounted — a cold open (#38) — so its launch
+ * runs now instead of when its project is next viewed. A start that fails counts as a refusal.
  */
 export async function deliverInBackground(
   launches: readonly (LaunchToFire & { projectId: string })[],
@@ -203,24 +208,45 @@ export async function deliverInBackground(
   io: LaunchPaste & {
     isReady: (id: string) => boolean
     disarm: (id: string, projectId: string) => void
+    start?: (id: string, projectId: string) => Promise<boolean>
   }
 ): Promise<void> {
   const pastes: Promise<void>[] = []
   for (const f of launches) {
-    if (!canDeliverInBackground(f.id, inFlight, refused, io.isReady)) continue
+    const up = io.isReady(f.id)
+    if (!canDeliverInBackground(f.id, inFlight, refused, () => up || !!io.start)) continue
     inFlight.add(f.id)
     pastes.push(
-      pasteIntoShell(f.id, f.command, io).then((ok) => {
-        if (!ok) {
-          inFlight.delete(f.id)
-          refused.add(f.id)
-          return
-        }
-        io.disarm(f.id, f.projectId)
-      })
+      (up ? Promise.resolve(true) : io.start!(f.id, f.projectId))
+        .then((started) => started && pasteIntoShell(f.id, f.command, io))
+        .then((ok) => {
+          if (!ok) {
+            inFlight.delete(f.id)
+            refused.add(f.id)
+            return
+          }
+          io.disarm(f.id, f.projectId)
+        })
     )
   }
   await Promise.all(pastes)
+}
+
+/**
+ * May the off-screen pass START this node's session (`deliverInBackground`'s `start`), rather than
+ * leave it queued for its project to be viewed? Only for a launch a canvas-control cold open armed
+ * IN THIS APP RUN (`armedThisRun`, in memory, never persisted), in a project this machine's own
+ * session owns. Everything else keeps the old wait: a queued launch persisted by an earlier run
+ * (after a relaunch they would all start at once), one written into a project file by another
+ * process, and a relay/adopted project's, whose sessions are not this machine's to spawn.
+ */
+export function mayStartInBackground(
+  id: string,
+  projectId: string,
+  armedThisRun: ReadonlySet<string>,
+  isLocalProject: (projectId: string) => boolean
+): boolean {
+  return armedThisRun.has(id) && isLocalProject(projectId)
 }
 
 /**
