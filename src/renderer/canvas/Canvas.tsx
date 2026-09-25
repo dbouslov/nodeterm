@@ -480,6 +480,7 @@ import { buildContextLinkNote, buildNotePushMessage, classifyLink, hiddenLinkIds
 import { startContextLinkSync, type ContextLinkSync } from '../lib/contextLinkSync'
 import {
   deliverInBackground,
+  mayStartInBackground,
   disarmDelivered,
   launchesToFire,
   launchRetryDelay,
@@ -960,6 +961,10 @@ const ropeLink = (e: Edge): BridgeLink => {
 
 /** Default size of a new terminal/agent node — the factories' own `terminalNodeSize`, so the
  *  placement engine clears the box the node will really occupy. */
+/** Does this machine's own session own the project? False for a relay/adopted tab, whose sessions
+ *  are not ours to spawn (`sessionForProject` resolves by binding, never by which tab is active). */
+const isLocalProject = (projectId: string): boolean => sessionForProject(projectId).id === 'local'
+
 const newNodeSize = (): BoxSize => {
   const s = terminalNodeSize()
   return { w: s.width, h: s.height }
@@ -1969,6 +1974,10 @@ export function Canvas() {
   // kanban modal's pattern: should the node mount mid-start, its canvas view co-attaches beside
   // this one, and the detach at the end leaves that view alone.
   const backgroundTransport = useMemo(() => new LocalTransport(api, 'background-start'), [api])
+  // The launches a canvas-control cold open armed IN THIS RUN — the only ones the off-screen pass may
+  // start (`mayStartInBackground`). In memory on purpose: a queued launch persisted by an earlier run,
+  // or written into a project file by another process, keeps waiting for its project to be viewed.
+  const coldArmedThisRun = useRef<Set<string>>(new Set())
   // A cold open writes an armed node into a project that is not on screen — the STORE, not React
   // Flow — and `armedDepSig` only re-reads on an agent-status event. This is the store-side trigger,
   // so the launch effect below starts that node's session now rather than on the next hook event.
@@ -2129,6 +2138,8 @@ export function Canvas() {
     // refused start or paste is left to the loop above, which has the backoff and the badge, for
     // when that project is next on screen.
     const start = (id: string, projectId: string): Promise<boolean> => {
+      if (!mayStartInBackground(id, projectId, coldArmedThisRun.current, isLocalProject))
+        return Promise.resolve(false)
       const project = useProjects.getState().projects.find((p) => p.id === projectId)
       const node = project?.nodes.find((n) => n.id === id)
       // An SSH session needs a ControlMaster that only the ACTIVE project connects; it waits.
@@ -10279,6 +10290,7 @@ export function Canvas() {
               op: 'upsert',
               node: flowToNodeStates([armForColdOpen(node)])[0]
             })
+            coldArmedThisRun.current.add(node.id)
           }
           void writeDisk()
           reply({
@@ -10287,7 +10299,10 @@ export function Canvas() {
             // own-project cold open below (lib/coldOpen) so an orchestrator never meets two
             // phrasings for one outcome.
             message: coldOpenMessage(tgCount, tgWhat, target.name, tgIds, {
-              background: startsInBackground(tgMade.map(armForColdOpen), target)
+              background: startsInBackground(tgMade.map(armForColdOpen), {
+                ...target,
+                remote: !isLocalProject(target.id)
+              })
             }),
             // Every node on this branch is armed by `armForColdOpen`, so the whole batch is
             // QUEUED. Said in the reply as a field, not only in the sentence, so an orchestrator
@@ -10729,6 +10744,7 @@ export function Canvas() {
                 op: 'upsert',
                 node: flowToNodeStates([node])[0]
               })
+              coldArmedThisRun.current.add(node.id)
             }
             const coldIds = coldMade.map((n) => n.id)
             // The lineage rope and the fan-in bridge are what an orchestrator LOSES if a cold open
@@ -10779,7 +10795,8 @@ export function Canvas() {
                   closed: route.kind === 'reopen',
                   background: startsInBackground(coldMade, {
                     ssh: owner.ssh,
-                    closed: route.kind === 'reopen'
+                    closed: route.kind === 'reopen',
+                    remote: !isLocalProject(owner.id)
                   })
                 }) +
                 (coldPlan.linked.length

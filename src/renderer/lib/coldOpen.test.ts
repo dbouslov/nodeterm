@@ -297,6 +297,9 @@ describe('startsInBackground — which cold opens the off-screen pass starts at 
     expect(startsInBackground([held()], { closed: true })).toBe(false)
     expect(startsInBackground([held()], { ssh: {} })).toBe(false)
   })
+  it('not a relay/adopted project — its sessions are not this machine\'s to spawn', () => {
+    expect(startsInBackground([held()], { remote: true })).toBe(false)
+  })
   it('not a node waiting on --after, nor one with no launch to hold (a bare terminal)', () => {
     expect(startsInBackground([held(['a'])], {})).toBe(false)
     expect(startsInBackground([held(), { data: {} }], {})).toBe(false)

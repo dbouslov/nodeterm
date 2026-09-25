@@ -259,13 +259,14 @@ export function coldOpenMessage(
  * project is next viewed? What `coldOpenMessage`'s `background` says, decided from the same facts
  * the pass reads: every node holds a launch with no `--after` to wait on, and the project is open
  * (a closed one's launches wait for the reopen) and local (an SSH session needs the ControlMaster
- * only the ACTIVE project connects). A bare terminal holds no launch, so nothing starts it.
+ * only the ACTIVE project connects), and this machine's own (`remote`: a relay/adopted tab's sessions
+ * are not ours to spawn). A bare terminal holds no launch, so nothing starts it.
  */
 export function startsInBackground(
   nodes: readonly { data: { pendingLaunch?: { after: readonly string[]; command?: string } } }[],
-  project: { closed?: boolean; ssh?: unknown }
+  project: { closed?: boolean; ssh?: unknown; remote?: boolean }
 ): boolean {
-  if (project.closed || project.ssh || !nodes.length) return false
+  if (project.closed || project.ssh || project.remote || !nodes.length) return false
   return nodes.every((n) => !!n.data.pendingLaunch?.command && !n.data.pendingLaunch.after.length)
 }
 

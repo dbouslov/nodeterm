@@ -6,6 +6,7 @@ import {
   launchesToFire,
   launchRetryDelay,
   launchTooltip,
+  mayStartInBackground,
   pasteIntoShell,
   storedLaunchesToFire,
   unmetDeps,
@@ -586,5 +587,19 @@ describe('deliverInBackground — the off-screen pass', () => {
       }
     })
     expect(log).not.toContain('start')
+  })
+})
+
+describe('mayStartInBackground — only what THIS run armed, on this machine (#38 review)', () => {
+  const local = (projectId: string) => projectId !== 'relay'
+  it('starts a launch a canvas-control cold open armed in this app run, in a local project', () => {
+    expect(mayStartInBackground('n1', 'school', new Set(['n1']), local)).toBe(true)
+  })
+  it('never starts a stale queued launch persisted by an earlier run (or written by another process)', () => {
+    // After a relaunch every armed node off screen would otherwise start at once.
+    expect(mayStartInBackground('old', 'school', new Set(['n1']), local)).toBe(false)
+  })
+  it('never starts a launch in a relay/adopted project, even one armed this run', () => {
+    expect(mayStartInBackground('n1', 'relay', new Set(['n1']), local)).toBe(false)
   })
 })

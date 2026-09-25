@@ -233,6 +233,23 @@ export async function deliverInBackground(
 }
 
 /**
+ * May the off-screen pass START this node's session (`deliverInBackground`'s `start`), rather than
+ * leave it queued for its project to be viewed? Only for a launch a canvas-control cold open armed
+ * IN THIS APP RUN (`armedThisRun`, in memory, never persisted), in a project this machine's own
+ * session owns. Everything else keeps the old wait: a queued launch persisted by an earlier run
+ * (after a relaunch they would all start at once), one written into a project file by another
+ * process, and a relay/adopted project's, whose sessions are not this machine's to spawn.
+ */
+export function mayStartInBackground(
+  id: string,
+  projectId: string,
+  armedThisRun: ReadonlySet<string>,
+  isLocalProject: (projectId: string) => boolean
+): boolean {
+  return armedThisRun.has(id) && isLocalProject(projectId)
+}
+
+/**
  * Where a launch that LANDED is disarmed: on the copy of its node that will be SAVED, decided when
  * the paste resolves, because the screen can move while it is out. `launch.projectId` is the project
  * it was fired from; `canvas` is what React Flow holds by then — the project its nodes belong to (the

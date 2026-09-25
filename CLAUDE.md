@@ -2684,10 +2684,13 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   React Flow holds only the active project, so such a node used to fire only once its project was
   brought back on screen — with two orchestrated projects travelling the screen to their own, a
   review panel sat as bare shells for fourteen minutes after its target finished (2026-09-11).
-  **A node that never mounted is STARTED there (#38, 2026-09-24):** a cold open (`--project`, an
-  own-project cold open, a reopen into a stored project; after a relaunch, every armed node off
-  screen) has no session, because only `TerminalNode`'s mount spawned one — a project once sat idle
-  for seven days. `deliverInBackground`'s `start` leg calls `startDetached`
+  **A node that never mounted is STARTED there (#38, 2026-09-24):** a canvas-control cold open
+  (`--project`, or an own-project cold open) has no session, because only `TerminalNode`'s mount
+  spawned one — a project once sat idle for seven days. ONLY launches such an open armed IN THIS
+  RUN are started (`mayStartInBackground`: Canvas's in-memory `coldArmedThisRun`, never persisted)
+  and only in a project this machine's session owns (a relay/adopted tab's are not ours to spawn);
+  a queued launch persisted by an earlier run, or written into a project file by another process,
+  still waits to be viewed — else after a relaunch every one of them would start at once. `deliverInBackground`'s `start` leg calls `startDetached`
   (`terminal/background-start.ts`): `transport.create` keyed by the node id under its own viewerId
   (`background-start`, the kanban modal's pattern, so a mount mid-start co-attaches instead of being
   detached), waits for the shell to settle, detaches — tmux keeps `nt-<id>` — then the paste goes
