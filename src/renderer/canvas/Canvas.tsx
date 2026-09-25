@@ -39,6 +39,8 @@ import {
 } from '../nodes/TerminalNode'
 import { solveFitPadding } from './fit-view'
 import { circuitEdgeTypes, EdgeLegend, EdgeRouter, useEdgeRoutes } from './edges'
+import { EdgeHoverCard } from './edges/EdgeHoverCard'
+import { createEdgeClickJump, farEndOf, useEdgeHoverCard } from './edges/edgeHoverCardModel'
 import { edgeAnimated, type EdgeData } from '../lib/edgeKinds'
 import { MacWheelGestureRouter, trackpadRoutingEnabled } from './wheel-gesture'
 import { isBrowserRuntime } from '@renderer/bridge/runtime'
@@ -3835,9 +3837,20 @@ export function Canvas() {
     [setNodes]
   )
 
+  // A single click on a link jumps to its far end (#40), after the double-click window below.
+  const edgeClickJump = useMemo(
+    () =>
+      createEdgeClickJump((nodeId) => {
+        useEdgeHoverCard.getState().dismiss()
+        focusNodeRef.current(nodeId)
+      }),
+    []
+  )
+
   // Double-click a context link to remove it (ephemeral subagent/loop edges are left alone).
   const onEdgeDoubleClick = useCallback(
     (_e: React.MouseEvent, edge: Edge) => {
+      edgeClickJump.cancel()
       // Control ropes are removable the same way as context links (ephemeral edges are not).
       if (controlEdgesRef.current.some((b) => b.id === edge.id)) {
         // A rope may be the only DRAWN edge for a pair that also has a context bridge (see
@@ -3861,20 +3874,37 @@ export function Canvas() {
       setLinkEdges((es) => es.filter((b) => b.id !== edge.id))
       markDirty()
     },
-    [setLinkEdges, markDirty, disarmDepsFor, nonWaitingRopeIds]
+    [setLinkEdges, markDirty, disarmDepsFor, nonWaitingRopeIds, edgeClickJump]
   )
 
   // Edge focus (spec 2026-09-11 edge routing, Section 4): hover lights one edge and dims the rest.
   // Written to the routes store, not to Canvas state — a hover must not re-render this component —
   // under the rfId of the flow this component and its <ReactFlow> share.
   const rfStore = useStoreApi()
-  const onEdgeMouseEnter = useCallback(
-    (_e: React.MouseEvent, edge: Edge) => useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, edge.id),
-    [rfStore]
+  // The link's end farther from the pointer — the one the hover card (#40) shows and a click jumps to.
+  const farEndAt = useCallback(
+    (e: React.MouseEvent, edge: Edge) =>
+      farEndOf(
+        edge,
+        screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+        useEdgeRoutes.getState().byFlow[rfStore.getState().rfId]?.nodes ?? new Map()
+      ),
+    [screenToFlowPosition, rfStore]
   )
-  const onEdgeMouseLeave = useCallback(
-    () => useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, null),
-    [rfStore]
+  const onEdgeMouseEnter = useCallback(
+    (e: React.MouseEvent, edge: Edge) => {
+      useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, edge.id)
+      useEdgeHoverCard.getState().hover({ nodeId: farEndAt(e, edge), x: e.clientX, y: e.clientY })
+    },
+    [rfStore, farEndAt]
+  )
+  const onEdgeMouseLeave = useCallback(() => {
+    useEdgeRoutes.getState().setHovered(rfStore.getState().rfId, null)
+    useEdgeHoverCard.getState().leave()
+  }, [rfStore])
+  const onEdgeClick = useCallback(
+    (e: React.MouseEvent, edge: Edge) => edgeClickJump.click(farEndAt(e, edge)),
+    [edgeClickJump, farEndAt]
   )
 
   // Route edge changes (selection) to the right store: `ctrl-` ids are control ropes (local
@@ -9408,6 +9438,8 @@ export function Canvas() {
     (_e: unknown, vp: Viewport) => {
       viewportRef.current = vp
       markDirty()
+      // The hover card is pinned to where the pointer entered the link; a pan/zoom leaves it behind.
+      useEdgeHoverCard.getState().dismiss()
       // SYNCHRONOUS, and deliberately OUTSIDE the coalescing rAF below. React Flow applies the
       // viewport's CSS transform inside the d3-zoom event that raised this callback, so the node
       // chrome has already moved by the time we return; the shared glyph canvas is redrawn by the
@@ -15252,6 +15284,7 @@ export function Canvas() {
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
+          onEdgeClick={onEdgeClick}
           onEdgeDoubleClick={onEdgeDoubleClick}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
@@ -15377,6 +15410,7 @@ export function Canvas() {
           {/* Routes every edge once per geometry change into the store CircuitEdge paints from;
               the legend explains the kinds (spec 2026-09-11 edge routing). */}
           <EdgeRouter edges={displayEdges} />
+          <EdgeHoverCard onJump={(id) => focusNodeRef.current(id)} />
           <EdgeLegend />
         </ReactFlow>
         </SessionProvider>

@@ -13366,6 +13366,34 @@ body.focus-mode .dock:hover {
 }
 @media (prefers-reduced-motion: reduce) { .react-flow__edge .edge-animated .react-flow__edge-path { animation: none; } }
 
+/* ---- edge hover card (#40): the node at a link's far end, painted at the pointer. Same surface as
+   the context menu; below it (z 46) so an open menu is never covered. ---- */
+.edge-hover-card {
+  position: fixed;
+  z-index: 44;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 280px;
+  padding: 7px 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(var(--menu-rgb), 0.98);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, calc(0.45 * var(--shadow-k)));
+  cursor: pointer;
+}
+.edge-hover-card__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.edge-hover-card__title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-hover-card__status { flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.edge-hover-card__status--working { color: #d97757; }
+.edge-hover-card__status--waiting { color: var(--danger); }
+.edge-hover-card__status--finished { color: var(--accent); }
+.edge-hover-card__summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---- edge legend: a chip on the pill cluster's surface, one row above the pills and right of the
    controls column (the Panel lives inside <ReactFlow>, the pills outside it, so it cannot join
    their row). The list opens upward so the chip stays under the cursor that opened it. ---- */
