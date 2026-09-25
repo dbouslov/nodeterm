@@ -88,6 +88,71 @@ describe('save → load round trip (v3)', () => {
     expect(loaded.projects[0].breadcrumbs).toEqual(breadcrumbs)
   })
 
+  // A canvas layout is shared CONTENT (it describes the nodes the file already carries), while the
+  // camera the author had per layout is one person's, exactly like `breadcrumbs`.
+  it('keeps layouts in the shared file and their cameras machine-local', async () => {
+    const layouts = [{
+      id: 'lay-1', name: 'Ultrawide', createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000,
+      window: { width: 3440, height: 1440 },
+      nodes: [{ id: 'term-1', x: 40, y: 60, width: 800, height: 600 }]
+    }]
+    const layoutViewports = { 'lay-1': { x: 5, y: 6, zoom: 1.5 } }
+    await new WorkspaceStore().save(ws([project({ cwd: projRoot, layouts, layoutViewports })]))
+
+    const fileRaw = await fs.readFile(path.join(projRoot, '.nodeterm/project.json'), 'utf-8')
+    expect(JSON.parse(fileRaw).layouts).toEqual(layouts)
+    expect(fileRaw).not.toContain('layoutViewports')
+    const index = JSON.parse(await fs.readFile(path.join(userData, 'workspace.json'), 'utf-8'))
+    expect(index.entries[0].layoutViewports).toEqual(layoutViewports)
+
+    const loaded = await new WorkspaceStore().load()
+    expect(loaded.projects[0].layouts).toEqual(layouts)
+    expect(loaded.projects[0].layoutViewports).toEqual(layoutViewports)
+  })
+
+  it('drops a hand-edited layout and prunes the camera it left behind', async () => {
+    const layouts = [{
+      id: 'lay-1', name: 'Ultrawide', createdAt: 1, updatedAt: 2,
+      nodes: [{ id: 'term-1', x: 0, y: 0, width: 10, height: 10 }]
+    }]
+    await new WorkspaceStore().save(ws([project({ cwd: projRoot, layouts, layoutViewports: { 'lay-1': { x: 1, y: 2, zoom: 1 } } })]))
+
+    // A `null` coordinate is what `JSON.stringify` writes for a NaN, so this is the shape a
+    // corrupted file really arrives in - and unguarded it reaches React Flow's adoptUserNodes.
+    const file = path.join(projRoot, '.nodeterm/project.json')
+    const parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
+    parsed.layouts[0].nodes[0].x = null
+    await fs.writeFile(file, JSON.stringify(parsed, null, 2))
+
+    const loaded = await new WorkspaceStore().load()
+    expect(loaded.projects[0].nodes[0].id).toBe('term-1') // the rest of the file still loaded
+    expect(loaded.projects[0].layouts).toBeUndefined()
+    expect(loaded.projects[0].layoutViewports).toBeUndefined()
+  })
+
+  it('sanitizes an inline project\'s embedded layouts, which never pass through fileToProject', async () => {
+    const index = {
+      version: 3,
+      activeProjectId: 'p2',
+      entries: [{
+        id: 'p2', name: 'inline', color: '#fff',
+        project: {
+          ...project({ id: 'p2', name: 'inline' }),
+          layouts: [
+            { id: 'lay-ok', name: 'Laptop', createdAt: 1, updatedAt: 2, nodes: [] },
+            { id: 'lay-bad', name: 'Broken', createdAt: 1, updatedAt: 2, nodes: [{ id: 'term-1', x: null, y: 0, width: 1, height: 1 }] }
+          ],
+          layoutViewports: { 'lay-ok': { x: 1, y: 2, zoom: 1 }, 'lay-bad': { x: 0, y: 0, zoom: 1 } }
+        }
+      }]
+    }
+    await fs.writeFile(path.join(userData, 'workspace.json'), JSON.stringify(index))
+
+    const loaded = await new WorkspaceStore().load()
+    expect(loaded.projects[0].layouts?.map((l) => l.id)).toEqual(['lay-ok'])
+    expect(loaded.projects[0].layoutViewports).toEqual({ 'lay-ok': { x: 1, y: 2, zoom: 1 } })
+  })
+
   it('does not rewrite (or bump rev of) an unchanged project file', async () => {
     const store = new WorkspaceStore()
     const w = ws([project({ cwd: projRoot })])

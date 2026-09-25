@@ -90,11 +90,15 @@ const api: NodeTerminalApi = {
     generateGroupName: (memberKeys, cwd) =>
       ipcRenderer.invoke(IPC.ptyGenerateGroupName, memberKeys, cwd),
     capture: (persistKey, full) => ipcRenderer.invoke(IPC.ptyCapture, persistKey, full),
+    remoteSessionConfirmed: (persistKey, sshRemote) =>
+      ipcRenderer.invoke(IPC.ptyRemoteSessionConfirmed, persistKey, sshRemote),
+    sessionAge: (persistKey) => ipcRenderer.invoke(IPC.ptySessionAge, persistKey),
     readScrollback: (persistKey) => ipcRenderer.invoke(IPC.ptyReadScrollback, persistKey),
     sendText: (persistKey, text, opts) =>
       ipcRenderer.invoke(IPC.ptySendText, persistKey, text, opts?.enter),
     tmuxStatus: () => ipcRenderer.invoke(IPC.ptyTmuxStatus),
     paneCommand: (persistKey) => ipcRenderer.invoke(IPC.ptyPaneCommand, persistKey),
+    paneOwner: (persistKey) => ipcRenderer.invoke(IPC.ptyPaneOwner, persistKey),
     terminateForeground: (persistKey, expectedAgentId) =>
       ipcRenderer.invoke(IPC.ptyTerminateForeground, persistKey, expectedAgentId),
     readSessionName: (sessionId, accountId, agentId) =>
@@ -438,6 +442,11 @@ const api: NodeTerminalApi = {
       ipcRenderer.on(IPC.appUpdateNotAvailable, handler)
       return () => ipcRenderer.removeListener(IPC.appUpdateNotAvailable, handler)
     },
+    onNoChannel: (listener) => {
+      const handler = () => listener()
+      ipcRenderer.on(IPC.appUpdateNoChannel, handler)
+      return () => ipcRenderer.removeListener(IPC.appUpdateNoChannel, handler)
+    },
     check: () => ipcRenderer.send(IPC.appCheckForUpdates),
     getVersion: () => ipcRenderer.invoke(IPC.appGetVersion),
     getPolicy: () => ipcRenderer.invoke(IPC.appUpdatePolicy),
@@ -493,8 +502,8 @@ const api: NodeTerminalApi = {
       ipcRenderer.on(IPC.contextUpdate, handler)
       return () => ipcRenderer.removeListener(IPC.contextUpdate, handler)
     },
-    ensure: (sessionId, cwd, accountId) =>
-      ipcRenderer.send(IPC.contextEnsure, sessionId, cwd, accountId)
+    ensure: (sessionId, cwd, accountId, nodeId, agentId) =>
+      ipcRenderer.send(IPC.contextEnsure, sessionId, cwd, accountId, nodeId, agentId)
   },
   // Canvas sync: one channel in both directions. The cast goes to the reflector (src/core/canvas-sync),
   // which stamps it with the total order (`seq`) and fans it to every attached client — INCLUDING us.
@@ -514,6 +523,7 @@ const api: NodeTerminalApi = {
   },
   codex: {
     identityCaps: () => ipcRenderer.invoke(IPC.codexIdentityCaps),
+    cliCaps: () => ipcRenderer.invoke(IPC.codexCliCaps),
     onIdentity: (listener) => {
       const handler = (_e: unknown, payload: Parameters<typeof listener>[0]) => listener(payload)
       ipcRenderer.on(IPC.codexIdentity, handler)

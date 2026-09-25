@@ -18,13 +18,13 @@ import { readFileSync } from 'node:fs'
  */
 const src = readFileSync(new URL('./Canvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-/** The off-canvas block: from its `if (answersOffCanvas(verb))` guard to the off-screen refusal it
- *  stands in front of (the travel call it once stood in front of is gone — Fix #16). */
+/** The off-canvas block: from its guard to the refusal that now stands where the travel did. */
+const OFF_CANVAS_GUARD = 'if (answersOffCanvas(verb) || answersFromStoredNodes(verb)) {'
 function offCanvasBody(): string {
-  const start = src.indexOf('if (answersOffCanvas(verb)) {')
+  const start = src.indexOf(OFF_CANVAS_GUARD)
   expect(start, 'the off-canvas guard').toBeGreaterThan(-1)
-  const end = src.indexOf('offScreenRefusal(projects, route, verb, sourceNodeId)', start)
-  expect(end, 'the refusal after the block').toBeGreaterThan(start)
+  const end = src.indexOf('reply({ ok: false, error: offScreenRefusal(verb,', start)
+  expect(end, 'the off-screen refusal after the block').toBeGreaterThan(start)
   return src.slice(start, end)
 }
 
@@ -46,30 +46,31 @@ function addAndConnectBody(): string {
 }
 
 describe('the off-canvas dispatch block (source pins)', () => {
-  it('stands IN FRONT of the off-screen refusal — a display verb never reaches it', () => {
-    // The travel call that moved the user's screen is gone (Fix #16); the source-routing block now
-    // ends in the refusal. The off-canvas guard must precede it, or the block is dead code sitting
-    // behind a refusal of every display verb.
+  it('stands IN FRONT of the refusal that replaced the travel call', () => {
+    // The travel call is what moved the user's screen, and it is gone. Scoped to the dispatch's
+    // source-routing block, the off-canvas guard must precede the refusal, or the block is dead
+    // code sitting behind the very thing it stands in for.
     const from = src.indexOf('routeControlSource(projects, activeId, sourceNodeId)')
     expect(from, 'the source-routing lookup').toBeGreaterThan(-1)
     const to = src.indexOf('waitForCanvasNode(', from)
     expect(to, 'the post-routing canvas wait').toBeGreaterThan(from)
     const routing = src.slice(from, to)
-    expect(routing).not.toMatch(/travelToProjectRef\.current\(route\.projectId\)/)
-    const guard = routing.indexOf('if (answersOffCanvas(verb)) {')
-    const refusal = routing.indexOf('offScreenRefusal(projects, route, verb, sourceNodeId)')
+    const guard = routing.indexOf(OFF_CANVAS_GUARD)
+    const refusal = routing.indexOf('reply({ ok: false, error: offScreenRefusal(verb,')
     expect(guard, 'the off-canvas guard inside the routing block').toBeGreaterThan(-1)
-    expect(guard).toBeLessThan(refusal)
+    expect(refusal, 'the off-screen refusal').toBeGreaterThan(guard)
     // …and the refusal is its ELSE, so the two are exclusive by construction rather than by a
     // `return` someone can move.
-    expect(routing).toMatch(
-      /\} else \{\s*(?:\/\/[^\n]*\n\s*)*const refusal = offScreenRefusal\(projects, route, verb, sourceNodeId\)/
-    )
+    expect(routing).toMatch(/\} else \{[\s\S]{0,800}?reply\(\{ ok: false, error: offScreenRefusal\(verb,/)
+    // A refusal REPLIES and stops — it must never fall through into the canvas wait, which would
+    // burn the 120 s timeout before answering.
+    expect(routing.slice(refusal)).toMatch(/offScreenRefusal\(verb,[\s\S]{0,200}?\n\s*return\n/)
   })
 
   it('the guard polarity is not inverted', () => {
-    expect(src).toContain('if (answersOffCanvas(verb)) {')
+    expect(src).toContain(OFF_CANVAS_GUARD)
     expect(src).not.toContain('if (!answersOffCanvas(verb))')
+    expect(src).not.toContain('if (!answersFromStoredNodes(verb))')
   })
 
   it('never travels, activates, reopens or moves the camera', () => {
@@ -104,8 +105,11 @@ describe('the off-canvas dispatch block (source pins)', () => {
     expect(body).toContain('ocStore.getProject(route.projectId)')
     expect(body).toMatch(/owner\?\.nodes\.find\(\(n\) => n\.id === sourceNodeId\)/)
     // Hydrated with the same transform the project load uses, so the shape cannot drift from a
-    // live node's — the verb bodies read `src.data.title`, `src.data.cwd` and its geometry.
-    expect(body).toContain('nodeStatesToFlow([ocSrc])[0]')
+    // live node's — the verb bodies read `src.data.title`, `src.data.cwd` and its geometry. The
+    // WHOLE array, not just the source: the stored-node verbs resolve other ids against it, and a
+    // display verb's placement walks the source's parent chain.
+    expect(body).toContain('nodeStatesToFlow(owner.nodes) as CanvasNode[]')
+    expect(body).toContain('src = ocNodes.find((n) => n.id === sourceNodeId)')
   })
 
   it('the acting project is the SOURCE’s, not whatever is on screen', () => {

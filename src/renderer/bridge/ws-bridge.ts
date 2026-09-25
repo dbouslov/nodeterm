@@ -32,6 +32,8 @@ import {
   type CodexApi,
   type CodexIdentityCaps,
   UNKNOWN_CODEX_IDENTITY_CAPS,
+  type CodexCliCaps,
+  UNKNOWN_CODEX_CLI_CAPS,
   type ContextApi,
   type DownloadTicket,
   type FilesApi,
@@ -58,6 +60,7 @@ import {
   type WorkspaceApi
 } from '../../shared/types'
 import type { PeerIdentity } from '../../shared/presence'
+import type { PaneOwner } from '../../shared/agents/pane-owner-predicate'
 import { buildStubApi } from './stubs'
 import { mountPickerRoot, openDirectoryPicker } from './dialog-picker'
 import { encodePcmForWire } from './speech-encode'
@@ -242,6 +245,16 @@ export function buildRealApi(
     generateGroupName: () => Promise.resolve(AI_NAMING_UNAVAILABLE),
     capture: (persistKey, full) =>
       client.request(IPC.ptyCapture, persistKey, full).catch(() => '') as Promise<string>,
+    // Documented degrade, not a stub with a hole in it: SSH PROJECTS are desktop-only (the whole
+    // `sshProject` surface is `U(...)`-stubbed here), so no browser session ever holds a remote
+    // ControlMaster to attach early over. `false` = "never attach early" = the pre-feature wait,
+    // which is exactly right for a shell that cannot produce the question.
+    remoteSessionConfirmed: () => Promise.resolve(false),
+    // REAL, unlike `remoteSessionConfirmed` above: the server runs on the machine whose tmux it is
+    // reading, so the local leg of this probe is exactly right there. Fail-open to `null` = "could
+    // not tell", the same answer every other failure path gives.
+    sessionAge: (persistKey) =>
+      client.request(IPC.ptySessionAge, persistKey).catch(() => null) as Promise<number | null>,
     readScrollback: (persistKey) =>
       client.request(IPC.ptyReadScrollback, persistKey) as Promise<string>,
     sendText: (persistKey, text, opts) =>
@@ -255,6 +268,11 @@ export function buildRealApi(
     // shell yet" and gives up on its own deadline.
     paneCommand: (persistKey) =>
       client.request(IPC.ptyPaneCommand, persistKey).catch(() => null) as Promise<string | null>,
+    // A REAL implementation, not a stub: core registers the handler, so the server this browser is
+    // served from answers it. The hibernation exit fails CLOSED on a null, so a stub here would
+    // have silently switched Eco off for the whole Server Edition rather than degrade it.
+    paneOwner: (persistKey) =>
+      client.request(IPC.ptyPaneOwner, persistKey).catch(() => null) as Promise<PaneOwner | null>,
     terminateForeground: (persistKey, expectedAgentId) =>
       client.request(IPC.ptyTerminateForeground, persistKey, expectedAgentId).catch(() => false) as Promise<boolean>,
     // No server handler — the session-name poll degrades to no adopted name. A PRE-EXISTING gap,
@@ -586,8 +604,8 @@ export function buildFilesApi(
 
   const context: ContextApi = {
     onUpdate: (listener) => client.subscribe(IPC.contextUpdate, listener as Listener),
-    ensure: (sessionId, cwd, accountId) =>
-      client.cast(IPC.contextEnsure, sessionId, cwd, accountId)
+    ensure: (sessionId, cwd, accountId, nodeId, agentId) =>
+      client.cast(IPC.contextEnsure, sessionId, cwd, accountId, nodeId, agentId)
   }
 
   // Board-log: REAL over the bridge for local projects (the server routes local; SSH projects on the
@@ -852,6 +870,14 @@ export function buildCodexApi(client: RpcClient): CodexApi {
     identityCaps: () =>
       (client.request(IPC.codexIdentityCaps) as Promise<CodexIdentityCaps>).catch(
         () => UNKNOWN_CODEX_IDENTITY_CAPS
+      ),
+    // A REAL handler server-side, unlike `identityCaps` right above it — `registerCodexCliIpc`
+    // runs in that shell for the reason spelled out there: the Server Edition's Codex sessions run
+    // on the server's own `codex`, so the browser needs that binary's real approval vocabulary.
+    // Rejection degrades to the unknown caps, i.e. the baseline vocabulary.
+    cliCaps: () =>
+      (client.request(IPC.codexCliCaps) as Promise<CodexCliCaps>).catch(
+        () => UNKNOWN_CODEX_CLI_CAPS
       ),
     onIdentity: (listener) => client.subscribe(IPC.codexIdentity, listener as Listener)
   }

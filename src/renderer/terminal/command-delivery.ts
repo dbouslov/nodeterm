@@ -15,12 +15,15 @@
 // @shared/canonical-line.
 
 import { fitsLaunchLine } from '@shared/canonical-line'
+import { KILL_LINE, WINDOWS_KILL_LINE } from '@shared/shell-kill-line'
 
 export const VERIFY_TIMEOUT_MS = 2000
 export const DELIVERY_ATTEMPTS = 3
-/** Ctrl-U — clear the pending input line before a rewrite. Exported because the in-place restart
- *  choreography clears the line the same way before typing its exit command (agent-restart.ts). */
-export const KILL_LINE = '\x15'
+export { KILL_LINE, WINDOWS_KILL_LINE }
+
+export interface DeliverCommandOptions {
+  killLine?: string
+}
 
 // CSI (\x1b[...X), OSC (\x1b]...BEL|ST) and single-char ESC sequences.
 // eslint-disable-next-line no-control-regex
@@ -85,17 +88,20 @@ export interface DeliveryIo {
 }
 
 /** Deliver `cmd` + Enter, echo-verified with bounded retries. Returns a cancel function
- *  (call on node teardown). `onSettled` fires exactly once when the delivery is over — submitted
- *  (verified or fail-open) or cancelled — for callers that must know when the LINE has left the
- *  pane, not merely when it was started: the retries run for up to
+ *  (call on node teardown). `onSettled` fires exactly once when the delivery is over and reports
+ *  whether the final Enter write succeeded, the line was too long, or delivery was cancelled.
+ *  Callers can use this to know when the LINE has left the pane, not merely when it was started:
+ *  the retries run for up to
  *  DELIVERY_ATTEMPTS × VERIFY_TIMEOUT_MS, and anything typed into the pane during that window
  *  lands inside the un-submitted line. The outcome argument is optional to read: every caller
  *  that only needs "the line has left the pane" keeps working unchanged. */
 export function deliverCommand(
   io: DeliveryIo,
   cmd: string,
-  onSettled?: (outcome: DeliveryOutcome) => void
+  onSettled?: (outcome: DeliveryOutcome) => void,
+  options?: DeliverCommandOptions
 ): () => void {
+  const killLine = options?.killLine ?? KILL_LINE
   let done = false
   let attempt = 0
   let echoed = ''
@@ -134,12 +140,25 @@ export function deliverCommand(
       return false
     }
   }
-  // Close the delivery BEFORE writing Enter: an io whose write echoes back synchronously (the
-  // in-place restart choreography feeds one) would otherwise re-enter the listener below while
-  // the tail still matches, and submit forever.
+  // Mark closed BEFORE writing Enter: an io whose write echoes back synchronously (the in-place
+  // restart choreography feeds one) would otherwise re-enter the listener below while the tail
+  // still matches, and submit forever. Announce success only AFTER that final write returns: the
+  // old ordering let a rejected Enter auto-dismiss a restart as successful.
   const submit = (): void => {
-    finish('submitted')
-    write('\r')
+    if (done) return
+    done = true
+    if (timer) clearTimeout(timer)
+    unsub?.()
+    let outcome: DeliveryOutcome = 'cancelled'
+    try {
+      io.write('\r')
+      outcome = 'submitted'
+    } catch {
+      // The transport rejected Enter. Report the failed submission below.
+    }
+    // Deliberately outside the transport try/catch: a caller callback that throws must still be
+    // invoked exactly once, and its own exception keeps propagating to that caller.
+    onSettled?.(outcome)
   }
   const tryOnce = (): void => {
     if (done) return
@@ -156,14 +175,14 @@ export function deliverCommand(
         // tail while the pane was in canonical mode, so Enter would submit a command we KNOW is
         // cut in half. Kill the pending line and report instead. See @shared/canonical-line.
         if (!fitsLaunchLine(cmd)) {
-          write(KILL_LINE)
+          write(killLine)
           finish('line-too-long')
           return
         }
         submit() // fail-open: unverified submit beats a never-launched agent
         return
       }
-      if (!write(KILL_LINE)) return // transport gone — the delivery is over, not stuck
+      if (!write(killLine)) return // transport gone — the delivery is over, not stuck
       tryOnce()
     }, VERIFY_TIMEOUT_MS)
     write(cmd, attempt === 1)
@@ -178,5 +197,5 @@ export function deliverCommand(
     }
   })
   tryOnce()
-  return finish
+  return () => finish()
 }
