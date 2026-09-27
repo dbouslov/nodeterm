@@ -12549,8 +12549,8 @@ export function Canvas() {
               const noteName = `note "${(target.data.title as string) || 'Note'}" (${resolved.id})`
               // `--fit yes` alone: refit to the text as it stands (lib/stickyFit), nothing written.
               if (parsed.write.text === undefined && parsed.write.append === undefined) {
-                const now = requestStickyFit(resolved.id)
-                reply({ ok: true, message: `${noteName}: ${now ? 'fitted to its text' : 'will fit to its text when it renders'}` })
+                requestStickyFit(resolved.id)
+                reply({ ok: true, message: `${noteName}: will fit to its text` })
                 return
               }
               // Validate against the snapshot for the REPLY, but re-apply inside the updater
@@ -12578,7 +12578,7 @@ export function Canvas() {
               requestStickyFit(resolved.id)
               reply({
                 ok: true,
-                message: `${noteName}: ${precheck.mode === 'append' ? 'appended' : 'replaced'}, fitted to its text`
+                message: `${noteName}: ${precheck.mode === 'append' ? 'appended' : 'replaced'}; it will fit to its text`
               })
               return
             }
@@ -12605,7 +12605,7 @@ export function Canvas() {
             node.data.textUpdatedBy = srcTitle
             const newId = addAndConnect(node)
             requestStickyFit(newId)
-            reply({ ok: true, message: `created note "${node.data.title}" (${newId}), fitted to its text` })
+            reply({ ok: true, message: `created note "${node.data.title}" (${newId}); it will fit to its text` })
             return
           }
           case 'annotate': {

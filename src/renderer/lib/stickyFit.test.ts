@@ -4,7 +4,9 @@ import { COLLAPSED_HEIGHT } from '../state/workspace'
 import { NODE_MIN_SIZES } from './nodeSizing'
 import {
   applyStickyFit,
+  forgetStickyFit,
   registerStickyFit,
+  STICKY_FIT_PENDING_MS,
   requestStickyFit,
   stickyFitHeight,
   STICKY_FIT_MAX
@@ -84,6 +86,16 @@ describe('applyStickyFit — set the height, keep the width, reflow around it', 
     expect(get(out, 'b').position.y).toBe(80)
   })
 
+  it('with snapping on, rounds the fitted height up to the grid, still capped at 2000', () => {
+    const nodes = [node('s', 0, 0, 300, 200)]
+    expect(h(get(applyStickyFit(nodes, 's', 301, 24), 's'))).toBe(312)
+    expect(h(get(applyStickyFit(nodes, 's', 1999, 24), 's'))).toBe(STICKY_FIT_MAX)
+    const folded = [
+      node('c', 0, 0, 300, COLLAPSED_HEIGHT, { data: { title: 'c', color: '#fff', group: null, collapsed: true, expandedHeight: 200 } })
+    ]
+    expect(get(applyStickyFit(folded, 'c', 301, 24), 'c').data.expandedHeight).toBe(312)
+  })
+
   it('returns the same array when the height already fits, or the id is not a note', () => {
     const nodes = [node('s', 0, 0, 300, 200), node('t', 0, 300, 300, 100, { type: 'terminal' })]
     expect(applyStickyFit(nodes, 's', 200)).toBe(nodes)
@@ -102,6 +114,26 @@ describe('requestStickyFit — the verb asks a mounted note to measure itself', 
     expect(early).toHaveBeenCalledTimes(2)
     off()
     expect(requestStickyFit('late')).toBe(false)
+  })
+
+  it('a held request expires, so a much later mount does not fit unasked', () => {
+    const fn = vi.fn()
+    expect(requestStickyFit('stale', 1_000)).toBe(false)
+    const off = registerStickyFit('stale', fn, 1_000 + STICKY_FIT_PENDING_MS + 1)
+    expect(fn).not.toHaveBeenCalled()
+    off()
+    const fresh = vi.fn()
+    requestStickyFit('fresh', 1_000)
+    registerStickyFit('fresh', fresh, 1_000 + STICKY_FIT_PENDING_MS - 1)()
+    expect(fresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('forgetStickyFit drops a held request (the note was deleted before it mounted)', () => {
+    const fn = vi.fn()
+    requestStickyFit('gone')
+    forgetStickyFit('gone')
+    registerStickyFit('gone', fn)()
+    expect(fn).not.toHaveBeenCalled()
   })
 
   it('a mount with nothing requested measures nothing (an old note is never refitted unasked)', () => {

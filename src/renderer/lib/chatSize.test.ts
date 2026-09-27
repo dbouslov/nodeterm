@@ -45,6 +45,19 @@ describe('commonChatSize — the size a frame’s chats share', () => {
     expect(commonChatSize(nodes, ['a', 'n1', 'n2', 'm'])).toEqual({ width: 600, height: 400 })
     expect(commonChatSize(nodes, ['n1', 'm'])).toBeNull()
   })
+  it('a maximized chat neither votes nor is resized (it is sized to the screen, not the frame)', () => {
+    const max = { premaxRect: { x: 0, y: 0, width: 600, height: 400 } }
+    const nodes = [
+      node('a', 0, 0, 600, 400),
+      node('m1', 0, 0, 1800, 1000, { data: { title: 'm1', color: '#fff', group: null, ...max } }),
+      node('m2', 0, 0, 1800, 1000, { data: { title: 'm2', color: '#fff', group: null, ...max } })
+    ]
+    expect(commonChatSize(nodes, ['a', 'm1', 'm2'])).toEqual({ width: 600, height: 400 })
+    const out = resizeChats(nodes, ['a', 'm1'], { width: 800, height: 500 })
+    expect(get(out, 'm1')).toBe(nodes[1])
+    expect(w(get(out, 'a'))).toBe(800)
+  })
+
   it('reads the rendered (`measured`) size first', () => {
     const nodes = [node('a', 0, 0, 1, 1, { measured: { width: 640, height: 420 } })]
     expect(commonChatSize(nodes, ['a'])).toEqual({ width: 640, height: 420 })

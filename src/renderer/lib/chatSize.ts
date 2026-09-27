@@ -4,11 +4,13 @@
 // the `--size WxH` asked for), and a chat that joins a frame holding chats (`open-* --group`,
 // `move --group`) takes that size. Notes keep theirs; a minimized chat takes the common width and
 // keeps its title bar, remembering the common height for when it is restored. Pinned chats are
-// left alone, as every automatic layout leaves them.
+// left alone, as every automatic layout leaves them, and so are maximized ones (sized to the
+// screen; restoring puts back the rect they had).
 //
 // PURE. The callers in Canvas then lay out and let the frames follow through `reflow`.
 import { NODE_MIN_SIZES } from './nodeSizing'
 import { isPinned, type CanvasNode } from '../state/workspace'
+import { isMaximized } from './nodeFocus'
 
 export interface ChatSize {
   width: number
@@ -48,7 +50,7 @@ export function commonChatSize(nodes: readonly CanvasNode[], ids: readonly strin
   const want = new Set(ids)
   const counts = new Map<string, { size: ChatSize; n: number }>()
   for (const nd of nodes) {
-    if (!want.has(nd.id) || !isChat(nd) || nd.data.collapsed) continue
+    if (!want.has(nd.id) || !isChat(nd) || nd.data.collapsed || isMaximized(nd)) continue
     const size = { width: nodeW(nd), height: nodeH(nd) }
     if (size.width <= 0 || size.height <= 0) continue
     const key = `${size.width}x${size.height}`
@@ -110,7 +112,7 @@ export function resizeChats(nodes: CanvasNode[], ids: readonly string[], size: C
   const want = new Set(ids)
   let changed = false
   const out = nodes.map((n) => {
-    if (!want.has(n.id) || !isChat(n) || isPinned(n, nodes)) return n
+    if (!want.has(n.id) || !isChat(n) || isPinned(n, nodes) || isMaximized(n)) return n
     const next = sized(n, size)
     if (next !== n) changed = true
     return next
@@ -121,5 +123,5 @@ export function resizeChats(nodes: CanvasNode[], ids: readonly string[], size: C
 /** A chat about to join a frame, at that frame's common size (`frameChatSize`); a note, or no
  *  size to take, leaves it as it is. */
 export function withChatSize<T extends CanvasNode>(node: T, size: ChatSize | null): T {
-  return size && isChat(node) ? sized(node, size) : node
+  return size && isChat(node) && !isMaximized(node) ? sized(node, size) : node
 }

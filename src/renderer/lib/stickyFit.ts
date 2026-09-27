@@ -26,9 +26,11 @@ export function stickyFitHeight(contentHeight: number): number | null {
  * the rect it had. A collapsed note stays collapsed: only its remembered `expandedHeight` changes,
  * and nothing moves (its box did not). Returns `nodes` itself when nothing changes.
  */
-export function applyStickyFit(nodes: CanvasNode[], id: string, height: number, grid = 0): CanvasNode[] {
+export function applyStickyFit(nodes: CanvasNode[], id: string, fitted: number, grid = 0): CanvasNode[] {
   const note = nodes.find((n) => n.id === id)
   if (!note || note.type !== 'sticky') return nodes
+  // With snapping on, whole grid cells: up, so the text still fits, and never past the cap.
+  const height = grid > 0 ? Math.min(STICKY_FIT_MAX, Math.ceil(fitted / grid) * grid) : fitted
   if (note.data.collapsed) {
     if (note.data.expandedHeight === height) return nodes
     return nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, expandedHeight: height } } : n))
@@ -44,26 +46,35 @@ export function applyStickyFit(nodes: CanvasNode[], id: string, height: number, 
 
 // The request registry. A note registers its measurer while mounted; `requestStickyFit` runs it.
 // A request for a note that has not mounted yet (one the verb has just created) is held and runs
-// when it mounts. A mount with nothing requested measures nothing, so opening a project never
-// resizes its old notes unasked — that is what `sticky --fit yes` is for.
+// when it mounts — for STICKY_FIT_PENDING_MS only, so a note deleted before it mounted, or one
+// whose project was left, is never fitted unasked much later. A mount with nothing requested
+// measures nothing, so opening a project never resizes its old notes — `sticky --fit yes` does.
+export const STICKY_FIT_PENDING_MS = 10_000
 const measurers = new Map<string, () => void>()
-const pending = new Set<string>()
+const pending = new Map<string, number>()
 
 /** Ask note `id` to fit its text. True when a mounted note took the request now. */
-export function requestStickyFit(id: string): boolean {
+export function requestStickyFit(id: string, now = Date.now()): boolean {
   const run = measurers.get(id)
   if (!run) {
-    pending.add(id)
+    pending.set(id, now)
     return false
   }
   run()
   return true
 }
 
+/** Drop a held request (its note was deleted before it mounted). */
+export function forgetStickyFit(id: string): void {
+  pending.delete(id)
+}
+
 /** Register a mounted note's measurer; returns the unregister. */
-export function registerStickyFit(id: string, run: () => void): () => void {
+export function registerStickyFit(id: string, run: () => void, now = Date.now()): () => void {
   measurers.set(id, run)
-  if (pending.delete(id)) run()
+  const at = pending.get(id)
+  pending.delete(id)
+  if (at !== undefined && now - at <= STICKY_FIT_PENDING_MS) run()
   return () => {
     if (measurers.get(id) === run) measurers.delete(id)
   }

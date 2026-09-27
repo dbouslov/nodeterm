@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { ReactFlowProvider, useNodes, type NodeProps } from '@xyflow/react'
 import { StickyNode } from './StickyNode'
 import { requestStickyFit } from '../lib/stickyFit'
+import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import type { CanvasNode } from '../state/workspace'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -90,11 +91,16 @@ function mount(id: string, text: string): () => CanvasNode[] {
 it('a fit request sets the height to header + rendered text + borders, width kept', () => {
   const seen = mount('fit-1', '# a long note')
   expect(seen()[0].height).toBe(260)
+  let dirty = 0
+  const off = registerWorkspaceDirty(() => dirty++)
   act(() => {
     requestStickyFit('fit-1')
   })
+  off()
   expect(seen()[0].height).toBe(HEADER + CONTENT + 2)
   expect(seen()[0].width).toBe(240)
+  // Saved: a collapsed note's fit changes only data, which no dimensions change would report.
+  expect(dirty).toBe(1)
 })
 
 it('finishing a hand edit fits the note only when the text changed', () => {

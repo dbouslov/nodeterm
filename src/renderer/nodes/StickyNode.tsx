@@ -10,6 +10,7 @@ import { NoteMarkdown } from '../components/NoteMarkdown'
 import { relativeTime } from '../lib/relativeTime'
 import { applyStickyFit, registerStickyFit, requestStickyFit, stickyFitHeight } from '../lib/stickyFit'
 import { useSettings } from '../state/settings'
+import { markWorkspaceDirty } from '../state/workspaceDirty'
 import { DEFAULT_SETTINGS } from '@shared/types'
 
 /**
@@ -73,6 +74,9 @@ export function StickyNode({ id, data, selected }: NodeProps<CanvasNode>) {
       const { snapToGrid, gridSize } = useSettings.getState().settings
       const grid = snapToGrid ? gridSize || DEFAULT_SETTINGS.gridSize : 0
       setNodes((ns) => applyStickyFit(ns as CanvasNode[], id, height, grid))
+      // Save it: a collapsed note's fit changes only data.expandedHeight, and no dimensions change
+      // reports that to Canvas, so without this it is lost on restart.
+      markWorkspaceDirty()
     })
     return () => cancelAnimationFrame(frame)
   }, [fitTick, id, setNodes])
