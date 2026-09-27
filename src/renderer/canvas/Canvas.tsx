@@ -321,7 +321,7 @@ import {
   viewportForRect,
   type FocusableNode
 } from '../lib/nodeFocus'
-import { runSnapshot, snapshotViewRefusal, SNAPSHOT_MARGIN_PX, SNAPSHOT_NOT_ON_SCREEN } from '../lib/canvasSnapshot'
+import { runSnapshot, settledPaint, snapshotViewRefusal, SNAPSHOT_MARGIN_PX, SNAPSHOT_NOT_ON_SCREEN } from '../lib/canvasSnapshot'
 import { geometryReply } from '../lib/geometry'
 import { buildLoopCards, loopCardListRows, type LoopCardUi } from '../lib/loopCards'
 import { buildSubagentCards } from '../lib/subagentCards'
@@ -12852,8 +12852,12 @@ export function Canvas() {
                 fit: { margin: SNAPSHOT_MARGIN_PX, minZoom: CANVAS_MIN_ZOOM, maxZoom: CANVAS_MAX_ZOOM },
                 getViewport,
                 setViewport: (v) => setViewport(v, { duration: 0 }),
-                // Two frames: the first commits the new transform, the second runs after it painted.
-                paint: () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+                // Bounded wait for a PRESENTED frame, not just a committed one (#2; lib/canvasSnapshot).
+                paint: () =>
+                  settledPaint({
+                    raf: (fn) => void requestAnimationFrame(() => fn()),
+                    setTimeout: (fn, ms) => void window.setTimeout(fn, ms)
+                  }),
                 capture: (rect) => api.captureCanvasSnapshot({ requestId, rect })
               })
             )

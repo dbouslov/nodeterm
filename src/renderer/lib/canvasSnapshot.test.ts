@@ -7,6 +7,9 @@ import {
   snapshotViewRefusal,
   snapshotReplyMessage,
   runSnapshot,
+  settledPaint,
+  SNAPSHOT_SETTLE_MS,
+  SNAPSHOT_SETTLE_MAX_MS,
   SNAPSHOT_EMPTY_CANVAS,
   SNAPSHOT_IN_PROGRESS,
   SNAPSHOT_NOT_ON_SCREEN,
@@ -267,5 +270,66 @@ describe('runSnapshot — frame, paint, capture, then hand the view back', () =>
       expect(calls).toEqual([])
       expect(view()).toEqual(USER_VIEW)
     }
+  })
+})
+
+describe('settledPaint — #2: prove a PRESENTED frame, not just a committed one, and never hang', () => {
+  // A hand-cranked clock: rAF callbacks and timers are queued and run only when the test says so,
+  // so the ORDER is what is asserted, not wall time.
+  const clock = () => {
+    let now = 0
+    let rafs: (() => void)[] = []
+    let timers: { at: number; fn: () => void }[] = []
+    const env = {
+      raf: (fn: () => void) => void rafs.push(fn),
+      setTimeout: (fn: () => void, ms: number) => void timers.push({ at: now + ms, fn })
+    }
+    const flush = () => new Promise<void>((r) => setImmediate(r))
+    return {
+      env,
+      async frame() {
+        const due = rafs
+        rafs = []
+        due.forEach((f) => f())
+        await flush()
+      },
+      async advance(ms: number) {
+        now += ms
+        const due = timers.filter((t) => t.at <= now)
+        timers = timers.filter((t) => t.at > now)
+        due.forEach((t) => t.fn())
+        await flush()
+      }
+    }
+  }
+
+  it('does not resolve on two frames alone: it waits the settle delay and one more frame', async () => {
+    const c = clock()
+    let done = false
+    void settledPaint(c.env).then(() => (done = true))
+    await c.frame()
+    await c.frame()
+    // The old paint wait resolved here — after the commit, before anything proved presentation.
+    expect(done).toBe(false)
+    await c.advance(SNAPSHOT_SETTLE_MS)
+    expect(done).toBe(false)
+    await c.frame()
+    expect(done).toBe(true)
+  })
+
+  it('is bounded: a window whose frames never come resolves at the deadline', async () => {
+    const c = clock()
+    let done = false
+    void settledPaint(c.env).then(() => (done = true))
+    await c.advance(SNAPSHOT_SETTLE_MAX_MS - 1)
+    expect(done).toBe(false)
+    await c.advance(1)
+    expect(done).toBe(true)
+  })
+
+  it('the whole wait fits the budget the brief allows', () => {
+    expect(SNAPSHOT_SETTLE_MAX_MS).toBeLessThanOrEqual(300)
+    // Room for the delay and a few frames inside the cap, so the cap is a backstop, not the path.
+    expect(SNAPSHOT_SETTLE_MS + 4 * 17).toBeLessThan(SNAPSHOT_SETTLE_MAX_MS)
   })
 })
