@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CanvasNodeState } from '@shared/types'
 import { WAIT_LABEL } from './edgeModel'
 import { buildFindings, buildOverviewGraph, overviewSig, type OverviewInput } from './networkOverview'
+import { OVERVIEW_CARD, OVERVIEW_LOOSE_ID } from './overviewPack'
 
 const node = (id: string, extra: Partial<CanvasNodeState> = {}): CanvasNodeState => ({
   id,
@@ -204,11 +205,13 @@ describe('buildOverviewGraph', () => {
       statusById: { a: { unread: true, state: 'working', lastEventAt: 999_000 } }
     })
     const { nodes, edges } = buildOverviewGraph(input, () => '#d97757', buildFindings(input))
-    expect(nodes.map((n) => n.id)).toEqual(['g', 'a', 'b', 's'])
+    // Blocks first (a parent must precede its children), then the cards in canvas order.
+    expect(nodes.map((n) => n.id)).toEqual(['g', OVERVIEW_LOOSE_ID, 'a', 'b', 's'])
     // `group`, not a private type: the edge router treats only `type === 'group'` as a frame.
     expect(nodes[0].type).toBe('group')
-    expect(nodes[1]).toMatchObject({ type: 'ovNode', parentId: 'g', extent: 'parent' })
-    expect(nodes[1].data).toMatchObject({
+    expect(nodes[1].type).toBe('group')
+    expect(nodes[2]).toMatchObject({ type: 'ovNode', parentId: 'g', extent: 'parent' })
+    expect(nodes[2].data).toMatchObject({
       role: 'lead',
       statusKind: 'working',
       statusLabel: 'Running',
@@ -216,8 +219,8 @@ describe('buildOverviewGraph', () => {
       unread: true,
       chips: []
     })
-    expect(nodes[2].data.chips).toEqual(['QUEUED'])
-    expect(nodes[3].data.textPreview).toBe('line one\nline two')
+    expect(nodes[3].data.chips).toEqual(['QUEUED'])
+    expect(nodes[4].data.textPreview).toBe('line one\nline two')
 
     const byId = new Map(edges.map((e) => [e.id, e]))
     // One arrow per pair, as on the canvas: the rope wins the pixels over the bridge it covers.
@@ -230,6 +233,27 @@ describe('buildOverviewGraph', () => {
     expect(byId.get('n')).toMatchObject({ type: 'circuit', data: { kind: 'note' } })
     // The look is a table lookup on kind + state; nothing inline rides the edge object.
     expect(edges.every((e) => e.style === undefined && e.markerEnd === undefined)).toBe(true)
+  })
+
+  it('draws compact cards packed by frame, loose chats in their own block, never canvas geometry', () => {
+    const input = base({
+      nodes: [
+        node('g', { kind: 'group', title: 'Wave', position: { x: 5000, y: 5000 }, size: { width: 3000, height: 2000 } }),
+        agent('a', { parentId: 'g', position: { x: 900, y: 40 }, annotation: { recommend: 'close it', by: 'a', at: 1 } }),
+        agent('b', { position: { x: -4000, y: 7000 }, size: { width: 900, height: 700 } })
+      ]
+    })
+    const { nodes } = buildOverviewGraph(input, () => undefined, [])
+    const byId = new Map(nodes.map((n) => [n.id, n]))
+    for (const id of ['a', 'b']) expect(byId.get(id)).toMatchObject({ width: OVERVIEW_CARD.width, height: OVERVIEW_CARD.height })
+    expect(byId.get('a')).toMatchObject({ parentId: 'g', extent: 'parent' })
+    expect(byId.get('b')).toMatchObject({ parentId: OVERVIEW_LOOSE_ID, extent: 'parent' })
+    expect(byId.get(OVERVIEW_LOOSE_ID)).toMatchObject({ type: 'group', data: { title: 'Not in a frame' } })
+    // Relative to its block, inside the label band — not the canvas's (900, 40).
+    expect(byId.get('a')!.position.x).toBeLessThan(50)
+    expect(byId.get('a')!.data.recommend).toBe('close it')
+    // The frame is sized to its packed contents, not its 3000 px canvas width.
+    expect(byId.get('g')!.width).toBeLessThan(400)
   })
 
   it('draws every edge even when a node hides its fan-out', () => {

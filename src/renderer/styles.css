@@ -9578,7 +9578,7 @@ button.group-node__setup:disabled {
 .overview-finding__kind { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(var(--tint-rgb), 0.55); }
 .overview-finding__text { font-size: 13px; }
 .overview-finding__meta { font-size: 11px; color: rgba(var(--tint-rgb), 0.55); }
-.ov-node { width: 100%; height: 100%; box-sizing: border-box; background: rgba(var(--card-rgb), 0.92); border: 1px solid rgba(var(--tint-rgb), 0.12); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; color: var(--text); display: flex; flex-direction: column; gap: 4px; overflow: hidden; cursor: pointer; }
+.ov-node { width: 100%; height: 100%; box-sizing: border-box; background: rgba(var(--card-rgb), 0.92); border: 1px solid rgba(var(--tint-rgb), 0.12); border-left: 4px solid var(--accent); border-radius: 8px; padding: 6px 8px; color: var(--text); display: flex; flex-direction: column; gap: 2px; overflow: hidden; cursor: pointer; }
 .ov-node--working { box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.55); }
 .ov-node--attention { box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.6); }
 .ov-node__head { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -9587,8 +9587,9 @@ button.group-node__setup:disabled {
 .ov-node__count { margin-left: auto; font-size: 10px; background: rgba(255, 159, 10, 0.2); border-radius: 999px; padding: 0 6px; }
 .ov-node__role { font-size: 12px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-node__role--none { color: rgba(var(--tint-rgb), 0.4); }
-.ov-node__text { margin: 0; font: 11px/1.3 ui-monospace, Menlo, monospace; color: rgba(var(--tint-rgb), 0.7); white-space: pre-wrap; }
-.ov-node__chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
+.ov-node__recommend { font-size: 11px; color: #d97757; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-node__text { margin: 0; font: 11px/1.3 ui-monospace, Menlo, monospace; color: rgba(var(--tint-rgb), 0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-node__chips { display: flex; flex-wrap: nowrap; gap: 4px; margin-top: auto; overflow: hidden; }
 .ov-chip { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: rgba(var(--tint-rgb), 0.08); }
 .ov-chip--working { color: #d97757; }
 .ov-chip--attention { color: #ff453a; }

@@ -3,10 +3,11 @@
 // instance over the SERIALIZED project — nothing here parks, releases or spawns a PTY, and the main
 // canvas stays mounted underneath.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Background, ReactFlow, ReactFlowProvider, type NodeMouseHandler } from '@xyflow/react'
+import { Background, ReactFlow, ReactFlowProvider, useReactFlow, useStore, type NodeMouseHandler } from '@xyflow/react'
 import { agentConfig, type AgentId } from '@shared/agents/config'
 import { circuitEdgeTypes, EdgeRouter } from '../../canvas/edges'
 import { buildFindings, buildOverviewGraph, type Finding, type OverviewInput } from '../../lib/networkOverview'
+import { OVERVIEW_LOOSE_ID, fitOverviewViewport } from '../../lib/overviewPack'
 import { relativeTime } from '../../lib/relativeTime'
 import { overviewNodeTypes } from './OverviewNodes'
 
@@ -26,6 +27,23 @@ export interface NetworkOverviewViewProps {
 const OVERVIEW_FLOW_ID = 'network-overview'
 
 const colorOf = (agentId: string): string | undefined => agentConfig(agentId as AgentId)?.color
+
+/**
+ * Frames the packed overview in its pane: on mount, on a pane resize, and when the packed size
+ * changes (a node added or removed). A status update changes neither, so it never resets the
+ * user's pan and zoom. Computed and applied with `setViewport` — never `fitView`, which resolves
+ * later against whatever is measured then (the "Go to node" rule in CLAUDE.md).
+ */
+function OverviewCamera({ width, height }: { width: number; height: number }) {
+  const { setViewport } = useReactFlow()
+  const paneW = useStore((s) => s.width)
+  const paneH = useStore((s) => s.height)
+  useEffect(() => {
+    const vp = fitOverviewViewport({ width, height }, { width: paneW, height: paneH })
+    if (vp) void setViewport(vp)
+  }, [width, height, paneW, paneH, setViewport])
+  return null
+}
 
 function FindingRow({ f, now, onGo }: { f: Finding; now: number; onGo(id: string): void }) {
   const target = f.nodeId ?? f.groupId
@@ -84,7 +102,13 @@ export function NetworkOverviewView({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const onNodeClick: NodeMouseHandler = useCallback((_e, n) => onGoToNode(n.id), [onGoToNode])
+  // The loose block is the overview's own box, not a canvas node: nothing to go to.
+  const onNodeClick: NodeMouseHandler = useCallback(
+    (_e, n) => {
+      if (n.id !== OVERVIEW_LOOSE_ID) onGoToNode(n.id)
+    },
+    [onGoToNode]
+  )
 
   return (
     <div ref={rootRef} tabIndex={-1} className="overview-overlay" role="region" aria-label="Network overview">
@@ -109,7 +133,7 @@ export function NetworkOverviewView({
       <div className="overview-body">
         <div className="overview-graph">
           {/* Its own provider: without one, <ReactFlow> would join the MAIN canvas's store. Keyed by
-              project: `fitView` fits once per mount, and a project switch must fit again (spec §3). */}
+              project: a project switch starts from a fresh camera, framed by OverviewCamera. */}
           <ReactFlowProvider key={projectId}>
             <ReactFlow
               id={OVERVIEW_FLOW_ID}
@@ -117,8 +141,6 @@ export function NetworkOverviewView({
               edges={graph.edges}
               nodeTypes={overviewNodeTypes}
               edgeTypes={circuitEdgeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.15 }}
               minZoom={0.05}
               maxZoom={1.5}
               nodesDraggable={false}
@@ -131,6 +153,7 @@ export function NetworkOverviewView({
             >
               <Background gap={16} size={1} />
               <EdgeRouter edges={graph.edges} />
+              <OverviewCamera width={graph.bounds.width} height={graph.bounds.height} />
             </ReactFlow>
           </ReactFlowProvider>
         </div>

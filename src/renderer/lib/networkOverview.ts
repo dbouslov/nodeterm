@@ -9,6 +9,7 @@ import { nodeStatesToFlow } from '../state/workspace'
 import { edgeAnimated, type EdgeData } from './edgeKinds'
 import { WAIT_LABEL, ropeInfoOf, ropeVisual } from './edgeModel'
 import { hiddenLinkIds } from './noteLink'
+import { OVERVIEW_LOOSE_ID, packOverview } from './overviewPack'
 import type { LaunchDelivery } from './pendingLaunch'
 import { STATE_LABEL, sessionStateAgeLabel, sessionStatusKind, type StatusKind } from './sessionList'
 
@@ -156,6 +157,8 @@ export interface OverviewNodeData extends Record<string, unknown> {
   agentId?: string
   color: string
   role?: string
+  /** The annotation's recommendation, shown on the card under the role. */
+  recommend?: string
   statusKind: StatusKind
   statusLabel?: string
   ageLabel?: string
@@ -182,7 +185,7 @@ export function buildOverviewGraph(
   input: OverviewInput,
   colorOf: (agentId: string) => string | undefined,
   findings: readonly Finding[]
-): { nodes: Node<OverviewNodeData>[]; edges: Edge[] } {
+): { nodes: Node<OverviewNodeData>[]; edges: Edge[]; bounds: { width: number; height: number } } {
   const { nodes: states, bridges, ropes, statusById, launchById, now } = input
   const findingCount = new Map<string, number>()
   const noLead = new Set<string>()
@@ -192,19 +195,43 @@ export function buildOverviewGraph(
     if (f.kind === 'group-no-lead' && f.groupId) noLead.add(f.groupId)
   }
   const byId = new Map(states.map((n) => [n.id, n]))
-  // nodeStatesToFlow gives parent-first order and parentId/extent — the canvas's own shape.
+  // nodeStatesToFlow gives parent-first order — the canvas's own shape, which ropeInfoOf reads.
   const flow = nodeStatesToFlow(states)
-  const nodes: Node<OverviewNodeData>[] = flow.flatMap((fn) => {
-    const n = byId.get(fn.id)
-    if (!n) return []
+  // Positions and sizes come from the compact packing, never the canvas: one small card per node,
+  // one block per frame (nested frames nested), loose nodes in a block of their own.
+  const packed = packOverview(
+    states.map((n) => ({ id: n.id, parentId: n.parentId, isFrame: n.kind === 'group' })),
+    { aspect: 16 / 9 }
+  )
+  const toNode = (id: string, type: 'group' | 'ovNode', data: OverviewNodeData): Node<OverviewNodeData> | null => {
+    const r = packed.rects.get(id)
+    if (!r) return null
+    const parentId = packed.parentOf.get(id)
+    const pr = parentId ? packed.rects.get(parentId) : undefined
+    return {
+      id,
+      type,
+      position: pr ? { x: r.x - pr.x, y: r.y - pr.y } : { x: r.x, y: r.y },
+      ...(pr ? { parentId, extent: 'parent' as const } : {}),
+      width: r.width,
+      height: r.height,
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      data
+    }
+  }
+  const dataOf = (n: CanvasNodeState): OverviewNodeData => {
     const st = statusById[n.id]
     const statusKind = n.agentId ? sessionStatusKind(st?.state) : 'unknown'
-    const data: OverviewNodeData = {
+    const annotation = normalizeNodeAnnotation(n.annotation)
+    return {
       title: n.title,
       kind: n.kind,
       agentId: n.agentId,
       color: n.color,
-      role: normalizeNodeAnnotation(n.annotation)?.role,
+      role: annotation?.role,
+      recommend: annotation?.recommend,
       statusKind,
       statusLabel: n.agentId ? STATE_LABEL[statusKind] : undefined,
       ageLabel: n.agentId ? sessionStateAgeLabel(st?.lastEventAt, now) : undefined,
@@ -215,23 +242,32 @@ export function buildOverviewGraph(
       worktreeBranch: n.worktree?.branch,
       noLead: noLead.has(n.id)
     }
-    return [
-      {
-        id: n.id,
-        // `group`, not a private type name: the edge router treats only `type === 'group'` as a
-        // frame (transparent to edges between its own members, an obstacle to everyone else's).
-        type: n.kind === 'group' ? 'group' : 'ovNode',
-        position: fn.position,
-        ...(fn.parentId ? { parentId: fn.parentId, extent: 'parent' as const } : {}),
-        width: n.size.width,
-        height: n.size.height,
-        draggable: false,
-        selectable: false,
-        connectable: false,
-        data
-      }
-    ]
+  }
+  const frames = flow.flatMap((fn) => {
+    const n = byId.get(fn.id)
+    // `group`, not a private type name: the edge router treats only `type === 'group'` as a frame
+    // (transparent to edges between its own members, an obstacle to everyone else's).
+    const out = n && n.kind === 'group' ? toNode(n.id, 'group', dataOf(n)) : null
+    return out ? [out] : []
   })
+  const looseData: OverviewNodeData = {
+    title: 'Not in a frame',
+    kind: 'group',
+    color: 'rgba(128, 128, 128, 0.6)',
+    statusKind: 'unknown',
+    chips: [],
+    unread: false,
+    findingCount: 0,
+    noLead: false
+  }
+  const loose = toNode(OVERVIEW_LOOSE_ID, 'group', looseData)
+  const cards = flow.flatMap((fn) => {
+    const n = byId.get(fn.id)
+    const out = n && n.kind !== 'group' ? toNode(n.id, 'ovNode', dataOf(n)) : null
+    return out ? [out] : []
+  })
+  // Blocks before cards: React Flow needs every parent ahead of its children.
+  const nodes: Node<OverviewNodeData>[] = [...frames, ...(loose ? [loose] : []), ...cards]
   const info = ropeInfoOf(flow, colorOf)
   const stickyIds = new Set(states.filter((n) => n.kind === 'sticky').map((n) => n.id))
   // One arrow per pair, as on the canvas (lib/noteLink.hiddenLinkIds): the rope wins the pixels.
@@ -265,7 +301,7 @@ export function buildOverviewGraph(
       }
     })
   ]
-  return { nodes, edges }
+  return { nodes, edges, bounds: { width: packed.width, height: packed.height } }
 }
 
 /**
