@@ -46,6 +46,65 @@ describe('projects store node mutations', () => {
   })
 })
 
+describe('removeNodes (the off-screen close frees a frame\'s children like deleteNodes does)', () => {
+  const group = (id: string, x: number, y: number, parentId?: string): CanvasNodeState => ({
+    id,
+    kind: 'group',
+    position: { x, y },
+    size: { width: 400, height: 300 },
+    title: id,
+    color: '#fff',
+    group: null,
+    ...(parentId ? { parentId } : {})
+  })
+  const at = (id: string, x: number, y: number, parentId?: string): CanvasNodeState => ({
+    ...mkNode(id),
+    position: { x, y },
+    ...(parentId ? { parentId } : {})
+  })
+  const load = (nodes: CanvasNodeState[]): void =>
+    useProjects.setState({
+      projects: [{ id: 'p1', name: 'P1', color: '#111', viewport: { x: 0, y: 0, zoom: 1 }, nodes }],
+      activeProjectId: 'p1'
+    })
+  const get = (id: string) => useProjects.getState().getProject('p1')!.nodes.find((n) => n.id === id)
+
+  it('a frame nested two deep: its children join the surviving parent at the same place', () => {
+    load([
+      group('outer', 100, 80),
+      group('mid', 30, 40, 'outer'),
+      group('inner', 20, 25, 'mid'),
+      at('a', 10, 12, 'inner')
+    ])
+    useProjects.getState().removeNodes('p1', ['inner'])
+    expect(get('inner')).toBeUndefined()
+    // Root position before: 100+30+20+10, 80+40+25+12 = (160, 157); `mid` sits at (130, 120).
+    expect(get('a')!.parentId).toBe('mid')
+    expect(get('a')!.position).toEqual({ x: 30, y: 37 })
+  })
+
+  it('an ancestor closed in the same call: children climb to the nearest survivor', () => {
+    load([group('outer', 100, 80), group('mid', 30, 40, 'outer'), group('inner', 20, 25, 'mid'), at('a', 10, 12, 'inner')])
+    useProjects.getState().removeNodes('p1', ['mid', 'inner'])
+    expect(get('a')!.parentId).toBe('outer')
+    expect(get('a')!.position).toEqual({ x: 60, y: 77 })
+  })
+
+  it('a one-deep frame: children go top-level at their absolute position', () => {
+    load([group('g', 50, 60), at('a', 10, 12, 'g')])
+    useProjects.getState().removeNodes('p1', ['g'])
+    expect(get('a')!.parentId).toBeUndefined()
+    expect(get('a')!.position).toEqual({ x: 60, y: 72 })
+  })
+
+  it('a parentId cycle does not hang', () => {
+    load([group('x', 0, 0, 'y'), group('y', 0, 0, 'x'), at('a', 3, 4, 'x')])
+    useProjects.getState().removeNodes('p1', ['x', 'y'])
+    expect(useProjects.getState().getProject('p1')!.nodes.map((n) => n.id)).toEqual(['a'])
+    expect(get('a')!.parentId).toBeUndefined()
+  })
+})
+
 describe('moveNodeToGroup', () => {
   const group = (id: string, x: number, y: number): CanvasNodeState => ({
     id,

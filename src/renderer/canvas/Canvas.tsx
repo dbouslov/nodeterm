@@ -13012,14 +13012,7 @@ export function Canvas() {
   const closeStoredNodes = useCallback(
     (projectId: string, ids: readonly string[]) => {
       const store = useProjects.getState()
-      const nodes = store.getProject(projectId)?.nodes ?? []
       for (const id of ids) {
-        // A deleted frame's children SURVIVE it (deleteNodes frees them to absolute positions).
-        // `moveNodeToGroup(…, null)` is the serialized twin of that conversion — without it the
-        // children keep a `parentId` pointing at a node that no longer exists.
-        for (const child of nodes) {
-          if (child.parentId === id) store.moveNodeToGroup(projectId, child.id, null)
-        }
         disposeTerminalOnUnmount(sessionForProject(projectId).id, id) // may be parked from a project switch
         transport.destroy(id)
         useAgentStatus.getState().remove(id)
@@ -13031,8 +13024,11 @@ export function Canvas() {
         // dies with the node.
         clearAttachConsent(id)
         useWebviewKeepAlive.getState().drop(id)
-        store.removeNode(projectId, id)
       }
+      // A deleted frame's children SURVIVE it. `removeNodes` is the serialized twin of deleteNodes'
+      // conversion (the same helper): each child joins the frame's nearest surviving ancestor at the
+      // same canvas position, instead of keeping a `parentId` that names a node no longer there.
+      store.removeNodes(projectId, ids)
       void writeDisk()
     },
     [writeDisk]

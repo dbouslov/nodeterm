@@ -83,9 +83,9 @@ describe('the stored-node dispatch cases (source pins)', () => {
     expect(at, 'closeStoredNodes').toBeGreaterThan(-1)
     const body = src.slice(at, src.indexOf('const closeSession = useCallback(', at))
     expect(body).toContain('transport.destroy(id)')
-    expect(body).toContain('store.removeNode(projectId, id)')
-    // A deleted frame's children survive it, exactly as deleteNodes frees them.
-    expect(body).toContain('moveNodeToGroup(projectId, child.id, null)')
+    // Removal, and a deleted frame's children surviving it, through the same helper deleteNodes
+    // uses (its behaviour is tested in projects.sessions.test.ts).
+    expect(body).toContain('store.removeNodes(projectId, ids)')
     // The persisted teardown deleteNodes owes: status, fan-out, loop card, consent, keep-alive.
     for (const call of [
       'useAgentStatus.getState().remove(id)',

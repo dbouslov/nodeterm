@@ -1393,7 +1393,11 @@ function groupsFirst(nodes: CanvasNode[]): CanvasNode[] {
 }
 
 /** A node's position in ROOT space: its own position plus every ancestor frame's origin. */
-export function rootPosition(node: CanvasNode, nodes: CanvasNode[]): { x: number; y: number } {
+/** The fields the position walks read: a live React Flow node and a stored `CanvasNodeState`
+ *  both have them, so one walk serves the on-screen canvas and the serialized one. */
+type PositionedNode = { id: string; parentId?: string; position: { x: number; y: number } }
+
+export function rootPosition(node: PositionedNode, nodes: PositionedNode[]): { x: number; y: number } {
   const byId = new Map(nodes.map((candidate) => [candidate.id, candidate]))
   const seen = new Set<string>([node.id])
   let x = node.position.x
@@ -1420,7 +1424,7 @@ export function rootPosition(node: CanvasNode, nodes: CanvasNode[]): { x: number
  */
 export function containerOrigin(
   parentId: string | undefined,
-  nodes: CanvasNode[]
+  nodes: PositionedNode[]
 ): { x: number; y: number } {
   if (!parentId) return { x: 0, y: 0 }
   const frame = nodes.find((node) => node.id === parentId)
@@ -1434,7 +1438,10 @@ export function containerOrigin(
  * whole ancestor chain counts, not one parent's offset, or closing a frame nested inside another
  * makes its chats jump. The walk is cycle-guarded: project.json is hand-editable.
  */
-export function removeNodesFreeingChildren(nodes: CanvasNode[], deleted: Set<string>): CanvasNode[] {
+export function removeNodesFreeingChildren<T extends PositionedNode & { extent?: unknown }>(
+  nodes: T[],
+  deleted: ReadonlySet<string>
+): T[] {
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const survivingAncestor = (parentId: string): string | undefined => {
     const seen = new Set<string>()
@@ -1455,7 +1462,9 @@ export function removeNodesFreeingChildren(nodes: CanvasNode[], deleted: Set<str
       return {
         ...node,
         parentId,
-        extent: parentId ? node.extent : undefined,
+        // A live child of a frame is clamped to it (`extent: 'parent'`); at the top level it must
+        // not be. A stored node carries no extent, and gains none.
+        ...('extent' in node && !parentId ? { extent: undefined } : {}),
         position: { x: abs.x - origin.x, y: abs.y - origin.y }
       }
     })
