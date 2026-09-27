@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { agentReadiness, markAgentHookSeen } from '../lib/agentHookSeen'
 import { readFileSync } from 'node:fs'
 import { resumeCommand } from '../../shared/agents/config'
 import { withPermissionMode } from '../../shared/agents/approval-mode'
@@ -1389,5 +1390,33 @@ describe('the write verb shares the restart lock', () => {
     expect(body).toContain("outcome === 'not-eligible'")
     // No un-guarded sendText left beside it.
     expect(body.match(/api\.pty\.sendText\(/g) ?? []).toHaveLength(1)
+  })
+})
+
+describe('performResumePhase — marks the node ended before the resume line goes in (#39)', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('is `ended` by the first write, so a /rename waits for the relaunched CLI', async () => {
+    markAgentHookSeen('rp1')
+    const { io } = fakeIo()
+    let atFirstWrite: string | undefined
+    const write = io.write.bind(io)
+    io.write = (d: string) => {
+      atFirstWrite ??= agentReadiness('rp1')
+      write(d)
+    }
+    const p = performResumePhase({ agentId: 'claude', sessionId: 'sid-1', io, nodeId: 'rp1' })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(await p).toBe('resumed')
+    expect(atFirstWrite).toBe('ended')
+  })
+
+  it('an ineligible resume writes nothing and changes nothing', async () => {
+    markAgentHookSeen('rp2')
+    const { io, written } = fakeIo()
+    expect(await performResumePhase({ agentId: 'claude', sessionId: 'bad id;rm', io, nodeId: 'rp2' })).toBe('not-eligible')
+    expect(written).toEqual([])
+    expect(agentReadiness('rp2')).toBe('live')
   })
 })

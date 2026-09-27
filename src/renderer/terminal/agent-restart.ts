@@ -11,6 +11,7 @@ import {
   resumeCommand,
   type AgentId
 } from '../../shared/agents/config'
+import { markAgentEnded } from '../lib/agentHookSeen'
 import { isShellCommand } from '@shared/agents/pane'
 import {
   DELIVERY_ATTEMPTS,
@@ -287,6 +288,11 @@ export async function performResumePhase(d: {
   sessionId: string
   io: DeliveryIo
   /**
+   * The node being resumed. Marked `ended` in the readiness registry before the line goes in, so a
+   * typed `/rename` waits for the relaunched CLI to report in (issue #39, lib/agentHookSeen).
+   */
+  nodeId?: string
+  /**
    * The exact launch line to relaunch with, when the caller has one. `withPermissionMode` is the
    * app's single funnel for every CLI launch, and it needs the ACTIVE mode — an async read that
    * belongs to the node, not to this module. Without it a canvas running in `acceptEdits` / `plan`
@@ -323,6 +329,7 @@ export async function performResumePhase(d: {
   const base = resumeCommand(d.agentId, d.sessionId)
   const cmd = d.command ?? base
   if (!cmd) return 'not-eligible'
+  if (d.nodeId) markAgentEnded(d.nodeId)
   const gone = (): boolean => !!d.isLive && !d.isLive()
   // Awaited, not fire-and-forget: see the header. `deliverCommand` is started inside the executor
   // (synchronously, so `onDelivery` still hands the cancel out before any await) and announces the
@@ -393,6 +400,8 @@ export async function performRestartResume(d: {
   /** Backstop for the resume delivery; see RESTART_DELIVERY_TIMEOUT_MS. */
   deliveryTimeoutMs?: number
   killLine?: string
+  /** See `performResumePhase`. */
+  nodeId?: string
   /** Handed `deliverCommand`'s cancel as the delivery starts; see `performResumePhase`. */
   onDelivery?: (cancel: () => void) => void
   /**
@@ -422,6 +431,7 @@ export async function performRestartResume(d: {
     command: d.command,
     deliveryTimeoutMs: d.deliveryTimeoutMs,
     killLine: d.killLine,
+    nodeId: d.nodeId,
     onDelivery: d.onDelivery,
     isLive: d.isLive
   })

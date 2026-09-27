@@ -3,6 +3,7 @@ import {
   coldFileIntoFrame,
   coldGroupCwd,
   coldOpenMessage,
+  coldPlaceInGroup,
   startsInBackground,
   coldPlaceBelow,
   coldResolveAfter,
@@ -12,6 +13,7 @@ import {
   storedAgentIdOf,
   type ColdNode
 } from './coldOpen'
+import { GROUP_GAP, GROUP_PAD_TOP, GROUP_PAD_X } from '@shared/placement'
 
 const N = (id: string, extra: Partial<ColdNode> = {}): ColdNode => ({
   id,
@@ -261,6 +263,46 @@ describe('coldFileIntoFrame — an opened node joins the frame its anchor lives 
         frames: []
       })
     }
+  })
+})
+
+describe('coldPlaceInGroup — a cold `--group` open lands inside its frame (#11)', () => {
+  // A frame holding one child; a second 600x400 child goes to the next slot, right of it.
+  const g = N('g', { kind: 'group', position: { x: 1000, y: 1000 }, size: { width: 700, height: 520 } })
+  const a = N('a', { parentId: 'g', position: { x: 24, y: 56 }, size: { width: 600, height: 400 } })
+  const SIZE = { w: 600, h: 400 }
+
+  it('takes the first free slot and grows the frame right and down to hold it', () => {
+    const r = coldPlaceInGroup([g, a], 'g', [SIZE])
+    const x = GROUP_PAD_X + 600 + GROUP_GAP
+    expect(r.positions).toEqual([{ x, y: GROUP_PAD_TOP }])
+    expect(r.frames).toEqual([{ id: 'g', size: { width: x + 600 + GROUP_PAD_X, height: 520 } }])
+  })
+
+  it('reserves each placed child before the next', () => {
+    const r = coldPlaceInGroup([g, a], 'g', [SIZE, SIZE])
+    expect(r.positions).toEqual([
+      { x: GROUP_PAD_X + 600 + GROUP_GAP, y: GROUP_PAD_TOP },
+      { x: GROUP_PAD_X, y: GROUP_PAD_TOP + 400 + GROUP_GAP }
+    ])
+  })
+
+  it('grows every frame up the chain, so a nested frame never outgrows its parent', () => {
+    // The reproduction: only the named frame used to grow. It became 1288 wide inside an 800-wide
+    // parent, and `extent: 'parent'` then clamps the inner frame (and the chat just opened in it)
+    // against an inverted range — the node lands outside the box it was opened into.
+    const outer = N('outer', { kind: 'group', position: { x: 0, y: 1000 }, size: { width: 800, height: 660 } })
+    const inner = { ...g, parentId: 'outer', position: { x: 24, y: 56 } }
+    const r = coldPlaceInGroup([outer, inner, a], 'g', [SIZE])
+    const grown = new Map(r.frames.map((f) => [f.id, f.size]))
+    const innerSize = grown.get('g')!
+    const outerSize = grown.get('outer') ?? outer.size!
+    expect(inner.position.x + innerSize.width).toBeLessThanOrEqual(outerSize.width)
+    expect(inner.position.y + innerSize.height).toBeLessThanOrEqual(outerSize.height)
+  })
+
+  it('grows nothing when the frame is gone', () => {
+    expect(coldPlaceInGroup([a], 'g', [SIZE]).frames).toEqual([])
   })
 })
 

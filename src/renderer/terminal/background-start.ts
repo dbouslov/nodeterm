@@ -14,6 +14,7 @@
 
 import type { PtyCreateOptions } from '@shared/types'
 import type { TerminalTransport } from './transport'
+import { markAgentEnded } from '../lib/agentHookSeen'
 
 /** TerminalNode's `whenShellSettled`: quiet for this long after output means the prompt is up… */
 const SETTLE_QUIET_MS = 200
@@ -33,6 +34,10 @@ export async function startDetached(
   transport: Pick<TerminalTransport, 'create' | 'onData' | 'kill'>,
   options: PtyCreateOptions
 ): Promise<boolean> {
+  // The held launch is typed into this session next; until that CLI reports in, a typed `/rename`
+  // waits (issue #39). Marked here too, not only on a fresh create: an existing session's age would
+  // otherwise vouch for a CLI still starting (the 1.5 s settle cap is shorter than a slow start).
+  if (options.persistKey) markAgentEnded(options.persistKey)
   let result
   try {
     result = await transport.create(options)

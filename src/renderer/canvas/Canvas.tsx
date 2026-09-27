@@ -277,6 +277,7 @@ import {
 } from '../lib/controlRouting'
 import {
   coldFileIntoFrame,
+  coldPlaceInGroup,
   coldGroupCwd,
   coldOpenMessage,
   startsInBackground,
@@ -498,7 +499,6 @@ import {
 import { WAIT_LABEL, dropAfterDep, edgeHidden, hiddenEdgeNodeIds, missingDepRopes, ropeInfoOf, ropeVisual } from '../lib/edgeModel'
 import { triggerEdges } from '../lib/triggerCard'
 import {
-  GROUP_PAD_X,
   PLACEMENT_GAP,
   ancestorFrameIds,
   centerOf,
@@ -510,6 +510,7 @@ import {
   type Size as BoxSize
 } from '@shared/placement'
 import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
+import { installAgentReadiness } from '../lib/agentHookSeen'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
 import {
@@ -10595,16 +10596,6 @@ export function Canvas() {
               const dep = coldNodes.find((n) => n.id === id)
               return dep ? [dep] : []
             })
-            const coldKids: Box[] = coldGroup.groupId
-              ? coldNodes
-                  .filter((n) => n.parentId === coldGroup.groupId)
-                  .map((n) => ({
-                    x: n.position.x,
-                    y: n.position.y,
-                    w: n.size?.width ?? 600,
-                    h: n.size?.height ?? 400
-                  }))
-              : []
             const coldMade: CanvasNode[] = []
             for (let i = 0; i < coldCount; i++) {
               const built = coldTerminal
@@ -10649,37 +10640,31 @@ export function Canvas() {
                     }
                   : armed
               const coldNodeSize = { w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }
-              if (coldGroup.groupId) {
-                const slot = placeInFrame(coldKids, coldNodeSize)
-                coldKids.push({ ...slot, ...coldNodeSize })
-                node.position = slot
-                node.parentId = coldGroup.groupId
-                node.extent = 'parent'
-              } else {
-                coldReserved.push({ ...node.position, ...coldNodeSize })
-              }
+              if (!coldGroup.groupId) coldReserved.push({ ...node.position, ...coldNodeSize })
               coldMade.push(node)
             }
-            // Grow the frame to hold every child BEFORE the children land — `extent: 'parent'`
-            // clamps a child that falls outside it. Sized from the slots actually taken (plus the
-            // frame's padding), not from a child count that assumed every child sat in its slot.
+            // A `--group` child takes the first free slot in that frame, and the frames that must
+            // grow to hold it are written BEFORE the children land — `extent: 'parent'` clamps a
+            // child that falls outside its frame (`coldPlaceInGroup`).
             if (coldGroup.groupId) {
-              const frame = owner.nodes.find((n) => n.id === coldGroup.groupId)
-              if (frame && coldKids.length) {
-                const need = {
-                  width: Math.max(...coldKids.map((k) => k.x + k.w)) + GROUP_PAD_X,
-                  height: Math.max(...coldKids.map((k) => k.y + k.h)) + GROUP_PAD_X
+              const inGroup = coldPlaceInGroup(
+                coldNodes,
+                coldGroup.groupId,
+                coldMade.map((n) => ({ w: (n.width as number) ?? 600, h: (n.height as number) ?? 400 }))
+              )
+              coldMade.forEach((node, i) => {
+                node.position = inGroup.positions[i]
+                node.parentId = coldGroup.groupId
+                node.extent = 'parent'
+              })
+              for (const grown of inGroup.frames) {
+                const frame = owner.nodes.find((n) => n.id === grown.id)
+                if (frame) {
+                  coldStore.applyNodeMutation(owner.id, {
+                    op: 'upsert',
+                    node: { ...frame, size: grown.size }
+                  })
                 }
-                coldStore.applyNodeMutation(owner.id, {
-                  op: 'upsert',
-                  node: {
-                    ...frame,
-                    size: {
-                      width: Math.max(frame.size?.width ?? 0, need.width),
-                      height: Math.max(frame.size?.height ?? 0, need.height)
-                    }
-                  }
-                })
               }
             }
             // A source inside a frame keeps its LINEAGE children inside that frame, as on the live
@@ -13616,6 +13601,10 @@ export function Canvas() {
     }
   }, [])
 
+  // Every hook event proves a node's CLI is up and reading input — the gate a typed `/rename`
+  // waits on (issue #39, lib/agentHookSeen). A SessionEnd withdraws it.
+  useEffect(() => installAgentReadiness(api), [api])
+
   const notifyCooldownRef = useRef<Record<string, number>>({})
   // Sound effects have their OWN cooldown: they fire whether or not the window is focused, so they
   // can't share the notification one (which only ticks in the background).
@@ -13830,7 +13819,9 @@ export function Canvas() {
             // that node was watching for.
             cs.setPaused(e.nodeId, false)
           }
-          if (e.sessionPhase === 'end') {
+          // A grok SUBAGENT's own session_end (it carries `subagentType`) is the child's teardown,
+          // not this node's: it must not reset the parent's state, loop or subagent cards.
+          if (e.sessionPhase === 'end' && !e.subagentType) {
             cs.setState(e.nodeId, undefined, e.agentId)
             // In-session /loop dies with its session; cron (and scheduled cloud routines)
             // keep running after it — their cards stay until CronDelete / manual dismiss.
