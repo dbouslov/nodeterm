@@ -4,10 +4,18 @@
 // not a nicety. Lives outside Canvas.tsx for that reason alone.
 import { isShellCommand } from '../terminal/agent-restart'
 import { oneLine } from '@shared/one-line'
+import { agentHookSeen } from './agentHookSeen'
 
 /** How long to wait for an agent CLI to take its pane before giving up on the mirror. */
 export const RENAME_PUSH_ATTEMPTS = 12
 export const RENAME_PUSH_RETRY_MS = 500
+/**
+ * How long, once the CLI owns the pane, to wait for it to report a hook event (its TUI is taking
+ * input) before sending anyway. 10 s: SessionStart measured at +1.4-2.0 s after launch, and MCP
+ * servers can slow a start well past that. The fallback exists for a CLI that has been running
+ * since before this app run — it reports nothing until its next turn, and its rename is still owed.
+ */
+export const RENAME_READY_ATTEMPTS = 20
 
 /**
  * The one place the `/rename` line is composed — SECURITY, not tidiness.
@@ -47,6 +55,8 @@ export function sessionNameUnchanged(next: string, current: string): boolean {
 export interface RenamePushIo {
   paneCommand(persistKey: string): Promise<string | null>
   sendText(persistKey: string, text: string): Promise<boolean>
+  /** Has this node's agent reported a hook event this run? Defaults to the live registry. */
+  hookSeen?(persistKey: string): boolean
   /** Injected so tests don't wait in real time. */
   sleep?(ms: number): Promise<void>
 }
@@ -88,9 +98,32 @@ export async function pushSessionRename(
     if (i > 0) await sleep(RENAME_PUSH_RETRY_MS)
     const pane = await io.paneCommand(nodeId).catch(() => null)
     if (pane && !isShellCommand(pane)) {
+      await waitForAgentReady(io, nodeId, sleep)
       void io.sendText(nodeId, renameCommand(name))
       return true
     }
   }
   return false
+}
+
+/**
+ * The CLI owns the pane — now wait until it can READ (issue #39). A non-shell pane owner is not a
+ * live input box: Claude Code drops what arrives in the moments before its SessionStart hook, so a
+ * rename sent the instant an orchestrator opens and names a node vanished without a trace. Its
+ * first hook event is the proof; bounded, then send anyway and say so, because a CLI that started
+ * before this app run reports nothing until its next turn.
+ */
+async function waitForAgentReady(
+  io: RenamePushIo,
+  nodeId: string,
+  sleep: (ms: number) => Promise<void>
+): Promise<void> {
+  const seen = io.hookSeen ?? agentHookSeen
+  for (let i = 0; i < RENAME_READY_ATTEMPTS; i++) {
+    if (i > 0) await sleep(RENAME_PUSH_RETRY_MS)
+    if (seen(nodeId)) return
+  }
+  console.warn(
+    `[rename] ${nodeId}: no hook event from the agent after ${(RENAME_READY_ATTEMPTS * RENAME_PUSH_RETRY_MS) / 1000}s — sending /rename anyway`
+  )
 }

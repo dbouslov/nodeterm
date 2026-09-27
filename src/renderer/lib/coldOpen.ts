@@ -26,6 +26,7 @@ import {
   centerOf,
   containerJoinedBy,
   framesJoinedBy,
+  placeInFrame,
   placeOpened,
   type Box,
   type Point,
@@ -212,8 +213,20 @@ export function coldFileIntoFrame(
   if (!frame) return { positions: placed.map((b) => ({ x: b.x, y: b.y })), frames: [] }
   const origin = coldBox(nodes, frame)
   const positions = placed.map((b) => ({ x: b.x - origin.x, y: b.y - origin.y }))
+  const kids: Box[] = positions.map((p, i) => ({ ...p, w: placed[i].w, h: placed[i].h }))
+  return { frameId: frame.id, positions, frames: growFrameChain(nodes, frame, kids) }
+}
+
+/**
+ * Every frame from `frame` up that must grow — right and down, never moved — to hold `kids`
+ * (frame-relative boxes). Stops at the first frame that already holds what is below it.
+ */
+function growFrameChain(
+  nodes: readonly ColdNode[],
+  frame: ColdNode,
+  kids: Box[]
+): { id: string; size: { width: number; height: number } }[] {
   const frames: { id: string; size: { width: number; height: number } }[] = []
-  let kids: Box[] = positions.map((p, i) => ({ ...p, w: placed[i].w, h: placed[i].h }))
   let cur: ColdNode | undefined = frame
   const seen = new Set<string>()
   while (cur?.kind === 'group' && !seen.has(cur.id)) {
@@ -227,8 +240,35 @@ export function coldFileIntoFrame(
     const parentId: string | undefined = cur.parentId
     cur = parentId ? nodes.find((n) => n.id === parentId) : undefined
   }
-  return { frameId: frame.id, positions, frames }
+  return frames
 }
+/**
+ * Where a cold open's `--group` children go: the first slot no current child of that frame occupies
+ * (`placeInFrame`, frame-relative), each one reserved before the next is placed. `frames` are the
+ * frames up the chain that must grow to hold them, to be written BEFORE the children land —
+ * `extent: 'parent'` clamps a child that falls outside its frame.
+ */
+export function coldPlaceInGroup(
+  nodes: readonly ColdNode[],
+  groupId: string,
+  sizes: readonly Size[]
+): { positions: Point[]; frames: { id: string; size: { width: number; height: number } }[] } {
+  const kids: Box[] = nodes
+    .filter((n) => n.parentId === groupId)
+    .map((n) => ({ x: n.position.x, y: n.position.y, w: widthOf(n), h: heightOf(n) }))
+  const positions = sizes.map((size) => {
+    const slot = placeInFrame(kids, size)
+    kids.push({ ...slot, ...size })
+    return slot
+  })
+  const frame = nodes.find((n) => n.id === groupId)
+  if (!frame || !positions.length) return { positions, frames: [] }
+  // The WHOLE chain, as a lineage child's `coldFileIntoFrame` does: growing only the named frame
+  // let a nested one outgrow its parent, and `extent: 'parent'` then clamped it — with the chat
+  // just opened in it — against an inverted range, outside the box it was opened into (#11).
+  return { positions, frames: growFrameChain(nodes, frame, kids) }
+}
+
 /**
  * The reply sentence for a session that was opened into a project the user is not looking at.
  *

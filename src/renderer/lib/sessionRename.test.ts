@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   RENAME_PUSH_ATTEMPTS,
+  RENAME_READY_ATTEMPTS,
   pushSessionRename,
   renameCommand,
   sessionNameUnchanged
@@ -16,6 +17,9 @@ const io = (panes: (string | null)[] | (() => Promise<string | null>)) => {
       sent.push(t)
       return true
     },
+    // The agent has already reported in (SessionStart) — the pane-ownership tests below are
+    // about the SHELL gate, not the readiness one, which has its own describe further down.
+    hookSeen: () => true,
     sleep: async () => {}
   }
 }
@@ -72,6 +76,82 @@ describe('pushSessionRename', () => {
       'was'
     )
     expect(probe).toHaveBeenCalledTimes(RENAME_PUSH_ATTEMPTS)
+  })
+})
+
+/**
+ * The readiness gate — issue #39 (and #11's "the /rename sits unsent in the input box").
+ *
+ * A non-shell owning the pane is NOT the same fact as the agent CLI taking input. MEASURED on
+ * Claude Code 2.1.283 in a private tmux: `#{pane_current_command}` reads `2.1.283` (non-shell) from
+ * ~0.2 s after launch, while text pasted in the ~0.4 s just BEFORE its SessionStart hook fired was
+ * dropped outright (4 runs; SessionStart at +1.4-2.0 s). Everything pasted after SessionStart landed.
+ * So the rename waits for the agent's first hook event, bounded, and falls back to sending anyway.
+ */
+describe('pushSessionRename: waits for the agent to report in before typing', () => {
+  it('does NOT write while the CLI owns the pane but has not reported a hook event yet', async () => {
+    const order: string[] = []
+    let probes = 0
+    const res = await pushSessionRename(
+      {
+        paneCommand: async () => '2.1.283',
+        hookSeen: () => {
+          probes++
+          const seen = probes > 3
+          order.push(seen ? 'ready' : 'not-ready')
+          return seen
+        },
+        sendText: async (_k, t) => {
+          order.push(`send ${t}`)
+          return true
+        },
+        sleep: async () => {}
+      },
+      'n1',
+      'Early name',
+      'Claude Code'
+    )
+    expect(res).toBe(true)
+    expect(order).toEqual(['not-ready', 'not-ready', 'not-ready', 'ready', 'send /rename Early name'])
+  })
+
+  it('falls back to sending after a bounded wait when no hook event ever arrives, and says so', async () => {
+    // An agent running since before this app run (a warm reattach after a restart) reports
+    // nothing until its next turn; the rename is still owed, so the wait is bounded.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const hookSeen = vi.fn(() => false)
+    const sent: string[] = []
+    const res = await pushSessionRename(
+      {
+        paneCommand: async () => 'claude',
+        hookSeen,
+        sendText: async (_k, t) => {
+          sent.push(t)
+          return true
+        },
+        sleep: async () => {}
+      },
+      'n1',
+      'Late name',
+      'Claude Code'
+    )
+    expect(res).toBe(true)
+    expect(sent).toEqual(['/rename Late name'])
+    expect(hookSeen).toHaveBeenCalledTimes(RENAME_READY_ATTEMPTS)
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it('never waits for readiness while a shell still owns the pane — the shell gate comes first', async () => {
+    const hookSeen = vi.fn(() => true)
+    const sent: string[] = []
+    await pushSessionRename(
+      { paneCommand: async () => 'zsh', hookSeen, sendText: async (_k, t) => (sent.push(t), true), sleep: async () => {} },
+      'n1',
+      'x',
+      'was'
+    )
+    expect(sent).toEqual([])
   })
 })
 
