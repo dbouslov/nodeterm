@@ -103,7 +103,7 @@ describe('the stored-node dispatch cases (source pins)', () => {
     // hand-rolled). Two copies of a teardown is how one of them quietly stops clearing a loop card.
     const at = src.indexOf('const closeSession = useCallback(')
     const body = src.slice(at, src.indexOf('const killSessionById = useCallback(', at))
-    expect(body).toContain('closeStoredNodes(projectId, [id])')
+    expect(body).toContain('closeStoredNodes(projectId, [id], { userClose: true })')
     expect(code(body)).not.toContain('transport.destroy(')
   })
 

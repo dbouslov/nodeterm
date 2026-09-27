@@ -6280,7 +6280,9 @@ export function Canvas() {
    * were classified (`lib/controlRouting`); a background agent's `close` on a project the human
    * was not looking at switched their tab and applied that project's saved viewport.
    */
-  const closeStoredNodesRef = useRef<(projectId: string, ids: readonly string[]) => void>(() => {})
+  const closeStoredNodesRef = useRef<
+    (projectId: string, ids: readonly string[], opts?: { userClose?: boolean }) => void
+  >(() => {})
   /** Latest `travelToNode`, for the agent-control handler's off-canvas notice. Travel to a NODE is
    *  the user's own click on the notice's "Go there" button, not something a verb does. */
   const travelToNodeRef = useRef<(nodeId: string) => void>(() => {})
@@ -12952,21 +12954,28 @@ export function Canvas() {
    * It is `deleteNodes` minus the things only a live canvas has. tmux sessions are keyed by node
    * id, so `transport.destroy` works for a node that was never mounted — including a REMOTE one,
    * since `runEndSession` resolves the owning SSH host from the persisted index rather than from a
-   * live client (core/remote-end.ts). The closed-session ledger and the ⇧⌘T reopen history ARE
-   * recorded, through the same `recordNodeClose` funnel `deleteNodes` uses, but keyed to THIS
-   * project and read off its saved nodes: they used to be skipped (`deleteNodes` records against
-   * the ACTIVE project), which lost an off-screen chat's transcript pointer and its reopen.
+   * live client (core/remote-end.ts). The closed-session ledger IS recorded, through the same
+   * `recordNodeClose` funnel `deleteNodes` uses, but keyed to THIS project and read off its saved
+   * nodes: it used to be skipped, which lost an off-screen chat's transcript pointer. The ⇧⌘T
+   * history is recorded only for a USER close (`userClose`, the sidebar): the stack is app-wide,
+   * and an agent's close pushed there would be reopened by the user's ⇧⌘T in another project.
    * The control ropes (`project.ropes`) that touched a removed node go with it, inside
    * `removeNodes`: on screen the close verbs drop them from the live edges, and off screen nothing
    * else would — a load restores every persisted rope and the next save writes it back.
    */
   const closeStoredNodes = useCallback(
-    (projectId: string, ids: readonly string[]) => {
+    (projectId: string, ids: readonly string[], opts?: { userClose?: boolean }) => {
       const store = useProjects.getState()
       // Recorded against the STORED project, before the teardown drops the live session id — the
       // same funnel `deleteNodes` records through, over the saved nodes instead of the live ones.
+      // Only a close the USER made reaches the global ⇧⌘T stack (see `recordNodeClose`); an
+      // agent's close/retire (the default) records the "Recently closed" ledger alone.
       const stored = store.getProject(projectId)?.nodes
-      if (stored) recordNodeClose(projectId, new Set(ids), nodeStatesToFlow(stored))
+      if (stored) {
+        recordNodeClose(projectId, new Set(ids), nodeStatesToFlow(stored), Date.now(), {
+          reopenHistory: opts?.userClose === true
+        })
+      }
       for (const id of ids) {
         disposeTerminalOnUnmount(sessionForProject(projectId).id, id) // may be parked from a project switch
         transport.destroy(id)
@@ -13007,7 +13016,7 @@ export function Canvas() {
           if (projectId === activeProjectId) {
             deleteNodes([id])
           } else {
-            closeStoredNodes(projectId, [id])
+            closeStoredNodes(projectId, [id], { userClose: true })
           }
           // The session-memory panel's remote leg (see `killSessionById`): the local destroy above
           // cannot reach a HOST's tmux session unless a live client carries `sshRemote`. Runs only

@@ -18,6 +18,11 @@ import { uuid } from './uuid'
  * live session id exists. `allNodes` must be the full tree from before the removal, so parent-chain
  * absolute positions still resolve.
  *
+ * `reopenHistory: false` records the ledger only. ⇧⌘T is ONE app-wide stack, so an agent's
+ * off-screen close pushed there is what the user's next ⇧⌘T — in whatever project they are in —
+ * would reopen, switching their tab to the agent's project. A close the user made pushes; one an
+ * agent made does not, and stays reopenable from its project's "Recently closed" list.
+ *
  * `uuid()`, NOT crypto.randomUUID: the latter exists only in a SECURE context, so it is undefined
  * in the Server Edition served over plain HTTP on a LAN — and a throw here would make the close do
  * nothing at all on that surface. See lib/uuid.ts.
@@ -26,7 +31,8 @@ export function recordNodeClose(
   projectId: string,
   ids: ReadonlySet<string>,
   allNodes: readonly CanvasNode[],
-  closedAt: number = Date.now()
+  closedAt: number = Date.now(),
+  opts?: { reopenHistory?: boolean }
 ): void {
   // Keyed by node id, not by array position: the ledger entries and the snapshots below each run
   // their OWN filter over `allNodes`, and a node-id map keeps the two correlated even if those
@@ -54,7 +60,7 @@ export function recordNodeClose(
       return snap ? { ...snap, closedSessionId: closedSessionIdByNode.get(n.id) } : snap
     })
     .filter((s): s is NonNullable<typeof s> => s !== null)
-  if (snapshots.length) {
+  if (snapshots.length && opts?.reopenHistory !== false) {
     useReopenHistory.getState().push({ kind: 'nodes', projectId, closedAt, nodes: snapshots })
   }
 }

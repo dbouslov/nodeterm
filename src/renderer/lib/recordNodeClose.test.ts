@@ -64,6 +64,30 @@ describe('recordNodeClose (the closed-session ledger + ⇧⌘T for a close, on o
     expect(useReopenHistory.getState().stack[0].closedAt).toBe(4242)
   })
 
+  it('an AGENT-driven close records the ledger only, never the global ⇧⌘T stack', () => {
+    // ⇧⌘T is one app-wide stack: an agent's close in project A pushed there would be what the
+    // user's ⇧⌘T in project B reopens — and reopening it switches their tab to A.
+    recordNodeClose('off', new Set(['a']), nodeStatesToFlow(useProjects.getState().getProject('off')!.nodes), 1, {
+      reopenHistory: false
+    })
+    const ledger = useProjects.getState().getProject('off')!.closedSessions ?? []
+    expect(ledger).toHaveLength(1)
+    expect(ledger[0].sessionId).toBe('sess-live-a')
+    expect(useReopenHistory.getState().stack).toHaveLength(0)
+  })
+
+  it('mints entry ids without crypto.randomUUID (absent over plain HTTP in the Server Edition)', () => {
+    const real = crypto.randomUUID
+    Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true, writable: true })
+    try {
+      recordNodeClose('off', new Set(['a']), nodeStatesToFlow(useProjects.getState().getProject('off')!.nodes))
+    } finally {
+      Object.defineProperty(crypto, 'randomUUID', { value: real, configurable: true, writable: true })
+    }
+    const ledger = useProjects.getState().getProject('off')!.closedSessions ?? []
+    expect(ledger[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  })
+
   it('records nothing for a kind neither ledger restores', () => {
     const group: CanvasNodeState = { ...agentNode('g'), kind: 'group', agentId: undefined }
     recordNodeClose('off', new Set(['g']), nodeStatesToFlow([group]))

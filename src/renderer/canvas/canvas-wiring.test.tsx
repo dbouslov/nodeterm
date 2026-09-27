@@ -241,14 +241,12 @@ describe('deleteNodes also records persisted closed-session history', () => {
     expect(body.indexOf('useAgentStatus.getState().remove(')).toBeGreaterThan(record)
   })
 
-  it('mints entry ids with lib/uuid, never crypto.randomUUID', () => {
+  it('never calls crypto.randomUUID (the id minting itself lives in lib/recordNodeClose)', () => {
     // crypto.randomUUID exists only in a SECURE context, so it is undefined in the Server Edition
-    // served over plain HTTP on a LAN. This call sits at the TOP of deleteNodes — before
-    // transport.destroy and setNodes — so a throw there makes Delete do nothing at all on that
-    // surface. The same call already broke "Add agent" once; see lib/uuid.ts.
-    // The CALL form, so the explanatory comment beside the fixed line can keep naming it.
+    // served over plain HTTP on a LAN. That the funnel still mints an id there is pinned by
+    // behaviour in lib/recordNodeClose.test.ts; this only keeps a new call out of Canvas.
+    // The CALL form, so an explanatory comment can keep naming it.
     expect(CANVAS_SRC).not.toContain('crypto.randomUUID(')
-    expect(CANVAS_SRC).toContain("import { uuid } from '../lib/uuid'")
   })
 
   it('sits inside the `opts?.record !== false` guard', () => {
@@ -275,6 +273,18 @@ describe('deleteNodes also records persisted closed-session history', () => {
     const record = body.indexOf('recordNodeClose(projectId,')
     expect(record).toBeGreaterThan(0)
     expect(body.indexOf('useAgentStatus.getState().remove(')).toBeGreaterThan(record)
+  })
+
+  it('only the USER close reaches the global ⇧⌘T stack; the agent close/retire verbs do not', () => {
+    // The stack is app-wide: an agent's off-screen close pushed there is what the user's ⇧⌘T in
+    // another project would reopen, switching their tab. The flag defaults off, so the verbs'
+    // calls must not pass it and the sidebar's must.
+    const body = callbackBody('closeStoredNodes')
+    expect(body).toContain('reopenHistory: opts?.userClose === true')
+    expect(callbackBody('closeSession')).toContain('closeStoredNodes(projectId, [id], { userClose: true })')
+    const agentCalls = CANVAS_SRC.match(/closeStoredNodesRef\.current\([^)]*\)/g) ?? []
+    expect(agentCalls.length).toBeGreaterThanOrEqual(2) // the off-canvas `close` and `retire`
+    for (const call of agentCalls) expect(call).not.toContain('userClose')
   })
 })
 
