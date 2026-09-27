@@ -1393,7 +1393,11 @@ function groupsFirst(nodes: CanvasNode[]): CanvasNode[] {
 }
 
 /** A node's position in ROOT space: its own position plus every ancestor frame's origin. */
-export function rootPosition(node: CanvasNode, nodes: CanvasNode[]): { x: number; y: number } {
+/** The fields the position walks read: a live React Flow node and a stored `CanvasNodeState`
+ *  both have them, so one walk serves the on-screen canvas and the serialized one. */
+type PositionedNode = { id: string; parentId?: string; position: { x: number; y: number } }
+
+export function rootPosition(node: PositionedNode, nodes: PositionedNode[]): { x: number; y: number } {
   const byId = new Map(nodes.map((candidate) => [candidate.id, candidate]))
   const seen = new Set<string>([node.id])
   let x = node.position.x
@@ -1420,12 +1424,50 @@ export function rootPosition(node: CanvasNode, nodes: CanvasNode[]): { x: number
  */
 export function containerOrigin(
   parentId: string | undefined,
-  nodes: CanvasNode[]
+  nodes: PositionedNode[]
 ): { x: number; y: number } {
   if (!parentId) return { x: 0, y: 0 }
   const frame = nodes.find((node) => node.id === parentId)
   if (!frame) return { x: 0, y: 0 }
   return rootPosition(frame, nodes)
+}
+
+/**
+ * Remove `deleted` and free the children of any removed frame. Each freed child joins the nearest
+ * SURVIVING ancestor of its old frame (or the top level) at the same root-space position — the
+ * whole ancestor chain counts, not one parent's offset, or closing a frame nested inside another
+ * makes its chats jump. The walk is cycle-guarded: project.json is hand-editable.
+ */
+export function removeNodesFreeingChildren<T extends PositionedNode & { extent?: unknown }>(
+  nodes: T[],
+  deleted: ReadonlySet<string>
+): T[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const survivingAncestor = (parentId: string): string | undefined => {
+    const seen = new Set<string>()
+    let id: string | undefined = parentId
+    while (id && deleted.has(id) && !seen.has(id)) {
+      seen.add(id)
+      id = byId.get(id)?.parentId
+    }
+    return id && !deleted.has(id) && byId.has(id) ? id : undefined
+  }
+  return nodes
+    .filter((node) => !deleted.has(node.id))
+    .map((node) => {
+      if (!node.parentId || !deleted.has(node.parentId)) return node
+      const parentId = survivingAncestor(node.parentId)
+      const abs = rootPosition(node, nodes)
+      const origin = containerOrigin(parentId, nodes)
+      return {
+        ...node,
+        parentId,
+        // A live child of a frame is clamped to it (`extent: 'parent'`); at the top level it must
+        // not be. A stored node carries no extent, and gains none.
+        ...('extent' in node && !parentId ? { extent: undefined } : {}),
+        position: { x: abs.x - origin.x, y: abs.y - origin.y }
+      }
+    })
 }
 
 function isDescendant(nodes: CanvasNode[], candidateId: string, ancestorId: string): boolean {

@@ -48,9 +48,13 @@ const tmux = vi.hoisted(() => ({
   live: new Set<string>(),
   /** Every tmux call fails the way a spawn failure does (no numeric exit code): tmux could not be asked. */
   unreachable: false,
+  /** One-shot: the NEXT `has-session` answers only once this settles (and as tmux stands then). */
+  holdNext: null as Promise<void> | null,
   calls: [] as Array<{ file: string; args: string[]; stdin?: string }>
 }))
-const spawned = vi.hoisted(() => [] as Array<{ killed: boolean }>)
+const spawned = vi.hoisted(
+  () => [] as Array<{ killed: boolean; exit?: (e: { exitCode: number }) => void }>
+)
 
 vi.mock('child_process', () => {
   type Out = { stdout: string; stderr: string }
@@ -95,14 +99,18 @@ vi.mock('child_process', () => {
     value: (file: string, args: string[]) => {
       const call: { file: string; args: string[]; stdin?: string } = { file, args }
       tmux.calls.push(call)
+      const hold = args.includes('has-session') ? tmux.holdNext : null
+      if (hold) tmux.holdNext = null
       const settled = new Promise<Out>((resolve, reject) => {
-        queueMicrotask(() => {
+        const settle = (): void => {
           try {
             resolve(answer(file, args))
           } catch (e) {
             reject(e)
           }
-        })
+        }
+        if (hold) void hold.then(settle)
+        else queueMicrotask(settle)
       })
       const stdin = {
         on: () => stdin,
@@ -118,11 +126,14 @@ vi.mock('child_process', () => {
 
 vi.mock('node-pty', () => ({
   spawn: () => {
-    const p = { killed: false }
+    const p: { killed: boolean; exit?: (e: { exitCode: number }) => void } = { killed: false }
     spawned.push(p)
     return {
       onData: () => {},
-      onExit: () => {},
+      // Kept so a case can end the tmux CLIENT the way its process exiting would.
+      onExit: (cb: (e: { exitCode: number }) => void) => {
+        p.exit = cb
+      },
       write: () => {},
       resize: () => {},
       pause: () => {},
@@ -189,6 +200,7 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
     tmux.calls.length = 0
     tmux.live.clear()
     tmux.unreachable = false
+    tmux.holdNext = null
     host.supported = false
     host.asked.length = 0
     resetMessageFlow()
@@ -466,6 +478,125 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
       expect(paneOwnerProject(NODE)).toBeUndefined()
       expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
       expect(pastes()).toEqual([])
+    })
+
+    it('an open whose tmux check got no answer says so once, and the chat stays unproven', async () => {
+      const { PtyManager } = await import('./pty-manager')
+      const m = new PtyManager()
+      m.init(() => DEFAULT_SETTINGS)
+      m.registerIpc()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        // The has-session probe fails to spawn (EAGAIN under a mount burst): no answer at all.
+        tmux.unreachable = true
+        const opened = (await fake.handlers[IPC.ptyCreate](ALICE, {
+          cols: 80,
+          rows: 24,
+          persistKey: NODE,
+          ownerProjectId: 'p1'
+        })) as { fresh: boolean }
+        tmux.unreachable = false
+        // Fail-closed stays: an unanswered probe folds to "exists", so nothing is recorded ...
+        expect(opened.fresh).toBe(false)
+        expect(paneOwnerProject(NODE)).toBeUndefined()
+        // ... but it is no longer silent. One line, naming the node, the failure and the cost.
+        const lines = warn.mock.calls.map((c) => c.join(' ')).filter((l) => l.includes('ownership not recorded'))
+        expect(lines).toHaveLength(1)
+        expect(lines[0]).toContain(TARGET)
+        expect(lines[0]).toContain('EAGAIN')
+      } finally {
+        warn.mockRestore()
+      }
+      tmux.live.add(TARGET) // `new-session -A` created it anyway
+      tmux.calls.length = 0
+
+      const { outcome } = await deliverFromControl(req(), deps(m, { paneOwnerProject }))
+
+      expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+      expect(pastes()).toEqual([])
+    })
+
+    /** Open the chat fresh for p1 (the ledger records it) and leave its painter attached. */
+    async function openedLive(): Promise<void> {
+      const { PtyManager } = await import('./pty-manager')
+      const m = new PtyManager()
+      m.init(() => DEFAULT_SETTINGS)
+      m.registerIpc()
+      const opened = (await fake.handlers[IPC.ptyCreate](ALICE, {
+        cols: 80,
+        rows: 24,
+        persistKey: NODE,
+        ownerProjectId: 'p1'
+      })) as { fresh: boolean }
+      expect(opened.fresh).toBe(true)
+      tmux.live.add(TARGET)
+      expect(paneOwnerProject(NODE)).toBe('p1')
+    }
+
+    /** The painter's tmux client exits, then the exit-time probe settles. */
+    async function clientExits(): Promise<void> {
+      spawned[spawned.length - 1].exit?.({ exitCode: 0 })
+      await new Promise((r) => setTimeout(r, 0))
+    }
+
+    it('forgets the owner once tmux confirms the exited session is gone', async () => {
+      await openedLive()
+      tmux.live.delete(TARGET) // the shell in the pane exited, taking the session with it
+
+      await clientExits()
+
+      expect(paneOwnerProject(NODE)).toBeUndefined()
+    })
+
+    it('keeps the owner when only the client exited and the session is still up (detach)', async () => {
+      await openedLive()
+
+      await clientExits()
+
+      expect(paneOwnerProject(NODE)).toBe('p1')
+    })
+
+    it('keeps the owner when the exit-time probe gets no answer', async () => {
+      await openedLive()
+      tmux.live.delete(TARGET)
+      tmux.unreachable = true
+
+      await clientExits()
+
+      expect(paneOwnerProject(NODE)).toBe('p1')
+    })
+
+    /**
+     * The respawn race: the exit-time probe is still in flight when the node is opened again. Its
+     * "absent" describes the generation that exited, not the one just spawned, so it must not
+     * forget the new owner.
+     */
+    async function exitThenRespawnBeforeProbeAnswers(respawnOwner: string): Promise<void> {
+      await openedLive()
+      tmux.live.delete(TARGET)
+      let release!: () => void
+      tmux.holdNext = new Promise<void>((r) => (release = r))
+      spawned[spawned.length - 1].exit?.({ exitCode: 0 }) // exit probe now held
+      const back = (await fake.handlers[IPC.ptyCreate](ALICE, {
+        cols: 80,
+        rows: 24,
+        persistKey: NODE,
+        ownerProjectId: respawnOwner
+      })) as { fresh: boolean }
+      expect(back.fresh).toBe(true)
+      expect(paneOwnerProject(NODE)).toBe(respawnOwner)
+      release() // tmux answers the held probe: exit 1, no such session
+      await new Promise((r) => setTimeout(r, 0))
+    }
+
+    it('a respawn by the same opener while the exit probe is in flight keeps its owner', async () => {
+      await exitThenRespawnBeforeProbeAnswers('p1')
+      expect(paneOwnerProject(NODE)).toBe('p1')
+    })
+
+    it('a respawn by another project while the exit probe is in flight keeps that new owner', async () => {
+      await exitThenRespawnBeforeProbeAnswers('p2')
+      expect(paneOwnerProject(NODE)).toBe('p2')
     })
 
     it('a chat closed while parked is no longer owned', async () => {

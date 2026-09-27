@@ -29,8 +29,8 @@ const RESOURCES = '/Applications/nodeterm.app/Contents/Resources'
 const BUNDLED = `${RESOURCES}/bin/tmux`
 
 /** A manager booted with `existsSync` answering true for exactly `present`. */
-async function bootWith(present: string[], resourcesPath?: string) {
-  initPlatform(fakePlatform(resourcesPath ? { resourcesPath } : {}))
+async function bootWith(present: string[], resourcesPath?: string, isPackaged = false) {
+  initPlatform(fakePlatform({ ...(resourcesPath ? { resourcesPath } : {}), isPackaged }))
   vi.spyOn(fs, 'existsSync').mockImplementation((p) => present.includes(String(p)))
   // ensureTmux writes the generated tmux.conf into userDataDir; the fake's dir does not exist.
   vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
@@ -82,5 +82,20 @@ describe('bundled tmux in findTmux', () => {
   it('dev run: picks up the artifact scripts/build-tmux.mjs left under the repo root', async () => {
     const mgr = await bootWith([`${process.cwd()}/resources/bin/tmux`])
     expect(mgr.getTmuxBin()).toBe(`${process.cwd()}/resources/bin/tmux`)
+  })
+
+  it('packaged (desktop, or the Server Edition, which always reports packaged): never runs a tmux out of the cwd', async () => {
+    // A packaged Linux/Server run launched from an untrusted checkout must not execute that
+    // checkout's resources/bin/tmux, nor its main worktree's.
+    const { linkedWorktreeMainRoot } = await import('./tmux-hint')
+    const main = linkedWorktreeMainRoot(process.cwd(), (p) => fs.readFileSync(p, 'utf8'))
+    const planted = [`${process.cwd()}/resources/bin/tmux`, ...(main ? [`${main}/resources/bin/tmux`] : [])]
+    const mgr = await bootWith(planted, undefined, true)
+    expect(mgr.getTmuxBin()).toBeNull()
+  })
+
+  it('packaged still finds its own shipped copy', async () => {
+    const mgr = await bootWith([BUNDLED, `${process.cwd()}/resources/bin/tmux`], RESOURCES, true)
+    expect(mgr.getTmuxBin()).toBe(BUNDLED)
   })
 })

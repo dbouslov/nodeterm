@@ -17,7 +17,7 @@ import {
   type Settings,
   type TmuxStatus
 } from '../shared/types'
-import { bundledTmuxPath, findCommand, findFixedTmux, tmuxInstall } from './tmux-hint'
+import { bundledTmuxPath, findCommand, findFixedTmux, linkedWorktreeMainRoot, tmuxInstall } from './tmux-hint'
 import { hookServer, PERM_WAIT_SECS_DEFAULT } from './agents/hook-server'
 import {
   probeSaysAbsent,
@@ -54,6 +54,7 @@ import { classifyPaneCwd } from './pane-cwd'
 import {
   recordFreshSpawnOwner,
   forgetPaneOwner,
+  paneOwnerProject,
   shouldRecordOwnership
 } from './agents/pane-ownership'
 import { PANE_OWNER_FMT, foregroundArgvArgs, paneOwnerFrom, parseCombinedPaneOwner, parsePaneOwner } from './agents/pane-owner'
@@ -358,7 +359,7 @@ ${leadPaneHookLines(leadPaneWidth)}`
  * process into a tmux pane); its recovery is the node's own Refresh/respawn, which re-creates it
  * through the now-resolved tmux.
  */
-function findTmux(resourcesPath?: string): string | null {
+function findTmux(resourcesPath: string | undefined, isPackaged: boolean): string | null {
   // Windows has none of `tmuxCandidatePaths`' targets (Homebrew, MacPorts, Nix, the distro
   // `/usr/bin` family — all POSIX filesystem layouts) and no bundled tmux (macOS-only, see
   // `bundledTmuxPath`'s doc comment; `scripts/build-tmux.mjs` never runs for a Windows package).
@@ -387,11 +388,16 @@ function findTmux(resourcesPath?: string): string | null {
   const onPath = findInPathString('tmux', shellPathNow() ?? process.env.PATH)
   if (onPath) return onPath
   // Last: the binary the macOS app ships. `process.cwd()` is the repo root under
-  // `electron-vite dev`, which is where scripts/build-tmux.mjs writes its artifact; in a packaged
-  // app it is meaningless and simply misses.
+  // `electron-vite dev`, which is where scripts/build-tmux.mjs writes its artifact. A PACKAGED run
+  // never looks there: its cwd is wherever it was launched from, and a packaged Linux or Server
+  // Edition run started inside an untrusted checkout must not execute that checkout's binary. The
+  // Server Edition always reports packaged, so it takes system tmux only, `server:dev` included.
+  const devRepo = isPackaged ? null : process.cwd()
   return bundledTmuxPath({
     resourcesPath,
-    repoRoot: process.cwd(),
+    repoRoot: devRepo,
+    // A linked git worktree has no build output of its own; its main checkout's artifact is next.
+    mainRepoRoot: devRepo && linkedWorktreeMainRoot(devRepo, (p) => fs.readFileSync(p, 'utf8')),
     exists: (p) => fs.existsSync(p)
   })
 }
@@ -1590,7 +1596,7 @@ export class PtyManager {
     // platform() is safe past the guard above: getSettings is only set by init(), which the shell
     // calls after initPlatform(). resourcesPath is undefined on the Server Edition, so the bundled
     // candidate is simply absent there (Linux keeps system-tmux-only).
-    const found = findTmux(platform().resourcesPath)
+    const found = findTmux(platform().resourcesPath, platform().isPackaged)
     if (!found) return
     this.confPath = path.join(platform().userDataDir, 'tmux.conf')
     try {
@@ -2198,7 +2204,7 @@ export class PtyManager {
       : warmWindowsBackend
         ? false
         : tmuxBacked
-        ? !(await this.tmuxSessionExists(options.persistKey as string))
+        ? await this.freshFromLocalProbe(options.persistKey as string, options.ownerProjectId)
         : true
     // Ensure the login-shell PATH is resolved (prewarmed in init(); usually already settled)
     // so the session env below picks it up — awaiting keeps the event loop free either way.
@@ -2544,20 +2550,44 @@ export class PtyManager {
    *  Async like the remote probe: a bulk project load fires one `create()` per terminal node,
    *  and a synchronous subprocess per probe would serialize on the main event loop. */
   private async tmuxSessionExists(persistKey: string): Promise<boolean> {
-    if (!this.tmuxPath) return false
+    return (await this.tmuxSessionProbe(persistKey)) !== 'absent'
+  }
+
+  /** The same `has-session` read, tri-state: `present`, `absent` (tmux's own exit 1), or the error
+   *  of a probe that got no answer (spawn failure, timeout). `tmuxSessionExists` folds the last one
+   *  into "exists"; callers that must also SAY a read went unanswered take this form. */
+  private async tmuxSessionProbe(persistKey: string): Promise<'present' | 'absent' | { unanswered: unknown }> {
+    if (!this.tmuxPath) return 'absent'
     try {
       // `=`: this session and no other. A bare name that is no session falls back to the ONE session
       // whose name it begins (`nt-b1` finds `nt-b12`, measured on tmux 3.7b): a gone node read live.
       await runAsync(this.tmuxPath, ['-L', TMUX_SOCKET, 'has-session', '-t', `=${sessionName(persistKey)}`], {
         timeout: PROBE_TIMEOUT_MS
       })
-      return true
+      return 'present'
     } catch (e) {
       // Same discrimination as the remote probe: tmux's exit 1 (no session / no server —
       // the reboot case) is absence; a spawn failure (EAGAIN under a bulk project load) is
       // not, and cold-restoring on it would type into a live session.
-      return !probeSaysAbsent(e)
+      return probeSaysAbsent(e) ? 'absent' : { unanswered: e }
     }
+  }
+
+  /** `create()`'s local freshness read. An unanswered probe folds to "exists" (never type a resume
+   *  into a live pane), which also means the ownership ledger records nothing for this open, while
+   *  `new-session -A` may still create the session — so every later `send` to the chat is refused
+   *  `unproven-target-owner`. That stays fail-closed; this only makes it visible in the log. */
+  private async freshFromLocalProbe(persistKey: string, ownerProjectId: string | undefined): Promise<boolean> {
+    const probe = await this.tmuxSessionProbe(persistKey)
+    if (probe === 'absent') return true
+    if (probe !== 'present' && ownerProjectId) {
+      const e = probe.unanswered as { code?: unknown; signal?: unknown } | null
+      console.warn(
+        `[pty] has-session for ${sessionName(persistKey)} got no answer ` +
+          `(code=${String(e?.code ?? '?')} signal=${String(e?.signal ?? '-')}): treated as live, ownership not recorded`
+      )
+    }
+    return false
   }
 
   /** Destructive-confirmation variant of the warm-attach probe. Warm attach treats an unavailable
@@ -3537,6 +3567,23 @@ export class PtyManager {
     for (const client of this.clientsOf(session))
       this.send(client, IPC.ptyExit(sessionId), exitCode)
     this.forget(sessionId, session)
+    if (session.persistKey && session.tmuxBacked && !session.sshRemote && !session.sessionHost)
+      void this.forgetOwnerIfSessionGone(session.persistKey)
+  }
+
+  /**
+   * A painter's tmux client exited. That alone says nothing about the SESSION — a detach, a park or
+   * another client's `-D` attach ends the client too — so the pane owner is dropped only when tmux
+   * itself answers that the session is gone (exit 1). An unanswered probe is "unknown" and keeps
+   * the entry. Respawn guard: if the node is live again by the time tmux answers, or its owner
+   * changed (a fresh spawn re-recorded), the answer is about a generation that no longer exists.
+   */
+  private async forgetOwnerIfSessionGone(persistKey: string): Promise<void> {
+    const owner = paneOwnerProject(persistKey)
+    if (!owner) return
+    if ((await this.tmuxSessionProbe(persistKey)) !== 'absent') return
+    if (this.liveSessionForPersistKey(persistKey) || paneOwnerProject(persistKey) !== owner) return
+    forgetPaneOwner(persistKey)
   }
 
   /** Roll back the provisional Session installed before a session-host attach settles. Unlike a

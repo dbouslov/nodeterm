@@ -22,7 +22,12 @@ import {
   pruneLayoutViewports,
   type CanvasLayout
 } from '@shared/canvas-layout'
-import { applyCanvasMutation, createProject, reorderGroupWithinParent } from './workspace'
+import {
+  applyCanvasMutation,
+  createProject,
+  removeNodesFreeingChildren,
+  reorderGroupWithinParent
+} from './workspace'
 import { markWorkspaceDirty } from './workspaceDirty'
 import { folderName } from '../lib/projectOpen'
 // One order-independent key for an edge's endpoints — the SAME rule `hiddenLinkIds` uses, so a
@@ -160,6 +165,9 @@ interface ProjectsState {
   recolorNode(projectId: string, nodeId: string, color: string): void
   /** Removes a node from a project. */
   removeNode(projectId: string, nodeId: string): void
+  /** Removes nodes from a project, freeing a removed frame's children into its nearest surviving
+   *  ancestor at the same canvas position — the stored twin of Canvas `deleteNodes`. */
+  removeNodes(projectId: string, nodeIds: readonly string[]): void
   /** Duplicates a node within a project (fresh id, offset position). */
   duplicateNode(projectId: string, nodeId: string): void
   /** Moves a node into a group frame (groupId) or out to the top level (null), keeping its
@@ -608,6 +616,15 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     set((s) => ({
       projects: mapProjectNodes(s.projects, projectId, (nodes) =>
         nodes.filter((n) => n.id !== nodeId)
+      )
+    }))
+  },
+
+  removeNodes(projectId, nodeIds) {
+    const deleted = new Set(nodeIds)
+    set((s) => ({
+      projects: mapProjectNodes(s.projects, projectId, (nodes) =>
+        removeNodesFreeingChildren(nodes, deleted)
       )
     }))
   },

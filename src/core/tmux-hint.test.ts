@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
+import { execFileSync } from 'child_process'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import {
   bundledTmuxPath,
+  linkedWorktreeMainRoot,
   findCommand,
   findFixedTmux,
   tmuxCandidatePaths,
@@ -168,5 +173,69 @@ describe('bundledTmuxPath', () => {
     expect(bundledTmuxPath({ resourcesPath: PACKAGED, repoRoot: '/repo', exists })).toBe(
       '/repo/resources/bin/tmux'
     )
+  })
+})
+
+describe('a linked git worktree falls back to its main checkout\'s built tmux', () => {
+  const files: Record<string, string> = {
+    '/repo.worktrees/fix/.git': 'gitdir: /repo/.git/worktrees/fix\n',
+    '/repo/.git/worktrees/fix/commondir': '../..\n'
+  }
+  const read = (p: string): string => {
+    if (p in files) return files[p]
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+  }
+
+  it('resolves the main checkout from the worktree\'s .git file and commondir', () => {
+    expect(linkedWorktreeMainRoot('/repo.worktrees/fix', read)).toBe('/repo')
+  })
+
+  it('a main checkout (its .git is a directory, not a file) has no other root', () => {
+    const dirRead = (p: string): string => {
+      if (p === '/repo/.git') throw Object.assign(new Error('EISDIR'), { code: 'EISDIR' })
+      return read(p)
+    }
+    expect(linkedWorktreeMainRoot('/repo', dirRead)).toBeNull()
+    expect(linkedWorktreeMainRoot('/not-a-repo', read)).toBeNull()
+  })
+
+  it('a worktree without resources/bin/tmux resolves to the main checkout\'s', () => {
+    expect(
+      bundledTmuxPath({
+        repoRoot: '/repo.worktrees/fix',
+        mainRepoRoot: '/repo',
+        exists: (p) => p === '/repo/resources/bin/tmux'
+      })
+    ).toBe('/repo/resources/bin/tmux')
+  })
+
+  it('a worktree with its own tmux keeps it', () => {
+    expect(
+      bundledTmuxPath({
+        repoRoot: '/repo.worktrees/fix',
+        mainRepoRoot: '/repo',
+        exists: (p) => p === '/repo.worktrees/fix/resources/bin/tmux' || p === '/repo/resources/bin/tmux'
+      })
+    ).toBe('/repo.worktrees/fix/resources/bin/tmux')
+  })
+
+  it('against a real `git worktree add` layout', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nt-wt-')))
+    try {
+      const main = path.join(tmp, 'main')
+      const wt = path.join(tmp, 'wt')
+      const git = (cwd: string, ...args: string[]): void => {
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, stdio: 'ignore' })
+      }
+      fs.mkdirSync(main)
+      git(main, 'init', '-q')
+      git(main, 'commit', '-q', '--allow-empty', '-m', 'init')
+      git(main, 'worktree', 'add', '-q', wt)
+      const readFile = (p: string): string => fs.readFileSync(p, 'utf8')
+      expect(linkedWorktreeMainRoot(wt, readFile)).toBe(main)
+      expect(linkedWorktreeMainRoot(main, readFile)).toBeNull()
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

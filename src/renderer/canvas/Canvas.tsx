@@ -681,6 +681,7 @@ import {
   placeNodeInRect,
   terminalNodeSize,
   isPinned,
+  removeNodesFreeingChildren,
   type CanvasNode
 } from '../state/workspace'
 import { codexAccountSelectable, codexAccountSwitchStillEligible } from './codex-account-switch'
@@ -5625,27 +5626,9 @@ export function Canvas() {
         // A node id revived later faces a fresh dialog, exactly as it faces a fresh grant.
         clearAttachConsent(n.id)
       })
-      setNodes((ns) => {
-        // Free children of any deleted group back to absolute positions.
-        const groupPos = new Map(
-          ns.filter((n) => set.has(n.id) && n.type === 'group').map((g) => [g.id, g.position])
-        )
-        return ns
-          .filter((n) => !set.has(n.id))
-          .map((n) =>
-            n.parentId && groupPos.has(n.parentId)
-              ? {
-                  ...n,
-                  parentId: undefined,
-                  extent: undefined,
-                  position: {
-                    x: n.position.x + groupPos.get(n.parentId)!.x,
-                    y: n.position.y + groupPos.get(n.parentId)!.y
-                  }
-                }
-              : n
-          )
-      })
+      // Free children of any deleted group, keeping their root-space position: they join the
+      // nearest surviving frame, so closing a frame nested inside another does not move its chats.
+      setNodes((ns) => removeNodesFreeingChildren(ns, set))
       markDirty()
       // A deleted group takes its worktree BINDING with it — and the frame is the only thing that
       // goes: its children SURVIVE (freed to absolute positions above), dead `data.cwd` and all. So
@@ -13043,14 +13026,7 @@ export function Canvas() {
   const closeStoredNodes = useCallback(
     (projectId: string, ids: readonly string[]) => {
       const store = useProjects.getState()
-      const nodes = store.getProject(projectId)?.nodes ?? []
       for (const id of ids) {
-        // A deleted frame's children SURVIVE it (deleteNodes frees them to absolute positions).
-        // `moveNodeToGroup(…, null)` is the serialized twin of that conversion — without it the
-        // children keep a `parentId` pointing at a node that no longer exists.
-        for (const child of nodes) {
-          if (child.parentId === id) store.moveNodeToGroup(projectId, child.id, null)
-        }
         disposeTerminalOnUnmount(sessionForProject(projectId).id, id) // may be parked from a project switch
         transport.destroy(id)
         useAgentStatus.getState().remove(id)
@@ -13062,8 +13038,11 @@ export function Canvas() {
         // dies with the node.
         clearAttachConsent(id)
         useWebviewKeepAlive.getState().drop(id)
-        store.removeNode(projectId, id)
       }
+      // A deleted frame's children SURVIVE it. `removeNodes` is the serialized twin of deleteNodes'
+      // conversion (the same helper): each child joins the frame's nearest surviving ancestor at the
+      // same canvas position, instead of keeping a `parentId` that names a node no longer there.
+      store.removeNodes(projectId, ids)
       void writeDisk()
     },
     [writeDisk]

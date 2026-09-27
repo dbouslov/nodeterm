@@ -17,9 +17,11 @@ import {
   nodeSshFor,
   reorderGroupWithinParent,
   reorderNodeBefore,
+  removeNodesFreeingChildren,
   reparentNode,
   resolveNewNodeAccount,
   selectedRootIds,
+  rootPosition,
   ungroupNodes
 } from './workspace'
 import type { CanvasNode } from './workspace'
@@ -46,6 +48,64 @@ const grp = (id: string, pos: { x: number; y: number }, parentId?: string): Canv
     data: { title: id, color: '#fff', group: null },
     ...(parentId ? { parentId, extent: 'parent' as const } : {})
   }) as unknown as CanvasNode
+
+describe('removeNodesFreeingChildren (closing a frame keeps its chats where they are)', () => {
+  const abs = (nodes: CanvasNode[], id: string) => rootPosition(nodes.find((n) => n.id === id)!, nodes)
+
+  it('a frame nested two deep: every freed child keeps its absolute position and joins the parent', () => {
+    const nodes = [
+      grp('outer', { x: 100, y: 80 }),
+      grp('mid', { x: 30, y: 40 }, 'outer'),
+      grp('inner', { x: 20, y: 25 }, 'mid'),
+      term('a', { x: 10, y: 12 }, 'inner'),
+      term('b', { x: 200, y: 50 }, 'inner')
+    ]
+    const out = removeNodesFreeingChildren(nodes, new Set(['inner']))
+    expect(out.map((n) => n.id)).toEqual(['outer', 'mid', 'a', 'b'])
+    for (const id of ['a', 'b']) {
+      expect(abs(out, id)).toEqual(abs(nodes, id))
+      expect(out.find((n) => n.id === id)!.parentId).toBe('mid')
+    }
+  })
+
+  it('an ancestor closed too: children climb to the nearest surviving frame', () => {
+    const nodes = [
+      grp('outer', { x: 100, y: 80 }),
+      grp('mid', { x: 30, y: 40 }, 'outer'),
+      grp('inner', { x: 20, y: 25 }, 'mid'),
+      term('a', { x: 10, y: 12 }, 'inner')
+    ]
+    const out = removeNodesFreeingChildren(nodes, new Set(['inner', 'mid']))
+    expect(out.find((n) => n.id === 'a')!.parentId).toBe('outer')
+    expect(abs(out, 'a')).toEqual(abs(nodes, 'a'))
+  })
+
+  it('a one-deep frame: children go top-level at their absolute position (unchanged behaviour)', () => {
+    const nodes = [grp('g', { x: 50, y: 60 }), term('a', { x: 10, y: 12 }, 'g')]
+    const out = removeNodesFreeingChildren(nodes, new Set(['g']))
+    const a = out.find((n) => n.id === 'a')!
+    expect(a.parentId).toBeUndefined()
+    expect(a.extent).toBeUndefined()
+    expect(a.position).toEqual({ x: 60, y: 72 })
+  })
+
+  it('top-level nodes and unrelated frames are untouched', () => {
+    const nodes = [term('t', { x: 5, y: 6 }), grp('g', { x: 50, y: 60 }), term('a', { x: 1, y: 2 }, 'g')]
+    const out = removeNodesFreeingChildren(nodes, new Set(['t']))
+    expect(out).toEqual([nodes[1], nodes[2]])
+  })
+
+  it('a parentId cycle from a hand-edited file does not hang', () => {
+    const nodes = [
+      grp('x', { x: 0, y: 0 }, 'y'),
+      grp('y', { x: 0, y: 0 }, 'x'),
+      term('a', { x: 3, y: 4 }, 'x')
+    ]
+    const out = removeNodesFreeingChildren(nodes, new Set(['x', 'y']))
+    expect(out.map((n) => n.id)).toEqual(['a'])
+    expect(out[0].parentId).toBeUndefined()
+  })
+})
 
 describe('reparentNode', () => {
   it('adds a top-level node to a group with a group-relative position', () => {
