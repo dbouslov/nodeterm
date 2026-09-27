@@ -97,6 +97,37 @@ describe('packOverview', () => {
     expect(rects.has('x') && rects.has('y') && rects.has('c')).toBe(true)
   })
 
+  it('a card whose parent is another card (not a frame) is loose, and still drawn', () => {
+    const { parentOf, rects } = packOverview([card('a'), card('b', 'a')])
+    expect(parentOf.get('b')).toBe(OVERVIEW_LOOSE_ID)
+    expect(rects.get('b')).toBeDefined()
+    expect(contains(rects.get(OVERVIEW_LOOSE_ID)!, rects.get('b')!)).toBe(true)
+  })
+
+  it('cuts a parent cycle at one link, so a cycled frame keeps its own cards', () => {
+    const { parentOf, rects } = packOverview([frame('x', 'y'), frame('y', 'x'), card('c', 'x'), card('d', 'y')])
+    // x comes first, so its link back into the cycle is the one cut: y nests in x.
+    expect(parentOf.has('x')).toBe(false)
+    expect(parentOf.get('y')).toBe('x')
+    expect(parentOf.get('c')).toBe('x')
+    expect(parentOf.get('d')).toBe('y')
+    expect(contains(rects.get('x')!, rects.get('c')!)).toBe(true)
+    expect(contains(rects.get('y')!, rects.get('d')!)).toBe(true)
+    expect(contains(rects.get('x')!, rects.get('y')!)).toBe(true)
+  })
+
+  it('keeps every child below its block label band and inside the side padding', () => {
+    const items = sixtyInEight()
+    const { rects, parentOf } = packOverview(items)
+    for (const [id, p] of parentOf) {
+      const c = rects.get(id)!
+      const f = rects.get(p)!
+      expect(c.y, `${id} below ${p} label`).toBeGreaterThanOrEqual(f.y + 28)
+      expect(c.x, `${id} inside ${p} padding`).toBeGreaterThanOrEqual(f.x + 12)
+      expect(c.x + c.width, `${id} right padding`).toBeLessThanOrEqual(f.x + f.width - 12)
+    }
+  })
+
   it('fits 60 chats in 8 frames into a 16:9 view at a readable card size', () => {
     const { width, height } = packOverview(sixtyInEight(), { aspect: 16 / 9 })
     const vp = fitOverviewViewport({ width, height }, { width: 1600, height: 900 })!

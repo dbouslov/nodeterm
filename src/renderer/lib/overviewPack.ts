@@ -128,26 +128,31 @@ function place(pieces: readonly Piece[], at: ReadonlyArray<{ x: number; y: numbe
 export function packOverview(items: readonly PackItem[], opts: { aspect?: number } = {}): PackResult {
   const aspect = opts.aspect ?? 16 / 9
   const byId = new Map(items.map((i) => [i.id, i]))
-  // The file is hostile input: a parent that is missing, not a frame, or part of a cycle is none.
+  // The file is hostile input: a parent that is missing or not a frame is none. A parent cycle is
+  // cut at ONE link — the item (in input order) whose parent would lead back to itself — so every
+  // other frame in the cycle, and every card, keeps its own parent.
   const effectiveParent = new Map<string, string | undefined>()
-  const parentOfItem = (it: PackItem): string | undefined => {
-    if (effectiveParent.has(it.id)) return effectiveParent.get(it.id)
-    const seen = new Set([it.id])
-    let p = it.parentId
-    let ok = true
-    while (p !== undefined) {
-      const pi = byId.get(p)
-      if (!pi || !pi.isFrame || seen.has(p)) {
-        ok = false
+  /** The parent as far as it is known: the decided one, else the file's (if it names a frame). */
+  const upOf = (id: string): string | undefined => {
+    if (effectiveParent.has(id)) return effectiveParent.get(id)
+    const p = byId.get(id)?.parentId
+    return p !== undefined && byId.get(p)?.isFrame ? p : undefined
+  }
+  for (const it of items) {
+    const p = it.parentId
+    let parent: string | undefined = p !== undefined && byId.get(p)?.isFrame ? p : undefined
+    const seen = new Set<string>()
+    for (let q = parent; q !== undefined && !seen.has(q); q = upOf(q)) {
+      if (q === it.id) {
+        parent = undefined
         break
       }
-      seen.add(p)
-      p = pi.parentId
+      // Another cycle above this item is cut when its own member is decided, not here.
+      seen.add(q)
     }
-    const parent = ok && it.parentId !== undefined ? it.parentId : undefined
     effectiveParent.set(it.id, parent)
-    return parent
   }
+  const parentOfItem = (it: PackItem): string | undefined => effectiveParent.get(it.id)
   const children = new Map<string | undefined, PackItem[]>()
   for (const it of items) {
     const p = parentOfItem(it)
