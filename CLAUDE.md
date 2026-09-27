@@ -4375,7 +4375,12 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   `ProjectView` (`'overview'`), a full-page overlay with its OWN read-only React Flow instance
   (`id="network-overview"`, so its `EdgeRouter` routes never overwrite the canvas's) over the
   SERIALIZED active project — `performOverviewToggle` commits the live canvas first, like the
-  global board. Its input comes from `useActiveOverview`, which subscribes through `overviewSig`
+  global board. It does NOT copy the canvas geometry: every node is one compact card and cards are packed
+  by box (`lib/overviewPack.ts`, pure: one block per frame, nested frames nested, loose nodes in a
+  synthetic `OVERVIEW_LOOSE_ID` block that is never a canvas node and never "go to"), with the row
+  width chosen to fill a 16:9 view; 60 cards in 8 frames fit 1600×900 at zoom ≥ 0.75. The camera is
+  `fitOverviewViewport` + `setViewport` (never `fitView`), re-run on mount, pane resize and a change
+  of packed size — never on a status update. Its input comes from `useActiveOverview`, which subscribes through `overviewSig`
   inside the two small consumers (overlay, minimap badge) so Canvas never re-renders on a hook
   event, and ticks once a minute so idle fires on a quiet canvas. Every canvas-only guard asks
   `isOverlayViewOpen` (board, Omni or overview), never a bare kanban check — the zoom chords, the
