@@ -50,7 +50,9 @@ const tmux = vi.hoisted(() => ({
   unreachable: false,
   calls: [] as Array<{ file: string; args: string[]; stdin?: string }>
 }))
-const spawned = vi.hoisted(() => [] as Array<{ killed: boolean }>)
+const spawned = vi.hoisted(
+  () => [] as Array<{ killed: boolean; exit?: (e: { exitCode: number }) => void }>
+)
 
 vi.mock('child_process', () => {
   type Out = { stdout: string; stderr: string }
@@ -118,11 +120,14 @@ vi.mock('child_process', () => {
 
 vi.mock('node-pty', () => ({
   spawn: () => {
-    const p = { killed: false }
+    const p: { killed: boolean; exit?: (e: { exitCode: number }) => void } = { killed: false }
     spawned.push(p)
     return {
       onData: () => {},
-      onExit: () => {},
+      // Kept so a case can end the tmux CLIENT the way its process exiting would.
+      onExit: (cb: (e: { exitCode: number }) => void) => {
+        p.exit = cb
+      },
       write: () => {},
       resize: () => {},
       pause: () => {},
@@ -502,6 +507,56 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
 
       expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
       expect(pastes()).toEqual([])
+    })
+
+    /** Open the chat fresh for p1 (the ledger records it) and leave its painter attached. */
+    async function openedLive(): Promise<void> {
+      const { PtyManager } = await import('./pty-manager')
+      const m = new PtyManager()
+      m.init(() => DEFAULT_SETTINGS)
+      m.registerIpc()
+      const opened = (await fake.handlers[IPC.ptyCreate](ALICE, {
+        cols: 80,
+        rows: 24,
+        persistKey: NODE,
+        ownerProjectId: 'p1'
+      })) as { fresh: boolean }
+      expect(opened.fresh).toBe(true)
+      tmux.live.add(TARGET)
+      expect(paneOwnerProject(NODE)).toBe('p1')
+    }
+
+    /** The painter's tmux client exits, then the exit-time probe settles. */
+    async function clientExits(): Promise<void> {
+      spawned[spawned.length - 1].exit?.({ exitCode: 0 })
+      await new Promise((r) => setTimeout(r, 0))
+    }
+
+    it('forgets the owner once tmux confirms the exited session is gone', async () => {
+      await openedLive()
+      tmux.live.delete(TARGET) // the shell in the pane exited, taking the session with it
+
+      await clientExits()
+
+      expect(paneOwnerProject(NODE)).toBeUndefined()
+    })
+
+    it('keeps the owner when only the client exited and the session is still up (detach)', async () => {
+      await openedLive()
+
+      await clientExits()
+
+      expect(paneOwnerProject(NODE)).toBe('p1')
+    })
+
+    it('keeps the owner when the exit-time probe gets no answer', async () => {
+      await openedLive()
+      tmux.live.delete(TARGET)
+      tmux.unreachable = true
+
+      await clientExits()
+
+      expect(paneOwnerProject(NODE)).toBe('p1')
     })
 
     it('a chat closed while parked is no longer owned', async () => {

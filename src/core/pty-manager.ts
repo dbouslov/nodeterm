@@ -54,6 +54,7 @@ import { classifyPaneCwd } from './pane-cwd'
 import {
   recordFreshSpawnOwner,
   forgetPaneOwner,
+  paneOwnerProject,
   shouldRecordOwnership
 } from './agents/pane-ownership'
 import { PANE_OWNER_FMT, foregroundArgvArgs, paneOwnerFrom, parseCombinedPaneOwner, parsePaneOwner } from './agents/pane-owner'
@@ -3561,6 +3562,23 @@ export class PtyManager {
     for (const client of this.clientsOf(session))
       this.send(client, IPC.ptyExit(sessionId), exitCode)
     this.forget(sessionId, session)
+    if (session.persistKey && session.tmuxBacked && !session.sshRemote && !session.sessionHost)
+      void this.forgetOwnerIfSessionGone(session.persistKey)
+  }
+
+  /**
+   * A painter's tmux client exited. That alone says nothing about the SESSION — a detach, a park or
+   * another client's `-D` attach ends the client too — so the pane owner is dropped only when tmux
+   * itself answers that the session is gone (exit 1). An unanswered probe is "unknown" and keeps
+   * the entry. Respawn guard: if the node is live again by the time tmux answers, or its owner
+   * changed (a fresh spawn re-recorded), the answer is about a generation that no longer exists.
+   */
+  private async forgetOwnerIfSessionGone(persistKey: string): Promise<void> {
+    const owner = paneOwnerProject(persistKey)
+    if (!owner) return
+    if ((await this.tmuxSessionProbe(persistKey)) !== 'absent') return
+    if (this.liveSessionForPersistKey(persistKey) || paneOwnerProject(persistKey) !== owner) return
+    forgetPaneOwner(persistKey)
   }
 
   /** Roll back the provisional Session installed before a session-host attach settles. Unlike a
