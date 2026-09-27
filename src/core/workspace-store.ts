@@ -1149,6 +1149,9 @@ export class WorkspaceStore {
       const changedSinceLoad = !(previousCache && sameProjectContent(previousCache, e.cache))
       e.cache.rev = changedSinceLoad ? prevRev + 1 : prevRev
       this.revs.set(e.id, e.cache.rev)
+      // The cache IS this machine's persisted canvas for an SSH project (the index write below
+      // lands it), so the save line names it like any folder or inline canvas.
+      ;(changedSinceLoad ? wrote : unchanged).push(e.id)
       if (!this.remoteIO) continue
       // Anything this save dropped is a deliberate local deletion — remember it until the server has
       // been told, so the mirror write's re-read below can tell it apart from a node we never had.

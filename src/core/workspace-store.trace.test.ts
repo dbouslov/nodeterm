@@ -95,6 +95,24 @@ describe('the workspace store traces every save decision', () => {
     expect(all.find((r) => r.ev === 'save')).toMatchObject({ wrote: [], unchanged: [] })
   })
 
+  // PR #18 review: an SSH project's canvas is persisted as its index cache, not a folder file, and
+  // the save line named neither — so a save that did (or did not) reach an SSH canvas said nothing.
+  it('names an SSH project it wrote, then as unchanged', async () => {
+    const { store, records } = await tracedStore()
+    const ssh: Project = {
+      ...project(projRoot),
+      id: 's1',
+      cwd: undefined,
+      ssh: { server: { host: 'h', user: 'u' } as never, remoteCwd: '~/x' }
+    }
+    const sshWs: Workspace = { version: 2, activeProjectId: 's1', projects: [ssh] }
+    await store.save(sshWs)
+    await store.save(sshWs)
+    const saves = (await records()).filter((r) => r.ev === 'save')
+    expect(saves[0]).toMatchObject({ wrote: ['s1'], unchanged: [] })
+    expect(saves[1]).toMatchObject({ wrote: [], unchanged: ['s1'] })
+  })
+
   it('knows how long ago it last wrote or read a project canvas', async () => {
     const { store } = await tracedStore()
     await store.save(ws([project(projRoot)]))
