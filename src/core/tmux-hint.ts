@@ -134,7 +134,8 @@ export function findFixedTmux(
 export function bundledTmuxPath(opts: {
   /** Electron's process.resourcesPath — `<app>/Contents/Resources` in a packaged build. */
   resourcesPath?: string | null
-  /** Repo root for a dev run (process.cwd() under `electron-vite dev`). */
+  /** Repo root for a dev run (process.cwd() under `electron-vite dev`). DEV ONLY: a packaged run's
+   *  cwd is untrusted, so the caller passes null there (see `findTmux`). */
   repoRoot?: string | null
   /** The main checkout when `repoRoot` is a linked git worktree (`linkedWorktreeMainRoot`). */
   mainRepoRoot?: string | null

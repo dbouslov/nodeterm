@@ -359,7 +359,7 @@ ${leadPaneHookLines(leadPaneWidth)}`
  * process into a tmux pane); its recovery is the node's own Refresh/respawn, which re-creates it
  * through the now-resolved tmux.
  */
-function findTmux(resourcesPath?: string): string | null {
+function findTmux(resourcesPath: string | undefined, isPackaged: boolean): string | null {
   // Windows has none of `tmuxCandidatePaths`' targets (Homebrew, MacPorts, Nix, the distro
   // `/usr/bin` family — all POSIX filesystem layouts) and no bundled tmux (macOS-only, see
   // `bundledTmuxPath`'s doc comment; `scripts/build-tmux.mjs` never runs for a Windows package).
@@ -388,13 +388,16 @@ function findTmux(resourcesPath?: string): string | null {
   const onPath = findInPathString('tmux', shellPathNow() ?? process.env.PATH)
   if (onPath) return onPath
   // Last: the binary the macOS app ships. `process.cwd()` is the repo root under
-  // `electron-vite dev`, which is where scripts/build-tmux.mjs writes its artifact; in a packaged
-  // app it is meaningless and simply misses.
+  // `electron-vite dev`, which is where scripts/build-tmux.mjs writes its artifact. A PACKAGED run
+  // never looks there: its cwd is wherever it was launched from, and a packaged Linux or Server
+  // Edition run started inside an untrusted checkout must not execute that checkout's binary. The
+  // Server Edition always reports packaged, so it takes system tmux only, `server:dev` included.
+  const devRepo = isPackaged ? null : process.cwd()
   return bundledTmuxPath({
     resourcesPath,
-    repoRoot: process.cwd(),
+    repoRoot: devRepo,
     // A linked git worktree has no build output of its own; its main checkout's artifact is next.
-    mainRepoRoot: linkedWorktreeMainRoot(process.cwd(), (p) => fs.readFileSync(p, 'utf8')),
+    mainRepoRoot: devRepo && linkedWorktreeMainRoot(devRepo, (p) => fs.readFileSync(p, 'utf8')),
     exists: (p) => fs.existsSync(p)
   })
 }
@@ -1593,7 +1596,7 @@ export class PtyManager {
     // platform() is safe past the guard above: getSettings is only set by init(), which the shell
     // calls after initPlatform(). resourcesPath is undefined on the Server Edition, so the bundled
     // candidate is simply absent there (Linux keeps system-tmux-only).
-    const found = findTmux(platform().resourcesPath)
+    const found = findTmux(platform().resourcesPath, platform().isPackaged)
     if (!found) return
     this.confPath = path.join(platform().userDataDir, 'tmux.conf')
     try {
