@@ -55,7 +55,9 @@ export function remoteAtomicWrite(
   const parent = options.makeParent === false
     ? ''
     : `mkdir -p -- ${quoteRemotePath(parentPath)} && `
-  const protect = options.chmod600 ? ` && chmod 600 -- ${temporary}` : ''
+  // `--` BEFORE the mode: BSD/macOS chmod stops option parsing at the mode, so `chmod 600 -- f`
+  // there names a file called `--` and fails; only GNU getopt permutes it back into an option.
+  const protect = options.chmod600 ? ` && chmod -- 600 ${temporary}` : ''
   const command =
     `${prefix}${parent}{ cat > ${temporary}${protect} && mv -f -- ${temporary} ${target}; ` +
     `nt_status=$?; ` +
