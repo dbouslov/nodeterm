@@ -69,7 +69,8 @@ describe('routeOne', () => {
       const obs = obstaclesFor(r.edges[0], r)
       for (const p of samples(route.points)) for (const o of obs) expect(containsStrict(o, p), `t=${t}`).toBe(false)
     }
-  })
+    // ~2s of routing on an idle machine; the 5s default timed out under full-suite load.
+  }, 30_000)
   it('boxed in ⇒ fallback, still drawable', () => {
     const wall = (id: string, x: number, y: number, w: number, h: number) => n(id, x, y, { width: w, height: h })
     const r = mk([n('a', 0, 0), n('b', 2000, 0), wall('w1', -100, -100, 400, 20), wall('w2', -100, 200, 400, 20), wall('w3', -100, -100, 20, 320), wall('w4', 280, -100, 20, 320)], [rope('e', 'a', 'b')])
