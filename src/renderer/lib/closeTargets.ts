@@ -48,9 +48,18 @@ export type CloseTargets =
  * closing 13 and claiming 14 is exactly the failure the single-id lie makes harmless only because
  * one id is one thing the caller can check.
  */
+export const LOOP_CARD_NOT_A_NODE =
+  'is a cron/loop card, not a node; dismiss it with its × or CronDelete — nothing was closed'
+
 export function parseCloseTargets(raw: string | undefined, live: readonly CloseCandidate[]): CloseTargets {
   const ids = [...new Set((raw ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
   if (!ids.length) return { kind: 'error', error: 'close requires --node' }
+  // A cron/loop card (`loop-<agentId>`, from `list`) is drawn, not a node: `deleteNodes` would do
+  // nothing, yet the dialog would ask and the reply claim "closed". A REAL node that happens to
+  // carry such an id is still closable.
+  const liveIds = new Set(live.map((n) => n.id))
+  const card = ids.find((id) => id.startsWith('loop-') && !liveIds.has(id))
+  if (card) return { kind: 'error', error: `close: ${card} ${LOOP_CARD_NOT_A_NODE}` }
   if (ids.length === 1) return { kind: 'single', id: ids[0] }
   if (ids.length > CLOSE_BULK_MAX) {
     return {

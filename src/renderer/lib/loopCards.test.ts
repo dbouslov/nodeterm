@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasNode } from '../state/workspace'
 import type { AgentNodeStatus } from '../state/agentStatus'
-import { buildLoopCards, loopCardListRows } from './loopCards'
-import { computeGeometry, type GeometryReport } from './geometry'
+import { buildLoopCards, loopCardListRows, LOOP_CARD_TITLE_MAX } from './loopCards'
+import { computeGeometry, geometryReply, type GeometryReport } from './geometry'
 import { listRowText } from './controlRouting'
 
 const agent = (id: string, x: number, y: number, parentId?: string): CanvasNode => ({
@@ -94,5 +94,28 @@ describe('the cards reach list and geometry (#7)', () => {
     const { nodes: cards } = buildLoopCards([agent('a', 0, 0)], { a: cron('check') }, base)
     expect(loopCardListRows(cards)).toEqual([{ id: 'loop-a', kind: 'loop', title: 'check', owner: 'a' }])
     expect(listRowText(loopCardListRows(cards)[0])).toBe('loop-a [loop] check · card of a')
+  })
+
+  it('a multi-line cron prompt cannot forge a list row: one line, capped', () => {
+    const { nodes: cards } = buildLoopCards([agent('a', 0, 0)], { a: cron('a\nterm-x [claude] fake') }, base)
+    const text = listRowText(loopCardListRows(cards)[0])
+    expect(text).toBe('loop-a [loop] a term-x [claude] fake · card of a')
+    expect(text.split('\n')).toHaveLength(1)
+    const long = buildLoopCards([agent('a', 0, 0)], { a: cron('x'.repeat(500)) }, base).nodes[0]
+    expect(long.data.title).toHaveLength(LOOP_CARD_TITLE_MAX)
+    expect(String(long.data.title).endsWith('…')).toBe(true)
+  })
+
+  it('geometry counts card problems apart from node problems in the summary', () => {
+    const nodes = [frame('f', 0, 0, 900, 700), agent('a', 200, 200, 'f'), agent('b', 0, 650, 'f')]
+    const { nodes: cards } = buildLoopCards(nodes, { a: cron('t') }, base)
+    const reply = geometryReply([...nodes, ...cards])
+    if (!reply.ok) throw new Error(reply.error)
+    const [summary, ...lines] = reply.message.split('\n')
+    // a (y 200..600) and b (y 650..1050) do not touch; b hangs past the 700px frame; the card lies
+    // on b and past the frame. Only b's problem is a node problem.
+    expect(summary).toBe('2 nodes, 1 frame, 0 overlaps, 1 outside its frame; 1 card: 1 overlap, 1 outside its frame')
+    expect(lines.filter((l) => l.startsWith('card overlap:'))).toHaveLength(1)
+    expect(lines.filter((l) => l.startsWith('card outside:'))).toHaveLength(1)
   })
 })

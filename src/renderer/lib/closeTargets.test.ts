@@ -25,6 +25,19 @@ describe('parseCloseTargets — the single-node form is unchanged', () => {
     expect(parseCloseTargets('ghost', live)).toEqual({ kind: 'single', id: 'ghost' })
   })
 
+  it('refuses a cron/loop card id, alone or in a list, and names it (#7)', () => {
+    for (const raw of ['loop-a', 'a,loop-c']) {
+      const r = parseCloseTargets(raw, live)
+      expect(r.kind).toBe('error')
+      if (r.kind === 'error') {
+        expect(r.error).toContain(raw === 'loop-a' ? 'loop-a' : 'loop-c')
+        expect(r.error).toMatch(/cron\/loop card, not a node; dismiss it with its × or CronDelete/)
+      }
+    }
+    // A real node that carries such an id is still a node.
+    expect(parseCloseTargets('loop-x', [...live, { id: 'loop-x' }])).toEqual({ kind: 'single', id: 'loop-x' })
+  })
+
   it('trims, and a trailing comma is still one id', () => {
     expect(parseCloseTargets('  a  ', live)).toEqual({ kind: 'single', id: 'a' })
     expect(parseCloseTargets('a,', live)).toEqual({ kind: 'single', id: 'a' })

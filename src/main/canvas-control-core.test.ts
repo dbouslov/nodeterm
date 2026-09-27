@@ -1214,6 +1214,9 @@ describe('geometry verb', () => {
       expect(body).toContain('`loop-<agentId>`')
       expect(body).toMatch(/card of <agentId>/)
       expect(body).toMatch(/move the agent/i)
+      // Card problems are counted apart, so an orchestrator does not chase overlaps it cannot clear.
+      expect(body).toMatch(/counted\s+SEPARATELY/)
+      expect(body).toMatch(/no layout verb moves a\s+card/)
     }
   })
 })

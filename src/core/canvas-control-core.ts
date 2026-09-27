@@ -598,7 +598,9 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  nodes, 6 frames, 0 overlaps") plus one line per problem: two siblings whose rectangles overlap',
     '  (touching edges do not count), or a child that sticks out of its frame. `result` carries the',
     '  full JSON. Run it before laying out, and after `arrange` to confirm 0 overlaps. Cron/loop cards',
-    '  (`loop-<agentId>`, see `list`) are included with `owner` and counted in both checks.',
+    '  (`loop-<agentId>`, see `list`) are included with `owner`, but their problems are counted',
+    '  SEPARATELY ("; 2 cards: 1 overlap") and their lines start with `card`: no layout verb moves a',
+    '  card, so the 0 to aim for is the node count before the `;`.',
     '- `restructure [--layout rows|radial]` — re-lay out the WHOLE project by lineage, centered on',
     '  the opener: you stay top-center, the nodes you opened sit in a centered row beneath you, their',
     '  children beneath those; a node armed `--after` sits to the right of what it waits on; a frame',
@@ -1164,8 +1166,10 @@ Verbs:
   arranging that frame's children (which refits the frame). A pinned frame keeps its layout (its
   children report \`pinned: true\`), so \`pin --node <frame> --set off\` first. Run it before you lay
   out, and again after \`arrange\` to confirm 0 overlaps. Cron/loop cards (\`loop-<agentId>\`, see
-  \`list\`) are included with \`owner\` set to their agent and counted in both checks; a card is
-  not clamped into its frame, so one reported as sticking out is drawn outside it.
+  \`list\`) are included with \`owner\` set to their agent, but their problems are counted
+  SEPARATELY (\`; 2 cards: 1 overlap\`) and their lines start with \`card\`: no layout verb moves a
+  card (it follows its agent), so the 0 to aim for is the node count before the \`;\`. A card is not
+  clamped into its frame, so one reported as sticking out is drawn outside it.
 - \`link --to <id,id> [--from <id>]\` — context-link nodes, so each can READ the other's
   transcript on demand with the get-linked-context skill. \`--from\` defaults to you. Nothing is
   pushed into the linked sessions — reading is on demand, so linking never interrupts anyone.

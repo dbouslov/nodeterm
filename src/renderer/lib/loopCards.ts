@@ -1,5 +1,6 @@
 import type { Edge } from '@xyflow/react'
 import { agentConfig } from '@shared/agents/config'
+import { oneLine } from '@shared/one-line'
 import type { CanvasNode } from '../state/workspace'
 import type { AgentNodeStatus } from '../state/agentStatus'
 import type { EdgeData } from './edgeKinds'
@@ -71,6 +72,14 @@ export function ephemeralDims(
   return { width, height, style: { width, height } }
 }
 
+/** Longest card title `list` / `geometry` print; the full task is on the card. */
+export const LOOP_CARD_TITLE_MAX = 120
+
+export function loopCardTitle(task: string | undefined): string {
+  const t = oneLine(task ?? '')
+  return t.length > LOOP_CARD_TITLE_MAX ? `${t.slice(0, LOOP_CARD_TITLE_MAX - 1)}…` : t
+}
+
 /** One loop card (plus its fan-out edge) per agent node on `nodes` with a live, undismissed loop.
  *  Pure. */
 export function buildLoopCards(
@@ -109,7 +118,10 @@ export function buildLoopCards(
       selected: ui.selectedId === lid,
       ...ephemeralDims(ui, lid, 230, 460, 92, 320),
       data: {
-        title: st.loop.task ?? '',
+        // The card's NAME for `list` / `geometry` (the card itself draws `loopTask`). A cron prompt
+        // is often multi-line, and `list` prints its title raw — one line, capped, or a prompt
+        // holding "\nterm-x [claude] …" forges a row in every caller's listing.
+        title: loopCardTitle(st.loop.task),
         color: accent,
         group: null,
         // The agent node this card belongs to — what `list` / `geometry` report as its owner.
