@@ -97,6 +97,24 @@ describe('removeNodes (the off-screen close frees a frame\'s children like delet
     expect(get('a')!.position).toEqual({ x: 60, y: 72 })
   })
 
+  it('drops the control ropes that touched a removed node, as the on-screen close does', () => {
+    // Nothing downstream prunes them: a load restores every persisted rope into the live edge
+    // state and the next save writes it back, so a dangling rope stayed in project.json forever.
+    load([at('a', 0, 0), at('b', 0, 0), at('c', 0, 0)])
+    useProjects.setState((s) => ({
+      projects: s.projects.map((p) => ({
+        ...p,
+        ropes: [
+          { id: 'ctrl-a-b', source: 'a', target: 'b', kind: 'opener' as const },
+          { id: 'ctrl-b-c', source: 'b', target: 'c', kind: 'dep' as const },
+          { id: 'ctrl-a-c', source: 'a', target: 'c' }
+        ]
+      }))
+    }))
+    useProjects.getState().removeNodes('p1', ['b'])
+    expect(useProjects.getState().getProject('p1')!.ropes).toEqual([{ id: 'ctrl-a-c', source: 'a', target: 'c' }])
+  })
+
   it('a parentId cycle does not hang', () => {
     load([group('x', 0, 0, 'y'), group('y', 0, 0, 'x'), at('a', 3, 4, 'x')])
     useProjects.getState().removeNodes('p1', ['x', 'y'])

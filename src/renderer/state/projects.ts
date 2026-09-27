@@ -166,7 +166,8 @@ interface ProjectsState {
   /** Removes a node from a project. */
   removeNode(projectId: string, nodeId: string): void
   /** Removes nodes from a project, freeing a removed frame's children into its nearest surviving
-   *  ancestor at the same canvas position — the stored twin of Canvas `deleteNodes`. */
+   *  ancestor at the same canvas position — the stored twin of Canvas `deleteNodes` — and drops
+   *  the control ropes that touched them, as the on-screen close does. */
   removeNodes(projectId: string, nodeIds: readonly string[]): void
   /** Duplicates a node within a project (fresh id, offset position). */
   duplicateNode(projectId: string, nodeId: string): void
@@ -623,8 +624,19 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   removeNodes(projectId, nodeIds) {
     const deleted = new Set(nodeIds)
     set((s) => ({
-      projects: mapProjectNodes(s.projects, projectId, (nodes) =>
-        removeNodesFreeingChildren(nodes, deleted)
+      projects: s.projects.map((p) =>
+        p.id !== projectId
+          ? p
+          : {
+              ...p,
+              nodes: removeNodesFreeingChildren(p.nodes, deleted),
+              // The control ropes go with their endpoint, as the on-screen close drops them from
+              // the live edges. Nothing downstream would: a load restores every persisted rope and
+              // the next save writes it back, so a dangling rope lived in project.json forever.
+              ...(p.ropes
+                ? { ropes: p.ropes.filter((r) => !deleted.has(r.source) && !deleted.has(r.target)) }
+                : {})
+            }
       )
     }))
   },

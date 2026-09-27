@@ -512,9 +512,9 @@ import {
 import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
 import { installAgentReadiness } from '../lib/agentHookSeen'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
-import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
+import { recreateNodeFromSnapshot } from '../lib/reopenNode'
+import { recordNodeClose } from '../lib/recordNodeClose'
 import {
-  buildClosedSessionEntries,
   recentlyClosedProjects,
   stateToReopenSnapshot
 } from '../lib/closedHistory'
@@ -5504,56 +5504,11 @@ export function Canvas() {
   const deleteNodes = useCallback(
     (ids: string[], opts?: { record?: boolean }) => {
       const set = new Set(ids)
+      // Issue #531: the agent-status entry is dropped a few lines below, and the live session id
+      // lives nowhere else — so the record runs BEFORE the teardown. One funnel with the off-screen
+      // close (`closeStoredNodes`).
       if (opts?.record !== false) {
-        const deletedAt = Date.now()
-        // Keyed by node id, not by array position: `closedEntries` and `snapshots` below each run
-        // their OWN independent filter over `nodesRef.current` (both via `snapshotNode`), and a
-        // node-id map is what lets the two stay correlated even if those filters ever drift apart,
-        // rather than relying on the two passes producing the same order.
-        const closedSessionIdByNode = new Map<string, string>()
-        // `uuid()`, NOT crypto.randomUUID: the latter exists only in a SECURE context, so it is
-        // undefined in the Server Edition served over plain HTTP on a LAN — and this call sits at
-        // the TOP of deleteNodes, before transport.destroy/setNodes, so a throw here would make
-        // Delete do nothing at all on that surface. See lib/uuid.ts (the same call already broke
-        // "Add agent" once).
-        const closedEntries = buildClosedSessionEntries(
-          set,
-          nodesRef.current,
-          deletedAt,
-          (nodeId) => {
-            const id = uuid()
-            closedSessionIdByNode.set(nodeId, id)
-            return id
-          },
-          // Issue #531. The agent-status entry is dropped a few lines below, and the live session
-          // id lives nowhere else — so this is the last instant the pointer to the node's
-          // transcript exists. Read it BEFORE the teardown, not after.
-          (nodeId) => useAgentStatus.getState().byId[nodeId]?.sessionId
-        )
-        if (closedEntries.length) {
-          useProjects.getState().recordClosedSessions(
-            useProjects.getState().activeProjectId ?? '',
-            closedEntries
-          )
-        }
-        // The two ledgers must agree on which node minted which persisted entry, so ⇧⌘T's restore
-        // can drop the persisted twin and the sidebar's reopen can drop this snapshot — see
-        // `ReopenNodeSnapshot.closedSessionId`.
-        const snapshots = nodesRef.current
-          .filter((n) => set.has(n.id))
-          .map((n) => {
-            const snap = snapshotNode(n, nodesRef.current)
-            return snap ? { ...snap, closedSessionId: closedSessionIdByNode.get(n.id) } : snap
-          })
-          .filter((s): s is NonNullable<typeof s> => s !== null)
-        if (snapshots.length) {
-          useReopenHistory.getState().push({
-            kind: 'nodes',
-            projectId: useProjects.getState().activeProjectId ?? '',
-            closedAt: deletedAt,
-            nodes: snapshots
-          })
-        }
+        recordNodeClose(useProjects.getState().activeProjectId ?? '', set, nodesRef.current)
       }
       nodesRef.current.forEach((n) => {
         if (!set.has(n.id)) return
@@ -6275,7 +6230,9 @@ export function Canvas() {
    * were classified (`lib/controlRouting`); a background agent's `close` on a project the human
    * was not looking at switched their tab and applied that project's saved viewport.
    */
-  const closeStoredNodesRef = useRef<(projectId: string, ids: readonly string[]) => void>(() => {})
+  const closeStoredNodesRef = useRef<
+    (projectId: string, ids: readonly string[], opts?: { userClose?: boolean }) => void
+  >(() => {})
   /** Latest `travelToNode`, for the agent-control handler's off-canvas notice. Travel to a NODE is
    *  the user's own click on the notice's "Go there" button, not something a verb does. */
   const travelToNodeRef = useRef<(nodeId: string) => void>(() => {})
@@ -12637,9 +12594,8 @@ export function Canvas() {
                 // node array and records its closed-session / reopen-history entries against the
                 // ACTIVE project, which is somebody else's here. `closeStoredNodes` is the
                 // cross-project teardown the sessions sidebar has always used — it still ends the
-                // tmux session (remote included, resolved from the persisted index) and still
-                // frees a closed frame's children. The control ropes are left alone for the same
-                // reason: `setControlEdges` addresses the wrong project's edges.
+                // tmux session (remote included, resolved from the persisted index), frees a
+                // closed frame's children, and records the close against the stored project.
                 closeStoredNodesRef.current(offCanvas.project.id, closeIds)
                 // `--compact` plans from MEASURED sizes (lib/closeCompact.ts), which an off-screen
                 // project does not have — so it is skipped, and the reply says so.
@@ -12952,19 +12908,28 @@ export function Canvas() {
    * It is `deleteNodes` minus the things only a live canvas has. tmux sessions are keyed by node
    * id, so `transport.destroy` works for a node that was never mounted — including a REMOTE one,
    * since `runEndSession` resolves the owning SSH host from the persisted index rather than from a
-   * live client (core/remote-end.ts). What is deliberately NOT reproduced: the closed-session
-   * ledger and the ⇧⌘T reopen history, both of which `deleteNodes` records against the ACTIVE
-   * project — recording another project's close there would put the entry on the wrong canvas. The
-   * sidebar's branch has always made that trade; this is the same trade with one copy.
-   *
-   * Known residual, inherited: display ropes (`project.ropes`) that pointed at a removed node stay
-   * in the file. React Flow drops an edge with a missing endpoint on the next load, and
-   * `appendCanvasLinks` is append-only, so pruning them needs a store writer that does not exist
-   * yet. It is decoration, not data.
+   * live client (core/remote-end.ts). The closed-session ledger IS recorded, through the same
+   * `recordNodeClose` funnel `deleteNodes` uses, but keyed to THIS project and read off its saved
+   * nodes: it used to be skipped, which lost an off-screen chat's transcript pointer. The ⇧⌘T
+   * history is recorded only for a USER close (`userClose`, the sidebar): the stack is app-wide,
+   * and an agent's close pushed there would be reopened by the user's ⇧⌘T in another project.
+   * The control ropes (`project.ropes`) that touched a removed node go with it, inside
+   * `removeNodes`: on screen the close verbs drop them from the live edges, and off screen nothing
+   * else would — a load restores every persisted rope and the next save writes it back.
    */
   const closeStoredNodes = useCallback(
-    (projectId: string, ids: readonly string[]) => {
+    (projectId: string, ids: readonly string[], opts?: { userClose?: boolean }) => {
       const store = useProjects.getState()
+      // Recorded against the STORED project, before the teardown drops the live session id — the
+      // same funnel `deleteNodes` records through, over the saved nodes instead of the live ones.
+      // Only a close the USER made reaches the global ⇧⌘T stack (see `recordNodeClose`); an
+      // agent's close/retire (the default) records the "Recently closed" ledger alone.
+      const stored = store.getProject(projectId)?.nodes
+      if (stored) {
+        recordNodeClose(projectId, new Set(ids), nodeStatesToFlow(stored), Date.now(), {
+          reopenHistory: opts?.userClose === true
+        })
+      }
       for (const id of ids) {
         disposeTerminalOnUnmount(sessionForProject(projectId).id, id) // may be parked from a project switch
         transport.destroy(id)
@@ -13005,7 +12970,7 @@ export function Canvas() {
           if (projectId === activeProjectId) {
             deleteNodes([id])
           } else {
-            closeStoredNodes(projectId, [id])
+            closeStoredNodes(projectId, [id], { userClose: true })
           }
           // The session-memory panel's remote leg (see `killSessionById`): the local destroy above
           // cannot reach a HOST's tmux session unless a live client carries `sshRemote`. Runs only

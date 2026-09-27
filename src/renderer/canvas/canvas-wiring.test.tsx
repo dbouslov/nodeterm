@@ -12,7 +12,7 @@ import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { chromeObstacles, FIT_VIEW_GAP } from './fit-view'
 
-const CANVAS_SRC = fs.readFileSync(path.join(__dirname, 'Canvas.tsx'), 'utf8')
+const CANVAS_SRC = fs.readFileSync(path.join(__dirname, 'Canvas.tsx'), 'utf8').replace(/\r\n/g, '\n')
 
 /** jsdom lays nothing out, so every rect is 0×0 and `chromeObstacles`'s size filter would drop the
  *  element. Give it the measurement a real bottom-left pill cluster has. */
@@ -221,60 +221,37 @@ describe('the auto-hide preference reaches the ephemeral-card store', () => {
 })
 
 describe('deleteNodes also records persisted closed-session history', () => {
-  it('builds entries from the full pre-delete tree and the same "now" used for reopenHistory', () => {
-    expect(CANVAS_SRC).toContain('const deletedAt = Date.now()')
-    expect(CANVAS_SRC).toContain(
-      'buildClosedSessionEntries(\n          set,\n          nodesRef.current,\n          deletedAt,'
-    )
-    // The reopenHistory push reuses the SAME `deletedAt`, not a second `Date.now()` call — the
-    // two ledgers must agree on when this batch closed, not just approximately.
-    expect(CANVAS_SRC).toContain('closedAt: deletedAt')
-  })
+  // What the record DOES (both ledgers, the same closedAt, node-id correlation, the live session
+  // id) is pinned behaviourally in lib/recordNodeClose.test.ts. What is left here is the wiring
+  // only a 14,000-line component can get wrong: where the funnel is called from.
+  /** A `useCallback` body, from its declaration to the next top-level `const … = useCallback(`. */
+  const callbackBody = (name: string): string => {
+    const at = CANVAS_SRC.indexOf(`const ${name} = useCallback(`)
+    expect(at, name).toBeGreaterThan(-1)
+    const next = CANVAS_SRC.indexOf('\n  const ', at + 1)
+    return CANVAS_SRC.slice(at, next > at ? next : undefined)
+  }
 
-  it('mints entry ids with lib/uuid, never crypto.randomUUID', () => {
-    // crypto.randomUUID exists only in a SECURE context, so it is undefined in the Server Edition
-    // served over plain HTTP on a LAN. This call sits at the TOP of deleteNodes — before
-    // transport.destroy and setNodes — so a throw there makes Delete do nothing at all on that
-    // surface. The same call already broke "Add agent" once; see lib/uuid.ts.
-    // The CALL form, so the explanatory comment beside the fixed line can keep naming it.
-    expect(CANVAS_SRC).not.toContain('crypto.randomUUID(')
-    expect(CANVAS_SRC).toContain("import { uuid } from '../lib/uuid'")
-  })
-
-  it('correlates each minted entry id back to its source node, so the two ledgers can consume each other', () => {
-    // The bug this pins: correlating the ⇧⌘T snapshot and its persisted twin by ARRAY POSITION
-    // (two independently-filtered lists happening to line up) instead of by node id would silently
-    // misalign the moment either filter changed.
-    expect(CANVAS_SRC).toContain('const closedSessionIdByNode = new Map<string, string>()')
-    expect(CANVAS_SRC).toContain('closedSessionIdByNode.set(nodeId, id)')
-    expect(CANVAS_SRC).toContain('closedSessionId: closedSessionIdByNode.get(n.id)')
-  })
-
-  it('captures the live agent session id BEFORE the agent-status entry is dropped', () => {
+  it('records through the shared funnel BEFORE the agent-status entry is dropped', () => {
     // Issue #531: the live session id is the only pointer to a closed node's transcript, and it
-    // lives nowhere but the transient agent-status store — which this same delete clears. Read it
-    // out of order and the ledger records `undefined`, and the conversation becomes unreachable
-    // with nothing on screen saying so.
-    const build = CANVAS_SRC.indexOf('buildClosedSessionEntries(')
-    expect(build).toBeGreaterThan(0)
-    const capture = CANVAS_SRC.indexOf('useAgentStatus.getState().byId[nodeId]?.sessionId', build)
-    expect(capture).toBeGreaterThan(build)
-    const clear = CANVAS_SRC.indexOf('useAgentStatus.getState().clear', build)
-    // A clear inside deleteNodes must come after the capture (or not exist at all).
-    if (clear !== -1) expect(clear).toBeGreaterThan(capture)
+    // lives nowhere but the transient agent-status store — which this same delete clears.
+    const body = callbackBody('deleteNodes')
+    const record = body.indexOf('recordNodeClose(')
+    expect(record).toBeGreaterThan(0)
+    expect(body.indexOf('useAgentStatus.getState().remove(')).toBeGreaterThan(record)
   })
 
-  it('records into the store only when entries were actually built', () => {
-    expect(CANVAS_SRC).toContain('if (closedEntries.length) {')
-    expect(CANVAS_SRC).toContain('.recordClosedSessions(')
+  it('never calls crypto.randomUUID (the id minting itself lives in lib/recordNodeClose)', () => {
+    // crypto.randomUUID exists only in a SECURE context, so it is undefined in the Server Edition
+    // served over plain HTTP on a LAN. That the funnel still mints an id there is pinned by
+    // behaviour in lib/recordNodeClose.test.ts; this only keeps a new call out of Canvas.
+    // The CALL form, so an explanatory comment can keep naming it.
+    expect(CANVAS_SRC).not.toContain('crypto.randomUUID(')
   })
 
-  it('sits inside the same `opts?.record !== false` guard as the reopenHistory push', () => {
-    // The bug this pins: recording closed-session history OUTSIDE the guard would enter it for
-    // the account-removal cleanup delete too, which reopenHistory deliberately excludes.
-    // The guard block is extracted up to its ACTUAL matching closing brace (brace-depth
-    // counting) rather than a fixed-length slice, so this test would actually fail if a future
-    // edit moved the recording call to just past the guard's real end.
+  it('sits inside the `opts?.record !== false` guard', () => {
+    // Recording OUTSIDE the guard would enter the account-removal cleanup delete too, which both
+    // ledgers deliberately exclude. The guard block is extracted up to its matching brace.
     const guardStart = CANVAS_SRC.indexOf('if (opts?.record !== false) {')
     const braceStart = CANVAS_SRC.indexOf('{', guardStart)
     let depth = 0
@@ -286,9 +263,28 @@ describe('deleteNodes also records persisted closed-session history', () => {
         if (depth === 0) break
       }
     }
-    const guardBlock = CANVAS_SRC.slice(braceStart, i + 1)
-    expect(guardBlock).toContain('useReopenHistory.getState().push(')
-    expect(guardBlock).toContain('buildClosedSessionEntries(')
+    expect(CANVAS_SRC.slice(braceStart, i + 1)).toContain('recordNodeClose(')
+  })
+
+  it('the off-screen close records through the same funnel, before its teardown', () => {
+    // It used to record nothing: a chat closed while its project was off screen lost its
+    // "Recently closed" row, its transcript pointer and its ⇧⌘T reopen.
+    const body = callbackBody('closeStoredNodes')
+    const record = body.indexOf('recordNodeClose(projectId,')
+    expect(record).toBeGreaterThan(0)
+    expect(body.indexOf('useAgentStatus.getState().remove(')).toBeGreaterThan(record)
+  })
+
+  it('only the USER close reaches the global ⇧⌘T stack; the agent close/retire verbs do not', () => {
+    // The stack is app-wide: an agent's off-screen close pushed there is what the user's ⇧⌘T in
+    // another project would reopen, switching their tab. The flag defaults off, so the verbs'
+    // calls must not pass it and the sidebar's must.
+    const body = callbackBody('closeStoredNodes')
+    expect(body).toContain('reopenHistory: opts?.userClose === true')
+    expect(callbackBody('closeSession')).toContain('closeStoredNodes(projectId, [id], { userClose: true })')
+    const agentCalls = CANVAS_SRC.match(/closeStoredNodesRef\.current\([^)]*\)/g) ?? []
+    expect(agentCalls.length).toBeGreaterThanOrEqual(2) // the off-canvas `close` and `retire`
+    for (const call of agentCalls) expect(call).not.toContain('userClose')
   })
 })
 
