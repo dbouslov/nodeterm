@@ -170,6 +170,7 @@ import { isHidden } from '../lib/ui-visibility'
 import { readsClaudeTranscript } from '../lib/transcriptGates'
 import { liveProjectJumpTarget } from '../lib/projectJump'
 import { pushSessionRename } from '../lib/sessionRename'
+import { markAgentEnded } from '../lib/agentHookSeen'
 import { useSettings } from '../state/settings'
 import { useCodexIdentity, codexSharedIdentity, codexFallbackText } from '../state/codexIdentity'
 import { codexApprovalCaps } from '../state/codexCli'
@@ -3517,6 +3518,9 @@ export function TerminalNode({
         //    wake path, which (rightly) refuses a pane it cannot see a shell in.
         //  - a real warm attach: the shell we exited to is still sitting in the pane, by design.
         //    Nothing auto-resumes here and the wake path owns the relaunch. That is the feature.
+        // A new tmux session holds no CLI that has proven it reads input: whatever launches in it
+        // must report a hook event before a typed `/rename` goes in (issue #39, lib/agentHookSeen).
+        if (coldStart) markAgentEnded(id)
         if (coldStart && useAgentStatus.getState().byId[id]?.hibernated) {
           useAgentStatus.getState().setHibernated(id, false)
         }

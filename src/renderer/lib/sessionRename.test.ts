@@ -2,9 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   RENAME_PUSH_ATTEMPTS,
   RENAME_READY_ATTEMPTS,
+  RENAME_READY_SESSION_AGE_S,
   pushSessionRename,
   renameCommand,
-  sessionNameUnchanged
+  sessionNameUnchanged,
+  type RenamePushIo
 } from './sessionRename'
 
 const io = (panes: (string | null)[] | (() => Promise<string | null>)) => {
@@ -19,7 +21,7 @@ const io = (panes: (string | null)[] | (() => Promise<string | null>)) => {
     },
     // The agent has already reported in (SessionStart) — the pane-ownership tests below are
     // about the SHELL gate, not the readiness one, which has its own describe further down.
-    hookSeen: () => true,
+    readiness: () => 'live' as const,
     sleep: async () => {}
   }
 }
@@ -89,69 +91,123 @@ describe('pushSessionRename', () => {
  * So the rename waits for the agent's first hook event, bounded, and falls back to sending anyway.
  */
 describe('pushSessionRename: waits for the agent to report in before typing', () => {
+  const base = (over: Partial<RenamePushIo> & { sent?: string[] } = {}) => {
+    const sent = over.sent ?? []
+    return {
+      sent,
+      io: {
+        paneCommand: async () => '2.1.283',
+        sendText: async (_k: string, t: string) => (sent.push(t), true),
+        sleep: async () => {},
+        ...over
+      } as RenamePushIo
+    }
+  }
+
   it('does NOT write while the CLI owns the pane but has not reported a hook event yet', async () => {
     const order: string[] = []
     let probes = 0
-    const res = await pushSessionRename(
-      {
-        paneCommand: async () => '2.1.283',
-        hookSeen: () => {
-          probes++
-          const seen = probes > 3
-          order.push(seen ? 'ready' : 'not-ready')
-          return seen
-        },
-        sendText: async (_k, t) => {
-          order.push(`send ${t}`)
-          return true
-        },
-        sleep: async () => {}
+    const { io } = base({
+      readiness: () => {
+        probes++
+        const r = probes > 3 ? 'live' : 'ended'
+        order.push(r)
+        return r
       },
-      'n1',
-      'Early name',
-      'Claude Code'
-    )
-    expect(res).toBe(true)
-    expect(order).toEqual(['not-ready', 'not-ready', 'not-ready', 'ready', 'send /rename Early name'])
+      sendText: async (_k, t) => (order.push(`send ${t}`), true)
+    })
+    await expect(pushSessionRename(io, 'n1', 'Early name', 'Claude Code')).resolves.toBe(true)
+    expect(order).toEqual(['ended', 'ended', 'ended', 'live', 'send /rename Early name'])
   })
 
   it('falls back to sending after a bounded wait when no hook event ever arrives, and says so', async () => {
-    // An agent running since before this app run (a warm reattach after a restart) reports
-    // nothing until its next turn; the rename is still owed, so the wait is bounded.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const hookSeen = vi.fn(() => false)
-    const sent: string[] = []
-    const res = await pushSessionRename(
-      {
-        paneCommand: async () => 'claude',
-        hookSeen,
-        sendText: async (_k, t) => {
-          sent.push(t)
-          return true
-        },
-        sleep: async () => {}
-      },
-      'n1',
-      'Late name',
-      'Claude Code'
-    )
-    expect(res).toBe(true)
+    const readiness = vi.fn(() => 'ended' as const)
+    const { io, sent } = base({ paneCommand: async () => 'claude', readiness })
+    await expect(pushSessionRename(io, 'n1', 'Late name', 'Claude Code')).resolves.toBe(true)
     expect(sent).toEqual(['/rename Late name'])
-    expect(hookSeen).toHaveBeenCalledTimes(RENAME_READY_ATTEMPTS)
+    expect(readiness).toHaveBeenCalledTimes(RENAME_READY_ATTEMPTS)
     expect(warn).toHaveBeenCalledTimes(1)
     warn.mockRestore()
   })
 
-  it('never waits for readiness while a shell still owns the pane — the shell gate comes first', async () => {
-    const hookSeen = vi.fn(() => true)
-    const sent: string[] = []
-    await pushSessionRename(
-      { paneCommand: async () => 'zsh', hookSeen, sendText: async (_k, t) => (sent.push(t), true), sleep: async () => {} },
-      'n1',
-      'x',
-      'was'
-    )
+  it('never writes into a SHELL, even once the ready budget is spent — the CLI exited mid-wait (#569)', async () => {
+    // Review finding: the shell gate used to be checked once, then the wait, then the send. A CLI
+    // that exits during the wait left `/rename …` + Enter to be typed at a bare shell prompt.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let probe = 0
+    const { io, sent } = base({
+      paneCommand: async () => (++probe <= 2 ? 'claude' : 'zsh'),
+      readiness: () => 'ended'
+    })
+    await expect(pushSessionRename(io, 'n1', 'x', 'was')).resolves.toBe(false)
     expect(sent).toEqual([])
+    warn.mockRestore()
+  })
+
+  it('an OLD session nobody has heard from this run (warm agent after a restart) is ready at once', async () => {
+    const { io, sent } = base({ readiness: () => 'unknown', sessionAge: async () => 3600 })
+    const readiness = vi.spyOn(io, 'readiness' as never)
+    await expect(pushSessionRename(io, 'n1', 'Warm', 'was')).resolves.toBe(true)
+    expect(sent).toEqual(['/rename Warm'])
+    expect(readiness).toHaveBeenCalledTimes(1)
+  })
+
+  it('a YOUNG unknown session (a background start seconds ago) still waits for its hook', async () => {
+    let calls = 0
+    const { io, sent } = base({
+      readiness: () => (++calls > 2 ? 'live' : 'unknown'),
+      sessionAge: async () => RENAME_READY_SESSION_AGE_S - 8
+    })
+    await pushSessionRename(io, 'n1', 'Young', 'was')
+    expect(calls).toBe(3)
+    expect(sent).toEqual(['/rename Young'])
+  })
+
+  it('an ENDED CLI never takes the age shortcut: the old session holds a CLI that just relaunched', async () => {
+    let calls = 0
+    const sessionAge = vi.fn(async () => 3600)
+    const { io } = base({ readiness: () => (++calls > 2 ? 'live' : 'ended'), sessionAge })
+    await pushSessionRename(io, 'n1', 'x', 'was')
+    expect(calls).toBe(3)
+    expect(sessionAge).not.toHaveBeenCalled()
+  })
+
+  it('never waits for readiness while a shell still owns the pane — the shell gate comes first', async () => {
+    const { io, sent } = base({ paneCommand: async () => 'zsh', readiness: () => 'live' })
+    await expect(pushSessionRename(io, 'n1', 'x', 'was')).resolves.toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it('one rename in flight per node: the LATEST name wins, a superseded one is dropped', async () => {
+    let live = false
+    const sent: string[] = []
+    const gate: (() => void)[] = []
+    const io: RenamePushIo = {
+      paneCommand: async () => 'claude',
+      readiness: () => (live ? 'live' : 'ended'),
+      sendText: async (_k, t) => (sent.push(t), true),
+      sleep: () => new Promise<void>((r) => gate.push(r))
+    }
+    const first = pushSessionRename(io, 'n1', 'First', 'was')
+    const second = pushSessionRename(io, 'n1', 'Second', 'was')
+    live = true
+    while (gate.length) gate.shift()!()
+    await expect(first).resolves.toBe(false)
+    await expect(second).resolves.toBe(true)
+    expect(sent).toEqual(['/rename Second'])
+  })
+
+  it('renames of DIFFERENT nodes do not supersede each other', async () => {
+    const sent: string[] = []
+    const io: RenamePushIo = {
+      paneCommand: async () => 'claude',
+      readiness: () => 'live',
+      sendText: async (k, t) => (sent.push(`${k} ${t}`), true),
+      sleep: async () => {}
+    }
+    await Promise.all([pushSessionRename(io, 'a', 'A', 'x'), pushSessionRename(io, 'b', 'B', 'x')])
+    expect(sent.sort()).toEqual(['a /rename A', 'b /rename B'])
   })
 })
 

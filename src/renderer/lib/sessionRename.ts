@@ -4,7 +4,7 @@
 // not a nicety. Lives outside Canvas.tsx for that reason alone.
 import { isShellCommand } from '../terminal/agent-restart'
 import { oneLine } from '@shared/one-line'
-import { agentHookSeen } from './agentHookSeen'
+import { agentReadiness, type AgentReadiness } from './agentHookSeen'
 
 /** How long to wait for an agent CLI to take its pane before giving up on the mirror. */
 export const RENAME_PUSH_ATTEMPTS = 12
@@ -12,10 +12,15 @@ export const RENAME_PUSH_RETRY_MS = 500
 /**
  * How long, once the CLI owns the pane, to wait for it to report a hook event (its TUI is taking
  * input) before sending anyway. 10 s: SessionStart measured at +1.4-2.0 s after launch, and MCP
- * servers can slow a start well past that. The fallback exists for a CLI that has been running
- * since before this app run — it reports nothing until its next turn, and its rename is still owed.
+ * servers can slow a start well past that.
  */
 export const RENAME_READY_ATTEMPTS = 20
+/**
+ * A tmux session at least this old whose CLI we have heard nothing about THIS run (readiness
+ * `unknown`) was launched before the app came up — a warm agent after a restart. It is long past
+ * its startup, so it is ready; a young one (a #38 background start seconds ago) is not.
+ */
+export const RENAME_READY_SESSION_AGE_S = 10
 
 /**
  * The one place the `/rename` line is composed — SECURITY, not tidiness.
@@ -55,8 +60,10 @@ export function sessionNameUnchanged(next: string, current: string): boolean {
 export interface RenamePushIo {
   paneCommand(persistKey: string): Promise<string | null>
   sendText(persistKey: string, text: string): Promise<boolean>
-  /** Has this node's agent reported a hook event this run? Defaults to the live registry. */
-  hookSeen?(persistKey: string): boolean
+  /** What this run knows about the node's CLI taking input. Defaults to the live registry. */
+  readiness?(persistKey: string): AgentReadiness
+  /** The tmux session's age in seconds (`PtyApi.sessionAge`); null = could not tell. */
+  sessionAge?(persistKey: string): Promise<number | null>
   /** Injected so tests don't wait in real time. */
   sleep?(ms: number): Promise<void>
 }
@@ -93,37 +100,62 @@ export async function pushSessionRename(
   current: string
 ): Promise<boolean> {
   if (sessionNameUnchanged(name, current)) return false
-  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
-  for (let i = 0; i < RENAME_PUSH_ATTEMPTS; i++) {
-    if (i > 0) await sleep(RENAME_PUSH_RETRY_MS)
-    const pane = await io.paneCommand(nodeId).catch(() => null)
-    if (pane && !isShellCommand(pane)) {
-      await waitForAgentReady(io, nodeId, sleep)
-      void io.sendText(nodeId, renameCommand(name))
-      return true
-    }
+  // One rename in flight per node, and the LATEST name wins: two renames inside the wait would
+  // otherwise both land, the stale one last as often as not.
+  const ticket = (inFlight.get(nodeId) ?? 0) + 1
+  inFlight.set(nodeId, ticket)
+  try {
+    return await pushWhenReady(io, nodeId, name, () => inFlight.get(nodeId) !== ticket)
+  } finally {
+    if (inFlight.get(nodeId) === ticket) inFlight.delete(nodeId)
   }
-  return false
 }
 
+const inFlight = new Map<string, number>()
+
 /**
- * The CLI owns the pane — now wait until it can READ (issue #39). A non-shell pane owner is not a
- * live input box: Claude Code drops what arrives in the moments before its SessionStart hook, so a
- * rename sent the instant an orchestrator opens and names a node vanished without a trace. Its
- * first hook event is the proof; bounded, then send anyway and say so, because a CLI that started
- * before this app run reports nothing until its next turn.
+ * Probe the pane EVERY tick, and send only when a non-shell owns it AND the CLI can read (issue
+ * #39): Claude Code drops what arrives in the moments before its SessionStart hook, so "a non-shell
+ * owns the pane" is not enough. Ready = a hook event this run, or — when this run knows nothing
+ * about the CLI — a session old enough to be past its startup. The ready wait is bounded; once it
+ * is spent the line goes anyway (say so), but still only into a non-shell pane: re-probing each
+ * tick is what stops a CLI that exits during the wait from taking the line into its shell (#569).
  */
-async function waitForAgentReady(
+async function pushWhenReady(
   io: RenamePushIo,
   nodeId: string,
-  sleep: (ms: number) => Promise<void>
-): Promise<void> {
-  const seen = io.hookSeen ?? agentHookSeen
-  for (let i = 0; i < RENAME_READY_ATTEMPTS; i++) {
+  name: string,
+  superseded: () => boolean
+): Promise<boolean> {
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const readiness = io.readiness ?? agentReadiness
+  let ownedTicks = 0
+  let oldSession: boolean | undefined
+  for (let i = 0; i < RENAME_PUSH_ATTEMPTS + RENAME_READY_ATTEMPTS; i++) {
     if (i > 0) await sleep(RENAME_PUSH_RETRY_MS)
-    if (seen(nodeId)) return
+    if (superseded()) return false
+    const pane = await io.paneCommand(nodeId).catch(() => null)
+    if (!pane || isShellCommand(pane)) {
+      if (ownedTicks === 0 && i >= RENAME_PUSH_ATTEMPTS - 1) return false
+      continue
+    }
+    ownedTicks++
+    const known = readiness(nodeId)
+    if (known === 'unknown' && oldSession === undefined && io.sessionAge) {
+      const age = await io.sessionAge(nodeId).catch(() => null)
+      oldSession = age !== null && age >= RENAME_READY_SESSION_AGE_S
+    }
+    const ready = known === 'live' || (known === 'unknown' && oldSession === true)
+    const spent = ownedTicks >= RENAME_READY_ATTEMPTS
+    if (!ready && !spent) continue
+    if (superseded()) return false
+    if (!ready) {
+      console.warn(
+        `[rename] ${nodeId}: no hook event from the agent after ${(RENAME_READY_ATTEMPTS * RENAME_PUSH_RETRY_MS) / 1000}s — sending /rename anyway`
+      )
+    }
+    void io.sendText(nodeId, renameCommand(name))
+    return true
   }
-  console.warn(
-    `[rename] ${nodeId}: no hook event from the agent after ${(RENAME_READY_ATTEMPTS * RENAME_PUSH_RETRY_MS) / 1000}s — sending /rename anyway`
-  )
+  return false
 }

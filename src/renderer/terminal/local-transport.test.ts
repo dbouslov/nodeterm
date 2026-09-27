@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { NodeTerminalApi } from '@shared/types'
 import { LocalTransport } from './local-transport'
+import { agentReadiness, markAgentHookSeen } from '../lib/agentHookSeen'
 
 describe('LocalTransport injected api', () => {
   it('delegates to the injected api, not the global', () => {
@@ -57,5 +58,16 @@ describe('LocalTransport co-attach members', () => {
     expect(unsubSize).toHaveBeenCalledTimes(1)
     expect(unsubClosed).toHaveBeenCalledTimes(1)
     expect(unsubResync).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('LocalTransport.recycle — the replaced session holds a CLI that has not proven itself (#39)', () => {
+  it('marks the node ended, so a typed /rename waits for the next CLI to report in', () => {
+    const recycle = vi.fn()
+    const t = new LocalTransport({ pty: { recycle } } as unknown as NodeTerminalApi)
+    markAgentHookSeen('rk')
+    t.recycle('rk')
+    expect(recycle).toHaveBeenCalledWith('rk')
+    expect(agentReadiness('rk')).toBe('ended')
   })
 })

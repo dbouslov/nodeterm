@@ -1,6 +1,7 @@
 import type { NodeTerminalApi, PtyCreateOptions, PtyCreateResult, RecycledInfo } from '@shared/types'
 import type { ClientId } from '@shared/presence'
 import type { TerminalTransport } from './transport'
+import { markAgentEnded } from '../lib/agentHookSeen'
 
 /**
  * Local transport: binds a core's api (`api.pty`) to the TerminalTransport interface.
@@ -62,6 +63,9 @@ export class LocalTransport implements TerminalTransport {
   }
 
   recycle(persistKey: string): void {
+    // The session is replaced, and so is whatever CLI it held: a typed `/rename` must wait for
+    // the next one to report in (issue #39, lib/agentHookSeen).
+    markAgentEnded(persistKey)
     this.pty.recycle(persistKey)
   }
 
