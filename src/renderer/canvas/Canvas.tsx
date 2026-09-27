@@ -12956,11 +12956,9 @@ export function Canvas() {
    * recorded, through the same `recordNodeClose` funnel `deleteNodes` uses, but keyed to THIS
    * project and read off its saved nodes: they used to be skipped (`deleteNodes` records against
    * the ACTIVE project), which lost an off-screen chat's transcript pointer and its reopen.
-   *
-   * Known residual, inherited: display ropes (`project.ropes`) that pointed at a removed node stay
-   * in the file. React Flow drops an edge with a missing endpoint on the next load, and
-   * `appendCanvasLinks` is append-only, so pruning them needs a store writer that does not exist
-   * yet. It is decoration, not data.
+   * The control ropes (`project.ropes`) that touched a removed node go with it, inside
+   * `removeNodes`: on screen the close verbs drop them from the live edges, and off screen nothing
+   * else would — a load restores every persisted rope and the next save writes it back.
    */
   const closeStoredNodes = useCallback(
     (projectId: string, ids: readonly string[]) => {
