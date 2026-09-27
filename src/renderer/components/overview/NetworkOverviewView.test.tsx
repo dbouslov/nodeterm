@@ -170,11 +170,10 @@ describe('NetworkOverviewView', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  // Spec §3: fitView on mount AND on project change. React Flow's `fitView` prop fits once per
-  // mount, so a project switch under an open overview kept the previous project's framing. jsdom
-  // cannot measure nodes, so no fit is observable here: the switch must bring a fresh React Flow
-  // (which fits on mount), and a same-project update must not (it would reset the user's pan and
-  // zoom on every status event).
+  // Spec §3: frame on mount AND on project change. jsdom has no pane size, so no framing is
+  // observable here (fitOverviewViewport is tested in lib/overviewPack.test.ts): the switch must
+  // bring a fresh React Flow (a fresh camera, framed on mount), and a same-project update must not
+  // (it would reset the user's pan and zoom on every status event).
   it('gives the graph a fresh React Flow, so a fresh fit, only when the project changes', () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

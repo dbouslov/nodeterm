@@ -36,7 +36,12 @@ export const OverviewNode = memo(function OverviewNode({ id, data }: OverviewNod
         {data.findingCount > 0 && <span className="ov-node__count">{data.findingCount}</span>}
       </div>
       <div className={`ov-node__role${data.role ? '' : ' ov-node__role--none'}`}>{data.role ?? 'no role'}</div>
-      {data.textPreview && <pre className="ov-node__text">{data.textPreview}</pre>}
+      {data.recommend && (
+        <div className="ov-node__recommend" title={data.recommend}>
+          ↳ {data.recommend}
+        </div>
+      )}
+      {!data.recommend && data.textPreview && <pre className="ov-node__text">{data.textPreview}</pre>}
       {(data.statusLabel || data.chips.length > 0) && (
         <div className="ov-node__chips">
           {data.statusLabel && (
