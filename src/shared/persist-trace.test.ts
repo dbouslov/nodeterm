@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  PERSIST_TRACE_KEYS_MAX,
   PERSIST_TRACE_LIST_MAX,
   PERSIST_TRACE_STRING_MAX,
   formatPersistLine,
@@ -70,5 +71,24 @@ describe('trace fields are ids, flags and sizes only', () => {
 
   it('drops keys that are not plain identifiers', () => {
     expect(sanitizeTraceFields({ 'a b': 1, _hidden: 2, ok: 3 })).toEqual({ ok: 3 })
+  })
+
+  // PR #18 review: every value was capped but the NUMBER of keys was not, so one console line
+  // with thousands of keys became a line of that size in the file.
+  it('keeps at most PERSIST_TRACE_KEYS_MAX keys, the first ones in order', () => {
+    const many = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, i]))
+    const out = sanitizeTraceFields(many)
+    expect(Object.keys(out)).toEqual(
+      Array.from({ length: PERSIST_TRACE_KEYS_MAX }, (_, i) => `k${i}`)
+    )
+    // The widest real line (a renderer save: via, active, onScreen, sentNodes, liveNodes, loading,
+    // cleared, code) fits with room to spare.
+    expect(PERSIST_TRACE_KEYS_MAX).toBeGreaterThanOrEqual(16)
+  })
+
+  it('a dropped key does not use up the key budget', () => {
+    const fields: Record<string, unknown> = { 'bad key': 1, obj: {} }
+    for (let i = 0; i < PERSIST_TRACE_KEYS_MAX; i++) fields[`k${i}`] = i
+    expect(Object.keys(sanitizeTraceFields(fields))).toHaveLength(PERSIST_TRACE_KEYS_MAX)
   })
 })
