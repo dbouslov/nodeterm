@@ -298,6 +298,7 @@ import {
 } from '../lib/livePlacement'
 import { rankUnits, restructureNodes, type RestructureLayout } from '../lib/restructure'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
+import { requestStickyFit } from '../lib/stickyFit'
 import { applyAnnotation, normalizeNodeAnnotation, parseAnnotateArgs } from '@shared/node-annotation'
 import { annotateNodes, annotateReply } from '../lib/annotateNodes'
 import {
@@ -565,7 +566,8 @@ import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTag
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
-import { reflow, resizesEnded, settle } from '../lib/reflow'
+import { nodeRect, reflow, resizesEnded, settle } from '../lib/reflow'
+import { commonChatSize, frameChatSize, parseChatSize, resizeChats, withChatSize } from '../lib/chatSize'
 import { snapResizeChanges } from '../lib/resizeSnap'
 import { canClearDirty, canCreateOnCanvas, commitSkipReason } from '../state/persistGuards'
 import { tracePersist, traceErrorCode } from '../lib/persistTrace'
@@ -10357,6 +10359,15 @@ export function Canvas() {
                 reply({ ok: false, error: `sticky: no node with id ${resolved.id}` })
                 return
               }
+              // Fitting measures the rendered note, and this project is not on screen: `--fit`
+              // alone is refused by name, and a write keeps the note's size, as it always did.
+              if (parsed.write.text === undefined && parsed.write.append === undefined) {
+                reply({
+                  ok: false,
+                  error: `sticky: --fit needs the note's project on screen (it measures the rendered text); nothing was changed`
+                })
+                return
+              }
               const next = applyStickyWrite(target.text ?? '', parsed.write)
               if ('error' in next) {
                 reply({ ok: false, error: `sticky: ${next.error}` })
@@ -11187,9 +11198,11 @@ export function Canvas() {
             w: (nd.measured?.width as number | undefined) ?? (nd.width as number | undefined) ?? 600,
             h: (nd.measured?.height as number | undefined) ?? (nd.height as number | undefined) ?? 400
           }))
+        // A chat joining a frame that holds chats takes their common size (lib/chatSize).
+        const common = frameChatSize(nodesRef.current as CanvasNode[], groupId)
         const ids: string[] = []
         for (let i = 0; i < count; i++) {
-          const node = make(i)
+          const node = withChatSize(make(i), common)
           const size = { w: (node.width as number) ?? 600, h: (node.height as number) ?? 400 }
           const slot = placeInFrame(kids, size)
           kids.push({ ...slot, ...size })
@@ -11666,6 +11679,11 @@ export function Canvas() {
             // The destination: each moved node settles in (the children it landed on move out of its
             // way) and the frame chain hugs it, each frame that grew moving its neighbours over, up
             // to the top level (lib/reflow).
+            // A chat joining a frame that holds chats takes their common size first (lib/chatSize).
+            if (targetGroup) {
+              const common = frameChatSize(next, targetGroup, moved)
+              if (common) next = resizeChats(next, moved, common)
+            }
             if (targetGroup) for (const id of moved) next = settle(next, id, snapGridNow())
             // The source frame(s) the nodes LEFT may now be the wrong size — hug whatever each still
             // holds so no oversized box is left behind.
@@ -11708,12 +11726,30 @@ export function Canvas() {
             }
             const layout = (['grid', 'row', 'column'] as const).find((l) => l === args.layout) ?? 'grid'
             const cols = args.cols ? parseInt(args.cols, 10) || undefined : undefined
+            // One chat size per frame (lib/chatSize): `--size WxH`, else — for a frame's children —
+            // the most common expanded chat size among them. Top-level arranges keep their sizes.
+            const askedSize = verb === 'arrange' ? parseChatSize(args.size) : null
+            if (askedSize && 'error' in askedSize) {
+              reply({ ok: false, error: `arrange: ${askedSize.error}` })
+              return
+            }
+            const chatSize = askedSize ?? (verb === 'arrange' && container ? commonChatSize(live, ids) : null)
+            const sizedLive = chatSize ? resizeChats(live, ids, chatSize) : live
             let next = verb === 'arrange'
-              ? arrangeNodes(live, ids, { layout, cols, order: 'given' }) // --nodes order, not array order
+              ? arrangeNodes(sizedLive, ids, { layout, cols, order: 'given' }) // --nodes order, not array order
               : alignNodes(live, ids, edge!)
             // Tidying a frame's children usually leaves the frame oversized (it was sized to their
-            // old scattered spots) — shrink it to hug the new layout. Top-level sets have no frame.
-            if (container) next = fitGroupToChildren(next, container, snapGridNow())
+            // old scattered spots) — shrink it to hug the new layout, then let its neighbours and
+            // the frames above it follow (lib/reflow). Top-level sets have no frame.
+            if (container) {
+              const frameBefore = live.find((n) => n.id === container)
+              next = fitGroupToChildren(next, container, snapGridNow())
+              if (frameBefore) {
+                // The fit leaves `measured` at the old size and reflow reads it first: drop it.
+                next = next.map((n) => (n.id === container && n !== frameBefore ? { ...n, measured: undefined } : n))
+                next = reflow(next, container, nodeRect(frameBefore), snapGridNow())
+              }
+            }
             setNodes(next)
             markDirty()
             const how = verb === 'arrange' ? `as ${layout}` : `to ${edge}`
@@ -11724,7 +11760,8 @@ export function Canvas() {
             })
             const count = ids.length - pinnedIds.length
             const note = pinnedIds.length ? ` (${pinnedIds.length} pinned, left in place)` : ''
-            reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${count} node(s) ${how}${note}`, result: { count, container, pinned: pinnedIds } })
+            const sizeNote = chatSize ? `, chats sized ${chatSize.width}x${chatSize.height}` : ''
+            reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${count} node(s) ${how}${sizeNote}${note}`, result: { count, container, pinned: pinnedIds, ...(chatSize ? { chatSize } : {}) } })
             return
           }
           case 'restructure': {
@@ -12456,6 +12493,13 @@ export function Canvas() {
                 reply({ ok: false, error: `sticky: no node with id ${resolved.id}` })
                 return
               }
+              const noteName = `note "${(target.data.title as string) || 'Note'}" (${resolved.id})`
+              // `--fit yes` alone: refit to the text as it stands (lib/stickyFit), nothing written.
+              if (parsed.write.text === undefined && parsed.write.append === undefined) {
+                requestStickyFit(resolved.id)
+                reply({ ok: true, message: `${noteName}: will fit to its text` })
+                return
+              }
               // Validate against the snapshot for the REPLY, but re-apply inside the updater
               // against the freshest text: nodesRef only advances on render commit, so two
               // near-simultaneous appends validated off the same snapshot must still compose
@@ -12477,11 +12521,11 @@ export function Canvas() {
                 })
               )
               markDirty()
+              // A verb write always fits the note to its new text; it measures after it renders.
+              requestStickyFit(resolved.id)
               reply({
                 ok: true,
-                message: `note "${(target.data.title as string) || 'Note'}" (${resolved.id}): ${
-                  precheck.mode === 'append' ? 'appended' : 'replaced'
-                }`
+                message: `${noteName}: ${precheck.mode === 'append' ? 'appended' : 'replaced'}; it will fit to its text`
               })
               return
             }
@@ -12507,7 +12551,8 @@ export function Canvas() {
             node.data.textUpdatedAt = Date.now()
             node.data.textUpdatedBy = srcTitle
             const newId = addAndConnect(node)
-            reply({ ok: true, message: `created note "${node.data.title}" (${newId})` })
+            requestStickyFit(newId)
+            reply({ ok: true, message: `created note "${node.data.title}" (${newId}); it will fit to its text` })
             return
           }
           case 'annotate': {

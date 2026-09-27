@@ -14,12 +14,17 @@ export interface StickyCandidate {
 }
 
 /** The args the verb accepts. Anything else is refused by `parseStickyArgs` — see there for why. */
-const STICKY_ARG_KEYS = new Set(['node', 'text', 'append', 'create'])
+const STICKY_ARG_KEYS = new Set(['node', 'text', 'append', 'create', 'fit'])
 
 export interface StickyArgs {
   ref: string
   write: { text?: string; append?: string }
   create: boolean
+  /**
+   * `--fit yes`: size the note's height to its rendered text. Alone it refits an existing note
+   * without touching its text; the renderer measures, so it needs the note on screen.
+   */
+  fit: boolean
 }
 
 /**
@@ -49,14 +54,14 @@ export function parseStickyArgs(args: Record<string, string>): StickyArgs | { er
   if (args.text !== undefined && args.append !== undefined) {
     return { error: 'pass either --text or --append, not both' }
   }
+  const yes = (v: string | undefined): boolean => /^(yes|true|1)$/i.test(v ?? '')
+  const fit = yes(args.fit)
+  const create = yes(args.create)
   if (args.text === undefined && args.append === undefined) {
-    return { error: 'requires --text or --append' }
+    if (!fit) return { error: 'requires --text, --append or --fit yes' }
+    if (create) return { error: '--fit alone refits an existing note; --create needs --text or --append' }
   }
-  return {
-    ref,
-    write: { text: args.text, append: args.append },
-    create: /^(yes|true|1)$/i.test(args.create ?? '')
-  }
+  return { ref, write: { text: args.text, append: args.append }, create, fit }
 }
 
 export type StickyRefResult = { id: string } | { notFound: true } | { error: string }
