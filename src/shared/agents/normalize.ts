@@ -700,7 +700,12 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
     // A SUBAGENT's own teardown carries `subagentType` (see `grokRawFields`); it rides along so a
     // renderer consumer can tell the child's end from the parent's (lib/agentHookSeen).
     const subagentType = p.subagentType ?? p.subagent_type
-    return { ...base, kind: 'session', sessionPhase: 'end', ...(subagentType ? { subagentType } : {}) }
+    return {
+      ...base,
+      kind: 'session',
+      sessionPhase: 'end',
+      ...(typeof subagentType === 'string' && subagentType ? { subagentType } : {})
+    }
   }
 
   // grok's turn start. Flagged newTurn so per-turn fan-out clears once per turn, not per tool event.

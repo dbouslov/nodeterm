@@ -19,6 +19,11 @@ export const RENAME_READY_ATTEMPTS = 20
  * A tmux session at least this old whose CLI we have heard nothing about THIS run (readiness
  * `unknown`) was launched before the app came up — a warm agent after a restart. It is long past
  * its startup, so it is ready; a young one (a #38 background start seconds ago) is not.
+ *
+ * Limit: when the age cannot be read (`sessionAge` answers null — the Windows session host, an SSH
+ * session whose master is down, any error) there is no shortcut, and an `unknown` node waits the
+ * full ready budget before sending. Fail-closed on purpose: a late rename is cosmetic, a lost one
+ * is what #39 was.
  */
 export const RENAME_READY_SESSION_AGE_S = 10
 

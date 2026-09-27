@@ -4,6 +4,7 @@
 // dependency edges to draw meanwhile. Kept free of React/store imports so the satisfaction
 // matrix is unit-testable — Canvas.tsx only wraps these in an effect and a setState.
 import type { AgentState } from '@shared/agents/normalize'
+import { markAgentEnded } from './agentHookSeen'
 import { isShellCommand } from '@shared/agents/pane'
 import type { PendingLaunch } from '@shared/types'
 import { canCommitCanvas } from '../state/persistGuards'
@@ -165,6 +166,9 @@ export interface LaunchPaste {
  */
 export async function pasteIntoShell(id: string, command: string, io: LaunchPaste): Promise<boolean> {
   if (!isShellCommand(await io.paneCommand(id))) return false
+  // A CLI launch is about to go into this pane; until it reports in, a typed `/rename` waits
+  // (issue #39) — even in an old session, whose age would otherwise vouch for it.
+  markAgentEnded(id)
   return io.send(id, command)
 }
 

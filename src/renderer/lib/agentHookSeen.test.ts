@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { agentReadiness, markAgentEnded, recordAgentHookForReadiness } from './agentHookSeen'
+import type { NormalizedAgentEvent } from '@shared/agents/normalize'
+import { agentReadiness, installAgentReadiness, markAgentEnded, recordAgentHookForReadiness } from './agentHookSeen'
 
 describe('recordAgentHookForReadiness — the readiness proof a typed /rename waits on (#39)', () => {
   it('a node nobody has heard from this run is unknown', () => {
@@ -39,5 +40,34 @@ describe('recordAgentHookForReadiness — the readiness proof a typed /rename wa
   it('is per node', () => {
     recordAgentHookForReadiness({ nodeId: 'd', kind: 'session', sessionPhase: 'start' })
     expect(agentReadiness('e')).toBe('unknown')
+  })
+})
+
+describe('installAgentReadiness — the subscription Canvas installs (#39)', () => {
+  const fakeApi = () => {
+    let cb: ((e: NormalizedAgentEvent) => void) | null = null
+    return {
+      emit: (e: Partial<NormalizedAgentEvent>) => cb?.({ agentId: 'claude', ...e } as NormalizedAgentEvent),
+      api: {
+        onAgentStatus: (f: (e: NormalizedAgentEvent) => void) => {
+          cb = f
+          return () => {
+            cb = null
+          }
+        }
+      }
+    }
+  }
+
+  it('feeds every emitted event into the registry, and stops on unsubscribe', () => {
+    const f = fakeApi()
+    const off = installAgentReadiness(f.api)
+    f.emit({ nodeId: 'ia', kind: 'session', sessionPhase: 'start' })
+    expect(agentReadiness('ia')).toBe('live')
+    f.emit({ nodeId: 'ia', kind: 'session', sessionPhase: 'end' })
+    expect(agentReadiness('ia')).toBe('ended')
+    off()
+    f.emit({ nodeId: 'ia', kind: 'state' })
+    expect(agentReadiness('ia')).toBe('ended')
   })
 })

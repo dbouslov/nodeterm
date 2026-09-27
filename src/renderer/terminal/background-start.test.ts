@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { agentReadiness, markAgentHookSeen } from '../lib/agentHookSeen'
 import type { PtyCreateOptions, PtyCreateResult } from '@shared/types'
 import { startDetached } from './background-start'
 
@@ -71,5 +72,18 @@ describe('startDetached — a session with no node mounted (#38)', () => {
       throw new Error('ipc gone')
     }
     await expect(startDetached(f.transport, opts)).resolves.toBe(false)
+  })
+})
+
+describe('startDetached — marks the node ended before the held launch is typed (#39)', () => {
+  it('even when the session already existed (not fresh), whose age would otherwise vouch for it', async () => {
+    vi.useFakeTimers()
+    markAgentHookSeen('bs1')
+    const f = fakeTransport({ fresh: false })
+    const done = startDetached(f.transport, { ...opts, persistKey: 'bs1' })
+    await vi.advanceTimersByTimeAsync(2000)
+    await done
+    expect(agentReadiness('bs1')).toBe('ended')
+    vi.useRealTimers()
   })
 })

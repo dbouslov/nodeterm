@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { agentReadiness, markAgentHookSeen } from './agentHookSeen'
 import {
   canDeliverInBackground,
   deliverInBackground,
@@ -601,5 +602,25 @@ describe('mayStartInBackground — only what THIS run armed, on this machine (#3
   })
   it('never starts a launch in a relay/adopted project, even one armed this run', () => {
     expect(mayStartInBackground('n1', 'relay', new Set(['n1']), local)).toBe(false)
+  })
+})
+
+describe('pasteIntoShell — marks the node ended before the launch goes in (#39)', () => {
+  const io = (pane: string | null, onSend?: () => void) => ({
+    paneCommand: async () => pane,
+    send: async () => (onSend?.(), true)
+  })
+
+  it('a stale `live` from the previous CLI does not vouch for the one being launched', async () => {
+    markAgentHookSeen('pl1')
+    let atSend: string | undefined
+    await pasteIntoShell('pl1', 'claude', io('zsh', () => (atSend = agentReadiness('pl1'))))
+    expect(atSend).toBe('ended')
+  })
+
+  it('a refused paste (no shell) changes nothing', async () => {
+    markAgentHookSeen('pl2')
+    await pasteIntoShell('pl2', 'claude', io('claude'))
+    expect(agentReadiness('pl2')).toBe('live')
   })
 })

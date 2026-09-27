@@ -31,6 +31,9 @@ describe('normalizeGrok — lifecycle', () => {
     expect(child).toMatchObject({ kind: 'session', sessionPhase: 'end', subagentType: 'explore' })
     const parent = normalizeGrok(env({ hookEventName: 'session_end', sessionId: 's1' }))
     expect(parent && 'subagentType' in parent).toBe(false)
+    // Hook payloads are foreign input: a non-string is not a type name.
+    const junk = normalizeGrok(env({ hookEventName: 'session_end', sessionId: 's1', subagentType: 7 as never }))
+    expect(junk && 'subagentType' in junk).toBe(false)
   })
 
   it('treats user_prompt_submit as the turn start (newTurn)', () => {

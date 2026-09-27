@@ -1,7 +1,7 @@
 import type { NodeTerminalApi, PtyCreateOptions, PtyCreateResult, RecycledInfo } from '@shared/types'
 import type { ClientId } from '@shared/presence'
 import type { TerminalTransport } from './transport'
-import { markAgentEnded } from '../lib/agentHookSeen'
+import { forgetAgentReadiness, markAgentEnded } from '../lib/agentHookSeen'
 
 /**
  * Local transport: binds a core's api (`api.pty`) to the TerminalTransport interface.
@@ -39,7 +39,13 @@ export class LocalTransport implements TerminalTransport {
     // Append the viewer only when this instance has one, so a PRIMARY transport's options object is
     // untouched (an explicit `viewerId: undefined` would still be PRIMARY, but keeping it absent is
     // bit-for-bit the pre-viewer create).
-    return this.pty.create(this.viewerId ? { ...options, viewerId: this.viewerId } : options)
+    const created = this.pty.create(this.viewerId ? { ...options, viewerId: this.viewerId } : options)
+    // A fresh tmux session holds no CLI that has proven it reads input (issue #39,
+    // lib/agentHookSeen). Every spawn passes here, the #38 background start included.
+    return created.then((r) => {
+      if (r.fresh && options.persistKey) markAgentEnded(options.persistKey)
+      return r
+    })
   }
 
   write(sessionId: string, data: string): void {
@@ -59,6 +65,7 @@ export class LocalTransport implements TerminalTransport {
   }
 
   destroy(persistKey: string, opts?: { everySocket?: boolean }): void {
+    forgetAgentReadiness(persistKey)
     this.pty.destroy(persistKey, opts)
   }
 

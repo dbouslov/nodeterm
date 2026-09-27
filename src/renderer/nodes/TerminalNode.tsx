@@ -3518,8 +3518,8 @@ export function TerminalNode({
         //    wake path, which (rightly) refuses a pane it cannot see a shell in.
         //  - a real warm attach: the shell we exited to is still sitting in the pane, by design.
         //    Nothing auto-resumes here and the wake path owns the relaunch. That is the feature.
-        // A new tmux session holds no CLI that has proven it reads input: whatever launches in it
-        // must report a hook event before a typed `/rename` goes in (issue #39, lib/agentHookSeen).
+        // A session found cold only by the late check above (`freshUnverified`) was not reported
+        // fresh to the transport, which marks the fresh ones itself (issue #39, lib/agentHookSeen).
         if (coldStart) markAgentEnded(id)
         if (coldStart && useAgentStatus.getState().byId[id]?.hibernated) {
           useAgentStatus.getState().setHibernated(id, false)
@@ -3936,6 +3936,7 @@ export function TerminalNode({
           // restart on its own `resumeCommand` gate — nothing is written either way.
           command,
           killLine: getTerminalKillLine(),
+          nodeId: id,
           // Session-scoped (`api`, not the global preload), like readScrollback above: a relay
           // tab's pane lives on the host, and only its own api can see it.
           paneCommand: () => api.pty.paneCommand(id),
@@ -4127,6 +4128,7 @@ export function TerminalNode({
           io: restartIo,
           command,
           killLine,
+          nodeId: id,
           isLive: restartTarget,
           onDelivery: (cancel) => {
             if (life.dead) cancel()

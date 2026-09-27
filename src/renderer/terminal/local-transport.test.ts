@@ -71,3 +71,33 @@ describe('LocalTransport.recycle — the replaced session holds a CLI that has n
     expect(agentReadiness('rk')).toBe('ended')
   })
 })
+
+describe('LocalTransport.create / destroy — readiness bookkeeping (#39)', () => {
+  const make = (fresh: boolean) => {
+    const destroy = vi.fn()
+    const t = new LocalTransport({
+      pty: { create: async () => ({ sessionId: 's', fresh }), destroy }
+    } as unknown as NodeTerminalApi)
+    return { t, destroy }
+  }
+
+  it('a FRESH create marks the node ended — a new session holds no CLI that has reported in', async () => {
+    markAgentHookSeen('lc1')
+    await make(true).t.create({ persistKey: 'lc1' } as never)
+    expect(agentReadiness('lc1')).toBe('ended')
+  })
+
+  it('a warm reattach leaves it alone', async () => {
+    markAgentHookSeen('lc2')
+    await make(false).t.create({ persistKey: 'lc2' } as never)
+    expect(agentReadiness('lc2')).toBe('live')
+  })
+
+  it('destroy forgets the node (deleted: nothing to remember)', () => {
+    markAgentHookSeen('lc3')
+    const { t, destroy } = make(false)
+    t.destroy('lc3')
+    expect(destroy).toHaveBeenCalledWith('lc3', undefined)
+    expect(agentReadiness('lc3')).toBe('unknown')
+  })
+})

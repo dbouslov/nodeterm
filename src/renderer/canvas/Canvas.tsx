@@ -507,7 +507,7 @@ import {
   type Size as BoxSize
 } from '@shared/placement'
 import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
-import { recordAgentHookForReadiness } from '../lib/agentHookSeen'
+import { installAgentReadiness } from '../lib/agentHookSeen'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
 import {
@@ -13608,6 +13608,10 @@ export function Canvas() {
     }
   }, [])
 
+  // Every hook event proves a node's CLI is up and reading input — the gate a typed `/rename`
+  // waits on (issue #39, lib/agentHookSeen). A SessionEnd withdraws it.
+  useEffect(() => installAgentReadiness(api), [api])
+
   const notifyCooldownRef = useRef<Record<string, number>>({})
   // Sound effects have their OWN cooldown: they fire whether or not the window is focused, so they
   // can't share the notification one (which only ticks in the background).
@@ -13648,9 +13652,6 @@ export function Canvas() {
     }
     return api.onAgentStatus((e: NormalizedAgentEvent) => {
       const cs = useAgentStatus.getState()
-      // Any hook event proves this node's CLI is up and reading input — the gate a typed `/rename`
-      // waits on (issue #39, lib/agentHookSeen). A SessionEnd withdraws it.
-      recordAgentHookForReadiness(e)
       if (e.sessionId) cs.setSessionId(e.nodeId, e.sessionId)
       // Which Claude account the posting session is ACTUALLY on — a hook-derived LABEL, captured
       // off any event that carries one, exactly like `sessionId` above: a plain terminal running
@@ -13825,7 +13826,9 @@ export function Canvas() {
             // that node was watching for.
             cs.setPaused(e.nodeId, false)
           }
-          if (e.sessionPhase === 'end') {
+          // A grok SUBAGENT's own session_end (it carries `subagentType`) is the child's teardown,
+          // not this node's: it must not reset the parent's state, loop or subagent cards.
+          if (e.sessionPhase === 'end' && !e.subagentType) {
             cs.setState(e.nodeId, undefined, e.agentId)
             // In-session /loop dies with its session; cron (and scheduled cloud routines)
             // keep running after it — their cards stay until CronDelete / manual dismiss.

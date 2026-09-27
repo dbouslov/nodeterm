@@ -25,7 +25,18 @@ export type AgentReadiness = 'live' | 'ended' | 'unknown'
 const state = new Map<string, 'live' | 'ended'>()
 
 /**
- * Canvas's hook listener calls this for EVERY event: any event marks the node live, a SessionEnd
+ * Subscribe the registry to a session's agent-status stream (Canvas installs it once per api).
+ * Returns the unsubscribe. Its own subscription rather than a line inside Canvas's big listener,
+ * so the wiring is tested here against a fake api instead of by reading Canvas's source.
+ */
+export function installAgentReadiness(api: {
+  onAgentStatus(cb: (e: NormalizedAgentEvent) => void): () => void
+}): () => void {
+  return api.onAgentStatus((e) => recordAgentHookForReadiness(e))
+}
+
+/**
+ * Every hook event: any event marks the node live, a SessionEnd
  * marks it ended (the CLI exited; whatever launches next in that pane has not proven itself yet).
  * A grok SUBAGENT's own session_end (it carries `subagentType`) is the child's teardown, not the
  * parent's, and changes nothing.
@@ -43,9 +54,19 @@ export function markAgentHookSeen(nodeId: string): void {
   state.set(nodeId, 'live')
 }
 
-/** The pane's CLI is gone or brand new (SessionEnd, fresh create, recycle): it must report in again. */
+/**
+ * The pane's CLI is gone or brand new — a SessionEnd, a fresh create, a recycle, or the renderer
+ * itself about to type a CLI launch into the pane (a resume, a held launch): it must report in again.
+ * Marking BEFORE the write matters for an old session, whose age would otherwise vouch for a CLI
+ * that is still starting.
+ */
 export function markAgentEnded(nodeId: string): void {
   state.set(nodeId, 'ended')
+}
+
+/** The node's session was destroyed (node deleted): nothing to remember. */
+export function forgetAgentReadiness(nodeId: string): void {
+  state.delete(nodeId)
 }
 
 export function agentReadiness(nodeId: string): AgentReadiness {
