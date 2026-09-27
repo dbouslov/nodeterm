@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -99,15 +99,25 @@ describe('BoardLogStore (local fs)', () => {
     const unsub = store.watch(dir, () => {
       hits++
     })
-    await store.append(dir, entry({ id: 'later' }))
-    await new Promise((r) => setTimeout(r, 500))
+    // macOS FSEvents goes live asynchronously after fs.watch returns and can DROP a change made
+    // in that window (measured under load: 1 in 12 appends made 0ms after watch never fired, while
+    // a later append on the same watcher did). So keep changing the log until the live watcher
+    // reports one; the retry interval stays above the 250ms debounce so the callback can land.
+    let n = 0
+    await vi.waitFor(
+      async () => {
+        if (hits === 0) await store.append(dir, entry({ id: `later-${n++}` }))
+        expect(hits).toBeGreaterThanOrEqual(1)
+      },
+      { timeout: 15_000, interval: 500 }
+    )
     unsub()
     expect(hits).toBeGreaterThanOrEqual(1)
     const after = hits
     await store.append(dir, entry({ id: 'after-unsub' }))
     await new Promise((r) => setTimeout(r, 400))
     expect(hits).toBe(after)
-  })
+  }, 30_000)
 })
 
 describe('BoardLogStore (remote exec injected)', () => {
