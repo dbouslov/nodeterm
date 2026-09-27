@@ -6,11 +6,17 @@
 // MAIN has already decided whether the caller MAY (verified, and the successor its own current-run
 // creation — `src/core/retire-verb.ts`). This decides the rest against the live canvas.
 //
+// Off screen (#41) the same plan runs on the project's SERIALIZED nodes (`planStoredRetire`): a
+// retiring orchestrator's tab is usually not the one on screen, and its saved rect, frame and
+// column are all in the persisted canvas.
+//
 // PURE, so it is testable where the 12k-line component is not — same reasoning as closeTargets.ts.
-import type { ProjectKanban } from '@shared/types'
+import type { CanvasNodeState, ProjectKanban } from '@shared/types'
 import {
   fitGroupToChildren,
+  flowToNodeStates,
   isPinned,
+  nodeStatesToFlow,
   reparentNode,
   restoreMaximizedNode,
   shrinkPinnedGroupToChildren,
@@ -87,6 +93,29 @@ export function planRetire(input: RetireInput): RetirePlan {
     else if (frame.id === successor.parentId) nodes = shrinkPinnedGroupToChildren(nodes, frame.id, grid)
   }
   return { nodes, kanban: input.kanban && inheritColumn(input.kanban, callerId, successorId) }
+}
+
+export type StoredRetirePlan =
+  | { error: string }
+  /** The nodes to write back (the caller excluded — the stored teardown removes it) and the board. */
+  | { upserts: CanvasNodeState[]; kanban: ProjectKanban | undefined }
+
+/**
+ * `planRetire` for a project that is NOT on screen: the same decisions over its serialized nodes.
+ * They are hydrated with `nodeStatesToFlow` (what a project load uses), so each node carries its
+ * saved size; there is no `measured` because nothing rendered it, so frames are refit from saved
+ * sizes rather than rendered ones. Only nodes the swap actually replaced are returned, so nothing
+ * else in the project is round-tripped through the serializers.
+ */
+export function planStoredRetire(
+  input: Omit<RetireInput, 'live'> & { stored: CanvasNodeState[] }
+): StoredRetirePlan {
+  const live = nodeStatesToFlow(input.stored)
+  const plan = planRetire({ ...input, live })
+  if ('error' in plan) return plan
+  const before = new Set(live)
+  const changed = plan.nodes.filter((n) => n.id !== input.callerId && !before.has(n))
+  return { upserts: flowToNodeStates(changed), kanban: plan.kanban }
 }
 
 /** The successor takes the caller's board slot: its column (Ungrouped included) and its place in it. */

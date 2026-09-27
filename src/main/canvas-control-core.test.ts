@@ -879,6 +879,13 @@ describe('retire verb', () => {
       expect(entry).toMatch(/no confirm/i)
       expect(entry).toMatch(/reply[\s\S]*before/i)
       expect(entry).toMatch(/Server Edition/)
+      // #41: answered off screen, from the saved canvas — and it says what differs there.
+      expect(entry).toMatch(/off screen too/i)
+      expect(entry).toMatch(/saved sizes/i)
+      const answered = body.split('\n').find((l) => l.includes('Answered whether or not that project is on screen'))
+      expect(answered, 'off-screen answered list').toMatch(/\bretire\b/)
+      const refused = body.split('\n').find((l) => l.includes('REFUSED while that project is off screen'))
+      expect(refused, 'off-screen refused list').not.toMatch(/\bretire\b/)
     }
   })
 })

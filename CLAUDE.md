@@ -2347,8 +2347,10 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   the renderer replies BEFORE `deleteNodes([caller])`. Touched frames refit as `move` refits them,
   except a pinned frame, which keeps its position and children and never grows. It shrinks back to
   hug them (`shrinkPinnedGroupToChildren`) only when the successor was already inside it; a frame
-  the successor entered from outside is left alone. Off screen it is refused like `move` (it needs
-  measured sizes; Fix #16). Server Edition: named refusal (not in `SERVER_V1_VERBS`).
+  the successor entered from outside is left alone. Off screen (#41) it is answered from the saved
+  canvas (`planStoredRetire`: the same plan over `nodeStatesToFlow`, writing back only the nodes the
+  swap replaced, then `closeStoredNodes` for the caller), so frames refit from saved sizes rather
+  than measured ones. Server Edition: named refusal (not in `SERVER_V1_VERBS`).
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim
@@ -2457,11 +2459,11 @@ still sees a station that finished before a relaunch; see Dependency edges, item
     because `cwdForNewNodeIn` subtracts `staleGroupIds`, which is epoch-scoped to the ACTIVE
     project.
   Since upstream v0.3.9 the whole table lives in `@shared/control-off-screen` (see above), and a
-  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`), is
+  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`/`retire`), is
   answered against the owning project's serialized nodes. Everything else is **REFUSED while its
   project is not on screen** (`OFF_SCREEN_REFUSALS`; fork Fix #16, 2026-09-13):
   `group`/`ungroup`/`move`/`arrange`/`align`/`verify`/`spawn-team`/`branch`/`open-worktree`/
-  `close-worktree`/`browser`, plus the fork verbs `restructure`/`minimize`/`pin`/`retire`/`snapshot`
+  `close-worktree`/`browser`, plus the fork verbs `restructure`/`minimize`/`pin`/`snapshot`
   — they read live canvas state the serialized copy does not carry (measured node sizes, worktree
   staleness, a mounted guest, the rendered picture). They used to TRAVEL there — the G5 hijack, and
   the whole of Fix #16's first symptom: an orchestrator in one project closing its stations or

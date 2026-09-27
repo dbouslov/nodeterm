@@ -205,6 +205,9 @@ export function answersOffCanvas(verb: string): boolean {
  *     the serialized node directly, with no round-trip through the serializers.
  *   - `link` writes persisted `bridges`, which `appendCanvasLinks` appends to a non-active project —
  *     the same call the cold open already makes for the rope and bridge it owes.
+ *   - `retire` hands the caller's SAVED rect, frame and column to the successor (`planStoredRetire`)
+ *     and closes the caller through `closeStoredNodes`. Frames refit from saved sizes, not
+ *     measured ones — the only difference from the on-screen path.
  *   - `board` is a read, and `assign` writes board METADATA through `setProjectKanban`. Both used
  *     to read `activeProjectId`, which off canvas was a second bug hiding behind the first: after
  *     the travel the two projects were the same, so the wrong read was never wrong in practice.
@@ -221,7 +224,12 @@ const STORED_NODE_VERBS: ReadonlySet<string> = new Set([
   'color',
   'link',
   'board',
-  'assign'
+  'assign',
+  // `retire` (#41): the caller's saved position, expanded size, parent frame and kanban column are
+  // all in the serialized canvas, and the caller's own teardown is `closeStoredNodes` — the same
+  // cross-project close `close` uses. Orchestrators rotate while their tab is off screen, which is
+  // exactly when a refusal would strand the successor wherever it was opened.
+  'retire'
 ])
 
 export function answersFromStoredNodes(verb: string): boolean {
@@ -268,7 +276,6 @@ const OFF_SCREEN_REFUSALS: Readonly<Record<string, string>> = {
   restructure: 'restructuring lays the canvas out from measured node sizes, which only a rendered canvas has',
   minimize: 'minimizing re-fits frames from measured node sizes, which only a rendered canvas has',
   pin: 'pinning edits the live canvas nodes, which only the project on screen has',
-  retire: 'retiring hands your measured rect and frame to the successor, which only a rendered canvas has',
   snapshot: 'a snapshot pictures the canvas as it is rendered on screen'
 }
 
