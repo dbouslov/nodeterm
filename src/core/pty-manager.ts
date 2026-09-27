@@ -17,7 +17,7 @@ import {
   type Settings,
   type TmuxStatus
 } from '../shared/types'
-import { bundledTmuxPath, findCommand, findFixedTmux, tmuxInstall } from './tmux-hint'
+import { bundledTmuxPath, findCommand, findFixedTmux, linkedWorktreeMainRoot, tmuxInstall } from './tmux-hint'
 import { hookServer, PERM_WAIT_SECS_DEFAULT } from './agents/hook-server'
 import {
   probeSaysAbsent,
@@ -393,6 +393,8 @@ function findTmux(resourcesPath?: string): string | null {
   return bundledTmuxPath({
     resourcesPath,
     repoRoot: process.cwd(),
+    // A linked git worktree has no build output of its own; its main checkout's artifact is next.
+    mainRepoRoot: linkedWorktreeMainRoot(process.cwd(), (p) => fs.readFileSync(p, 'utf8')),
     exists: (p) => fs.existsSync(p)
   })
 }

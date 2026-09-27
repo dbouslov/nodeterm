@@ -3,6 +3,8 @@
 // can't attach — which users never discover on their own; the banner makes it visible and offers
 // a one-click install (run in a terminal node, gh-sign-in style).
 
+import path from 'path'
+
 export interface TmuxInstallHint {
   command: string
   /** Button caption — tells the user up front when more than tmux is being installed. */
@@ -134,11 +136,14 @@ export function bundledTmuxPath(opts: {
   resourcesPath?: string | null
   /** Repo root for a dev run (process.cwd() under `electron-vite dev`). */
   repoRoot?: string | null
+  /** The main checkout when `repoRoot` is a linked git worktree (`linkedWorktreeMainRoot`). */
+  mainRepoRoot?: string | null
   exists: (path: string) => boolean
 }): string | null {
   const candidates: string[] = []
   if (opts.resourcesPath) candidates.push(`${opts.resourcesPath}/bin/tmux`)
   if (opts.repoRoot) candidates.push(`${opts.repoRoot}/resources/bin/tmux`)
+  if (opts.mainRepoRoot) candidates.push(`${opts.mainRepoRoot}/resources/bin/tmux`)
   for (const candidate of candidates) {
     try {
       if (opts.exists(candidate)) return candidate
@@ -147,6 +152,30 @@ export function bundledTmuxPath(opts: {
     }
   }
   return null
+}
+
+/**
+ * The main checkout behind a linked git worktree, or null. `resources/bin/tmux` is gitignored build
+ * output, so a fresh `git worktree add` has none and — on a machine with no system tmux — every
+ * tmux-backed dev run and test in it falls back to a plain shell; the main checkout's copy is the
+ * same artifact. Read from git's own layout, no git subprocess: a linked worktree's `.git` is a
+ * FILE (`gitdir: <common>/worktrees/<name>`) and that dir's `commondir` points back at the common
+ * `.git`, whose parent is the main checkout. A main checkout (`.git` is a directory), a bare common
+ * dir, or anything unreadable answers null. `readFile` is injected (fs.readFileSync in production).
+ */
+export function linkedWorktreeMainRoot(
+  repoRoot: string,
+  readFile: (path: string) => string
+): string | null {
+  try {
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFile(path.join(repoRoot, '.git')))
+    if (!m) return null
+    const gitDir = path.resolve(repoRoot, m[1])
+    const common = path.resolve(gitDir, readFile(path.join(gitDir, 'commondir')).trim())
+    return path.basename(common) === '.git' ? path.dirname(common) : null
+  } catch {
+    return null
+  }
 }
 
 /**
