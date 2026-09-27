@@ -530,6 +530,15 @@ describe('parseControlRequest', () => {
     }
   })
 
+  it('both agent-facing texts document one chat size per frame and `--size WxH`', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('[--size WxH]')
+      expect(body).toMatch(/most common\s+expanded\s+chat\s+size/)
+      expect(body).toMatch(/joins a frame[^.]*takes (the|that) frame's common chat\s+size/)
+      expect(body).toMatch(/Notes keep their size/)
+    }
+  })
+
   it('both agent-facing texts document that notes fit their text, `--fit yes`, and the off-screen limit', () => {
     for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
       expect(body).toContain('--fit yes')
