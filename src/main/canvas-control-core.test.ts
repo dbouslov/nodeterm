@@ -1205,6 +1205,17 @@ describe('geometry verb', () => {
       expect(body).toMatch(/sticks out of its frame/i)
     }
   })
+
+  it('both bodies say `list` and `geometry` include the cron/loop cards and who owns them (#7)', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`loop-<agentId>`')
+      expect(body).toMatch(/card of <agentId>/)
+      expect(body).toMatch(/move the agent/i)
+    }
+  })
 })
 
 describe('minimize verb', () => {

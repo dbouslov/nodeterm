@@ -26,6 +26,8 @@ export interface GeometryNode {
   collapsed: boolean
   /** It, or a frame it sits in, is pinned: layout verbs will not move it. */
   pinned: boolean
+  /** A cron/loop card (lib/loopCards): the agent node it hangs off. Absent on every other node. */
+  owner?: string
 }
 
 /** Two siblings (same container) whose rectangles intersect with positive area. `width`/`height`
@@ -104,7 +106,8 @@ export function computeGeometry(
     ...absolutePosition(nd as unknown as FocusableNode, all),
     ...renderedSize(nd),
     collapsed: nd.data.collapsed === true,
-    pinned: isPinned(nd, nodes)
+    pinned: isPinned(nd, nodes),
+    ...(typeof nd.data.ownerNodeId === 'string' ? { owner: nd.data.ownerNodeId } : {})
   }))
 
   const overlaps: SiblingOverlap[] = []

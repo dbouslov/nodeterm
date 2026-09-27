@@ -226,6 +226,8 @@ export interface ListRow {
   role?: string
   minimized?: boolean
   lastTurnErrored?: boolean
+  /** A cron/loop card (lib/loopCards): the agent node it hangs off. */
+  owner?: string
 }
 
 /** A `list` row as text: the id, kind and title, then each marker the row carries. The live
@@ -234,6 +236,7 @@ export function listRowText(row: ListRow): string {
   return (
     `${row.id} [${row.kind}] ${row.title}` +
     (row.minimized ? ' (minimized)' : '') +
+    (row.owner ? ` · card of ${row.owner}` : '') +
     (row.role ? ` · role: ${row.role}` : '') +
     (row.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
   )
