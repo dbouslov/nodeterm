@@ -9,22 +9,38 @@ const nodes = [
 ]
 
 describe('parseStickyArgs', () => {
+  it('--fit yes refits an existing note with no text, and rides along with a write', () => {
+    expect(parseStickyArgs({ node: 'n1', fit: 'yes' })).toEqual({
+      ref: 'n1',
+      write: { text: undefined, append: undefined },
+      create: false,
+      fit: true
+    })
+    expect(parseStickyArgs({ node: 'n1', text: 'x', fit: 'yes' })).toMatchObject({ fit: true, write: { text: 'x' } })
+    expect(parseStickyArgs({ node: 'n1', fit: 'no' })).toEqual({ error: 'requires --text, --append or --fit yes' })
+    expect(parseStickyArgs({ node: 'n1', fit: 'yes', create: 'yes' })).toEqual({
+      error: '--fit alone refits an existing note; --create needs --text or --append'
+    })
+  })
+
   it('accepts the two write forms, ref trimmed', () => {
     expect(parseStickyArgs({ node: ' n1 ', text: '# md' })).toEqual({
       ref: 'n1',
       write: { text: '# md', append: undefined },
-      create: false
+      create: false,
+      fit: false
     })
     expect(parseStickyArgs({ node: 'n1', append: 'line' })).toEqual({
       ref: 'n1',
       write: { text: undefined, append: 'line' },
-      create: false
+      create: false,
+      fit: false
     })
   })
 
   it('requires --node and exactly one of --text/--append; empty --text is a legal clear', () => {
     expect(parseStickyArgs({ text: 'x' })).toEqual({ error: 'requires --node <id|title>' })
-    expect(parseStickyArgs({ node: 'n1' })).toEqual({ error: 'requires --text or --append' })
+    expect(parseStickyArgs({ node: 'n1' })).toEqual({ error: 'requires --text, --append or --fit yes' })
     expect(parseStickyArgs({ node: 'n1', text: 'a', append: 'b' })).toEqual({
       error: 'pass either --text or --append, not both'
     })

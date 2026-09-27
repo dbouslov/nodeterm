@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Tooltip } from '../components/Tooltip'
 import { IconChevronDown, IconChevronRight, IconClose } from '../components/icons'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
@@ -8,6 +8,9 @@ import { NodeColorSwatches } from '../components/NodeColorSwatches'
 import { ColumnPill } from '../components/kanban/ColumnPill'
 import { NoteMarkdown } from '../components/NoteMarkdown'
 import { relativeTime } from '../lib/relativeTime'
+import { applyStickyFit, registerStickyFit, requestStickyFit, stickyFitHeight } from '../lib/stickyFit'
+import { useSettings } from '../state/settings'
+import { DEFAULT_SETTINGS } from '@shared/types'
 
 /**
  * A sticky note node: a colored, resizable card with free-text content.
@@ -47,6 +50,43 @@ export function StickyNode({ id, data, selected }: NodeProps<CanvasNode>) {
     return () => clearInterval(t)
   }, [stampAt])
 
+  // Fit to text (lib/stickyFit): a request renders a hidden copy of the body at the note's width,
+  // and after paint its height becomes the note's. The copy exists because a collapsed note's body
+  // is not rendered at all, and the live body is sized BY the note, so it cannot say what it needs.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<HTMLDivElement>(null)
+  const [fitTick, setFitTick] = useState(0)
+  useEffect(() => registerStickyFit(id, () => setFitTick((t) => t + 1)), [id])
+  useEffect(() => {
+    if (fitTick === 0) return
+    const frame = requestAnimationFrame(() => {
+      const root = rootRef.current
+      const header = headerRef.current
+      const measure = measureRef.current
+      if (!root || !header || !measure) return
+      measure.style.width = `${root.clientWidth}px`
+      const borders = root.offsetHeight - root.clientHeight
+      const height = stickyFitHeight(header.offsetHeight + measure.offsetHeight + borders)
+      setFitTick(0)
+      if (height === null) return
+      const { snapToGrid, gridSize } = useSettings.getState().settings
+      const grid = snapToGrid ? gridSize || DEFAULT_SETTINGS.gridSize : 0
+      setNodes((ns) => applyStickyFit(ns as CanvasNode[], id, height, grid))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [fitTick, id, setNodes])
+  /** The text editing started with: finishing a hand edit that changed it fits the note. */
+  const textAtEditStart = useRef('')
+  const endTextEdit = () => {
+    setEditingText(false)
+    if (((data.text as string) ?? '') !== textAtEditStart.current) requestStickyFit(id)
+  }
+  const startTextEdit = () => {
+    textAtEditStart.current = (data.text as string) ?? ''
+    setEditingText(true)
+  }
+
   const toggleCollapse = () =>
     setNodes((ns) => setCollapsed(ns, [id], !ns.find((n) => n.id === id)?.data.collapsed))
 
@@ -55,6 +95,7 @@ export function StickyNode({ id, data, selected }: NodeProps<CanvasNode>) {
     {/* Sibling of the root: .sticky-node is overflow:hidden and would clip the half-pill. */}
     <ColumnPill nodeId={id} />
     <div
+      ref={rootRef}
       className={`sticky-node${selected ? ' selected' : ''}${collapsed ? ' collapsed' : ''}`}
       style={{ background: `${data.color}22`, borderColor: data.color }}
     >
@@ -76,7 +117,7 @@ export function StickyNode({ id, data, selected }: NodeProps<CanvasNode>) {
         data-tip="Link in — drop a link here to attach this note as context"
       />
 
-      <div className="sticky-node__header" style={{ background: `${data.color}33` }}>
+      <div ref={headerRef} className="sticky-node__header" style={{ background: `${data.color}33` }}>
         <Tooltip label={collapsed ? 'Expand' : 'Collapse'}>
           <button
             className="term-node__collapse"
@@ -165,11 +206,11 @@ export function StickyNode({ id, data, selected }: NodeProps<CanvasNode>) {
           onChange={(e) =>
             updateNodeData(id, { text: e.target.value, textUpdatedAt: undefined, textUpdatedBy: undefined })
           }
-          onBlur={() => setEditingText(false)}
+          onBlur={endTextEdit}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.preventDefault()
-              setEditingText(false)
+              endTextEdit()
             }
           }}
         />
@@ -186,12 +227,12 @@ export function StickyNode({ id, data, selected }: NodeProps<CanvasNode>) {
             // textarea there would destroy the selection the user just made to copy it.
             const sel = window.getSelection()
             if (sel && !sel.isCollapsed) return
-            setEditingText(true)
+            startTextEdit()
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'A') {
               e.preventDefault()
-              setEditingText(true)
+              startTextEdit()
             }
           }}
         >
@@ -205,6 +246,22 @@ export function StickyNode({ id, data, selected }: NodeProps<CanvasNode>) {
       {typeof stampAt === 'number' && (
         <div className="sticky-node__stamp" title={new Date(stampAt).toLocaleString()}>
           ↻ {(data.textUpdatedBy as string) || 'agent'} · {relativeTime(stampAt, now)}
+        </div>
+      )}
+      {fitTick > 0 && (
+        <div ref={measureRef} className="sticky-node__measure" aria-hidden>
+          <div className="sticky-node__view">
+            {((data.text as string) ?? '') !== '' ? (
+              <NoteMarkdown text={data.text as string} className="sticky-node__md" />
+            ) : (
+              <span className="sticky-node__placeholder">Write a note…</span>
+            )}
+          </div>
+          {typeof stampAt === 'number' && (
+            <div className="sticky-node__stamp">
+              ↻ {(data.textUpdatedBy as string) || 'agent'} · {relativeTime(stampAt, now)}
+            </div>
+          )}
         </div>
       )}
     </div>

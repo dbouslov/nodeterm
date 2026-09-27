@@ -386,8 +386,9 @@ describe('parseControlRequest', () => {
   it('sticky requires --node plus exactly one of --text/--append, and is not destructive', () => {
     expect(parseControlRequest('sticky', {})).toEqual({ error: 'sticky requires --node <id|title>' })
     expect(parseControlRequest('sticky', { node: 'n1' })).toEqual({
-      error: 'sticky requires --text or --append'
+      error: 'sticky requires --text, --append or --fit yes'
     })
+    expect(parseControlRequest('sticky', { node: 'n1', fit: 'yes' })).toMatchObject({ verb: 'sticky' })
     expect(parseControlRequest('sticky', { node: 'n1', text: 'a', append: 'b' })).toEqual({
       error: 'sticky: pass either --text or --append, not both'
     })
@@ -526,6 +527,15 @@ describe('parseControlRequest', () => {
     for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
       expect(body).toContain('`sticky --node')
       expect(body).toContain('--create')
+    }
+  })
+
+  it('both agent-facing texts document that notes fit their text, `--fit yes`, and the off-screen limit', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('--fit yes')
+      expect(body).toMatch(/fits to its\s+rendered\s+text/)
+      expect(body).toContain('2000 px')
+      expect(body).toMatch(/not on screen[^.]*keeps its size/)
     }
   })
 

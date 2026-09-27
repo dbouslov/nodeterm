@@ -297,6 +297,7 @@ import {
 } from '../lib/livePlacement'
 import { rankUnits, restructureNodes, type RestructureLayout } from '../lib/restructure'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
+import { requestStickyFit } from '../lib/stickyFit'
 import { applyAnnotation, normalizeNodeAnnotation, parseAnnotateArgs } from '@shared/node-annotation'
 import { annotateNodes, annotateReply } from '../lib/annotateNodes'
 import {
@@ -10418,6 +10419,15 @@ export function Canvas() {
                 reply({ ok: false, error: `sticky: no node with id ${resolved.id}` })
                 return
               }
+              // Fitting measures the rendered note, and this project is not on screen: `--fit`
+              // alone is refused by name, and a write keeps the note's size, as it always did.
+              if (parsed.write.text === undefined && parsed.write.append === undefined) {
+                reply({
+                  ok: false,
+                  error: `sticky: --fit needs the note's project on screen (it measures the rendered text); nothing was changed`
+                })
+                return
+              }
               const next = applyStickyWrite(target.text ?? '', parsed.write)
               if ('error' in next) {
                 reply({ ok: false, error: `sticky: ${next.error}` })
@@ -12509,6 +12519,13 @@ export function Canvas() {
                 reply({ ok: false, error: `sticky: no node with id ${resolved.id}` })
                 return
               }
+              const noteName = `note "${(target.data.title as string) || 'Note'}" (${resolved.id})`
+              // `--fit yes` alone: refit to the text as it stands (lib/stickyFit), nothing written.
+              if (parsed.write.text === undefined && parsed.write.append === undefined) {
+                const now = requestStickyFit(resolved.id)
+                reply({ ok: true, message: `${noteName}: ${now ? 'fitted to its text' : 'will fit to its text when it renders'}` })
+                return
+              }
               // Validate against the snapshot for the REPLY, but re-apply inside the updater
               // against the freshest text: nodesRef only advances on render commit, so two
               // near-simultaneous appends validated off the same snapshot must still compose
@@ -12530,11 +12547,11 @@ export function Canvas() {
                 })
               )
               markDirty()
+              // A verb write always fits the note to its new text; it measures after it renders.
+              requestStickyFit(resolved.id)
               reply({
                 ok: true,
-                message: `note "${(target.data.title as string) || 'Note'}" (${resolved.id}): ${
-                  precheck.mode === 'append' ? 'appended' : 'replaced'
-                }`
+                message: `${noteName}: ${precheck.mode === 'append' ? 'appended' : 'replaced'}, fitted to its text`
               })
               return
             }
@@ -12560,7 +12577,8 @@ export function Canvas() {
             node.data.textUpdatedAt = Date.now()
             node.data.textUpdatedBy = srcTitle
             const newId = addAndConnect(node)
-            reply({ ok: true, message: `created note "${node.data.title}" (${newId})` })
+            requestStickyFit(newId)
+            reply({ ok: true, message: `created note "${node.data.title}" (${newId}), fitted to its text` })
             return
           }
           case 'annotate': {

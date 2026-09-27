@@ -1482,6 +1482,11 @@ export class HeadlessNodeFactory {
         return this.ownershipRefusal('sticky', sourceNodeId, node.id)
       }
 
+      // Fitting a note to its text measures it rendered; a headless canvas renders nothing, so
+      // `--fit` alone is refused by name and a write keeps the note's size, as it always did.
+      if (parsed.write.text === undefined && parsed.write.append === undefined) {
+        return { ok: false, error: 'sticky: --fit is not available on the Server Edition (it measures the rendered note); nothing was changed' }
+      }
       const write = applyStickyWrite(node.text ?? '', parsed.write)
       if ('error' in write) return { ok: false, error: `sticky: ${write.error}` }
       node.text = write.text
