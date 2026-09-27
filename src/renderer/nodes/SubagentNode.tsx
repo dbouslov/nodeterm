@@ -27,6 +27,8 @@ export function SubagentNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const tokens = data.subagentTokens as number | undefined
   const toolUses = data.subagentToolUses as number | undefined
   const result = (data.subagentResult as string) || ''
+  // The full task; `data.title` is the one-line, capped name `list` / `geometry` print.
+  const task = (data.subagentTask as string) || ''
   // Live transcript: subscribed here per-id (not passed through Canvas's ephemeral node data)
   // so streaming chunks re-render only this card, never the whole canvas.
   const activity = useAgentNodes((s) => s.activityById[id]) || ''
@@ -78,11 +80,11 @@ export function SubagentNode({ id, data, selected }: NodeProps<CanvasNode>) {
         <span className="subagent-node__type">{(data.subagentType as string) || 'subagent'}</span>
         <span className="subagent-node__state">{working ? 'working' : 'done'}</span>
       </div>
-      {data.title && !expanded && <div className="subagent-node__task">{data.title as string}</div>}
+      {task && !expanded && <div className="subagent-node__task">{task}</div>}
       {meta && <div className="subagent-node__meta">{meta}</div>}
       {expanded && (
         <div className="subagent-node__term nodrag nowheel" ref={bodyRef}>
-          {data.title ? <div className="subagent-node__result-task">{data.title as string}</div> : null}
+          {task ? <div className="subagent-node__result-task">{task}</div> : null}
           {body || (working ? 'Working… (live output appears here)' : 'No output.')}
         </div>
       )}

@@ -51,7 +51,19 @@ export type CloseTargets =
 export const LOOP_CARD_NOT_A_NODE =
   'is a cron/loop card, not a node; dismiss it with its × or CronDelete — nothing was closed'
 
-export function parseCloseTargets(raw: string | undefined, live: readonly CloseCandidate[]): CloseTargets {
+export const SUBAGENT_CARD_NOT_A_NODE =
+  "is a subagent card, not a node; a finished one clears when its agent's next turn starts, and the agent's eye hides them — nothing was closed"
+
+/**
+ * `subagentCards` are the subagent card ids drawn right now (lib/subagentCards). Unlike a loop
+ * card's, their id is the hook's own id for the subagent — nothing about its shape says "card" —
+ * so the caller hands them in. Absent = none.
+ */
+export function parseCloseTargets(
+  raw: string | undefined,
+  live: readonly CloseCandidate[],
+  subagentCards: ReadonlySet<string> = new Set()
+): CloseTargets {
   const ids = [...new Set((raw ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
   if (!ids.length) return { kind: 'error', error: 'close requires --node' }
   // A cron/loop card (`loop-<agentId>`, from `list`) is drawn, not a node: `deleteNodes` would do
@@ -60,6 +72,8 @@ export function parseCloseTargets(raw: string | undefined, live: readonly CloseC
   const liveIds = new Set(live.map((n) => n.id))
   const card = ids.find((id) => id.startsWith('loop-') && !liveIds.has(id))
   if (card) return { kind: 'error', error: `close: ${card} ${LOOP_CARD_NOT_A_NODE}` }
+  const sub = ids.find((id) => subagentCards.has(id) && !liveIds.has(id))
+  if (sub) return { kind: 'error', error: `close: ${sub} ${SUBAGENT_CARD_NOT_A_NODE}` }
   if (ids.length === 1) return { kind: 'single', id: ids[0] }
   if (ids.length > CLOSE_BULK_MAX) {
     return {
