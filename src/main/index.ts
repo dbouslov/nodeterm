@@ -4482,7 +4482,13 @@ app.on('before-quit', (e) => {
   // Pending throttled .nodeterm mirror writes must land BEFORE the ControlMasters die — killing
   // a master mid-write used to leave a truncated project.json on the server. The masters are
   // therefore kept up through the raced flush and dropped on the second before-quit pass.
-  const flush = Promise.allSettled([remoteWorkspaceIO.flush(), ptyManager.killAll()])
+  // The persist trace too: its lines append asynchronously, and the last decisions before a quit
+  // are the ones a relaunch report needs.
+  const flush = Promise.allSettled([
+    remoteWorkspaceIO.flush(),
+    ptyManager.killAll(),
+    persistTrace.flushed()
+  ])
   void Promise.race([flush, new Promise((r) => setTimeout(r, 1500))])
     // Then let whisper go. A dictation still transcribing when Electron tears down the main
     // process's node env aborts the WHOLE app from inside the native addon (SIGABRT in
