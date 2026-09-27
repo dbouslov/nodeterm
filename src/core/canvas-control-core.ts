@@ -498,7 +498,9 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `list` — current nodes (id, kind, title). Start here when you need a node id. The cron / schedule /',
     '  loop card drawn under an agent is listed too, as kind `loop` with id `loop-<agentId>` and the',
     '  suffix `· card of <agentId>`; it sits at an offset from that agent and moves with it (no verb',
-    '  moves the card itself), so to clear an overlap with it, move the agent.',
+    '  moves the card itself), so to clear an overlap with it, move the agent. A subagent card is listed',
+    '  the same way, as kind `subagent` with the subagent\'s own id and `· card of <agentId>`. Cards are',
+    '  drawn, not nodes: `close` refuses a card id.',
     '- `help` — print the verb list. Answered by the shim itself, so it works even if the app is down.',
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]` — open N plain terminals.',
     '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]` — open N Claude sessions.',
@@ -602,8 +604,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  node reports its collapsed height), collapsed and pinned. The reply is one summary line ("21',
     '  nodes, 6 frames, 0 overlaps") plus one line per problem: two siblings whose rectangles overlap',
     '  (touching edges do not count), or a child that sticks out of its frame. `result` carries the',
-    '  full JSON. Run it before laying out, and after `arrange` to confirm 0 overlaps. Cron/loop cards',
-    '  (`loop-<agentId>`, see `list`) are included with `owner`, but their problems are counted',
+    '  full JSON. Run it before laying out, and after `arrange` to confirm 0 overlaps. Cron/loop and',
+    '  subagent cards (see `list`) are included with `owner`, but their problems are counted',
     '  SEPARATELY ("; 2 cards: 1 overlap") and their lines start with `card`: no layout verb moves a',
     '  card, so the 0 to aim for is the node count before the `;`.',
     '- `restructure [--layout rows|radial]` — re-lay out the WHOLE project by lineage, centered on',
@@ -1025,6 +1027,8 @@ Verbs:
   The cron / schedule / loop card drawn under an agent is listed too, as kind \`loop\` with id
   \`loop-<agentId>\` and the suffix \`· card of <agentId>\`. It sits at an offset from that agent
   and moves with it (no verb moves the card itself), so to clear an overlap with it, move the agent.
+  A subagent card is listed the same way, as kind \`subagent\` with the subagent's own id and
+  \`· card of <agentId>\`. Cards are drawn, not nodes: \`close\` refuses a card id.
   A row ending **LAST TURN ERRORED** is a station whose last turn died on an API/model error:
   it is idle, but it produced nothing, so do not read its output or build on it. The marker
   is on the row on purpose — a fan-out of seven stations should cost one call to learn this,
@@ -1183,8 +1187,8 @@ Verbs:
   \`arrange\`/\`align\` move; a child that sticks out is drawn clamped inside its frame, so fix it by
   arranging that frame's children (which refits the frame). A pinned frame keeps its layout (its
   children report \`pinned: true\`), so \`pin --node <frame> --set off\` first. Run it before you lay
-  out, and again after \`arrange\` to confirm 0 overlaps. Cron/loop cards (\`loop-<agentId>\`, see
-  \`list\`) are included with \`owner\` set to their agent, but their problems are counted
+  out, and again after \`arrange\` to confirm 0 overlaps. Cron/loop cards (\`loop-<agentId>\`) and
+  subagent cards (see \`list\`) are included with \`owner\` set to their agent, but their problems are counted
   SEPARATELY (\`; 2 cards: 1 overlap\`) and their lines start with \`card\`: no layout verb moves a
   card (it follows its agent), so the 0 to aim for is the node count before the \`;\`. A card is not
   clamped into its frame, so one reported as sticking out is drawn outside it.

@@ -150,6 +150,43 @@ export type SnapshotRunResult =
     }
   | { ok: false; error: string }
 
+/**
+ * How long `settledPaint` waits, after the new transform has been painted, for the compositor to
+ * present it. Issue #2: the first whole-canvas snapshot after an app restart captured the view
+ * the user already had. Node sizes were ruled out; the suspect is the old wait — two rAFs — which
+ * proves the frame was COMMITTED (the second callback runs after the first frame was produced),
+ * not that the window surface main's `capturePage` reads had been updated, and a cold compositor
+ * is exactly where that gap is widest. Not measured on a device.
+ */
+export const SNAPSHOT_SETTLE_MS = 100
+
+/** The most the whole paint wait may take, frames or no frames: a snapshot must never hang on a
+ *  window that stopped producing frames (main refuses a hidden one, but that is a race). */
+export const SNAPSHOT_SETTLE_MAX_MS = 300
+
+export interface SettleEnv {
+  raf(fn: () => void): void
+  setTimeout(fn: () => void, ms: number): void
+}
+
+/**
+ * Resolve once the transform just set has had a chance to be PRESENTED: two frames (commit, then
+ * paint), a settle delay, then one more frame so the capture follows a frame produced after the
+ * delay. The whole sequence is raced against `SNAPSHOT_SETTLE_MAX_MS`, so it is bounded however
+ * the frames behave.
+ */
+export function settledPaint(env: SettleEnv): Promise<void> {
+  const frame = (): Promise<void> => new Promise((r) => env.raf(r))
+  const sequence = (async () => {
+    await frame()
+    await frame()
+    await new Promise<void>((r) => env.setTimeout(r, SNAPSHOT_SETTLE_MS))
+    await frame()
+  })()
+  const deadline = new Promise<void>((r) => env.setTimeout(r, SNAPSHOT_SETTLE_MAX_MS))
+  return Promise.race([sequence, deadline])
+}
+
 export const SNAPSHOT_IN_PROGRESS = 'snapshot refused: a snapshot is already in progress — retry in a moment'
 
 /** One snapshot at a time. Canvas.tsx runs control events concurrently, and a second run started

@@ -1232,6 +1232,17 @@ describe('geometry verb', () => {
     }
   })
 
+  it('both bodies say `list` and `geometry` include the subagent cards, and `close` refuses them', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toMatch(/subagent card/i)
+      expect(body).toContain('kind `subagent`')
+      expect(body).toMatch(/`close` refuses a card id/)
+    }
+  })
+
   it('both bodies say `list` and `geometry` include the cron/loop cards and who owns them (#7)', () => {
     for (const body of [
       buildCanvasSkillBody('/tmp/nodeterm.sh'),

@@ -2314,7 +2314,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   id — the renderer's capture call (`IPC.canvasSnapshotCapture`) carries only that id and a rect,
   never a path. The RENDERER refuses an off-screen project (it never travels — G5) or a canvas
   covered by the kanban board/Network overview, then `lib/canvasSnapshot.runSnapshot` sets a
-  COMPUTED viewport (never `fitView`), waits two frames, has main capture the `.flow-wrap` rect
+  COMPUTED viewport (never `fitView`), waits for a presented frame (`settledPaint`: two frames, a settle delay, one more frame, capped at 300 ms), has main capture the `.flow-wrap` rect
   (scaled by the page zoom) and restores the exact previous viewport in `finally`. Default file
   `<userData>/snapshots/<projectId>-<UTC stamp>.png`, pruned to the newest `SNAPSHOT_KEEP` (20).
   Verified-only (`requiresVerified`: the picture shows every pane). Server Edition: refused by name

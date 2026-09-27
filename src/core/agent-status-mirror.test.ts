@@ -544,6 +544,26 @@ describe('inbox event production (via recordAgentEvent)', () => {
       )
     })
 
+    it("ignores a grok SUBAGENT's own session_end — the parent's turn is still running", () => {
+      // grok fires session_end for a child as well (it carries `subagentType`). Canvas.tsx already
+      // refuses to reset the parent on it; the mirror used to reset it and end the phone's Live
+      // Activity mid-turn.
+      recordAgentEvent(ev({ agentId: 'grok', state: 'working', newTurn: true }))
+      const edges = edgesFor(() =>
+        recordAgentEvent(
+          ev({ agentId: 'grok', kind: 'session', sessionPhase: 'end', subagentType: 'explore' })
+        )
+      )
+      expect(edges).toEqual([])
+      expect(_snapshot().n1?.state).toBe('working')
+      // The parent's own session_end still ends it.
+      const own = edgesFor(() =>
+        recordAgentEvent(ev({ agentId: 'grok', kind: 'session', sessionPhase: 'end' }))
+      )
+      expect(own).toHaveLength(1)
+      expect(own[0]).toMatchObject({ event: 'end', state: 'done' })
+    })
+
     it('adds no inbox card — the session going away is not news for the feed', () => {
       recordAgentEvent(ev({ state: 'working', newTurn: true }))
       const before = _inboxSnapshot().events.length

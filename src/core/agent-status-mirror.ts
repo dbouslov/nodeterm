@@ -431,6 +431,16 @@ function resolveGrokStopCancelled(ev: NormalizedAgentEvent): NormalizedAgentEven
   }
 }
 
+/**
+ * A grok SUBAGENT's own `session_end` (it carries `subagentType`): the child's teardown, not the
+ * node's. Canvas.tsx refuses to reset the parent on it (`sessionPhase === 'end' && !subagentType`);
+ * the mirror must agree, or it resets a working parent to idle and ends the phone's Live Activity
+ * mid-turn.
+ */
+function isChildSessionEnd(ev: NormalizedAgentEvent): boolean {
+  return ev.kind === 'session' && ev.sessionPhase === 'end' && !!ev.subagentType
+}
+
 export function reduceEntry(
   prev: MirrorEntry | undefined,
   ev: NormalizedAgentEvent,
@@ -522,7 +532,7 @@ function reduceEffectiveEntry(
     // rather than merged — an event with no stamp is a report that this node is running a script
     // that cannot send one, which is exactly what a stale entry would hide.
     if (!heldOff) commitState(ev.state, ev.verified === true)
-  } else if (ev.kind === 'session') {
+  } else if (ev.kind === 'session' && !isChildSessionEnd(ev)) {
     // SessionStart / SessionEnd both reset the node to idle (renderer: setState(id, undefined)).
     // The proof goes with the state it was about, and `false` is passed EXPLICITLY rather than
     // `ev.verified`: this commits idle, and "the idle was verified" is not a claim worth making.
@@ -1433,7 +1443,10 @@ function produceInboxFromState(
 ): NeedsYouClassification | undefined {
   // Clear any stashed question options on a new turn or session boundary — a stale option set must
   // never attach to a later, unrelated question. (State-leave clearing is handled below.)
-  if (ev.kind === 'session' || (ev.kind === 'state' && ev.state === 'working' && ev.newTurn)) {
+  if (
+    (ev.kind === 'session' && !isChildSessionEnd(ev)) ||
+    (ev.kind === 'state' && ev.state === 'working' && ev.newTurn)
+  ) {
     pendingQuestions.delete(nodeId)
   }
   // Leaving blocked/waiting (any newer, different state — incl. a session reset to idle) resolves
@@ -1581,7 +1594,8 @@ function produceInboxFromState(
     prevState !== undefined &&
     prevState !== 'done' &&
     ev.kind === 'session' &&
-    ev.sessionPhase === 'end'
+    ev.sessionPhase === 'end' &&
+    !isChildSessionEnd(ev)
   ) {
     // The CLI EXITED mid-turn (`/exit`, Ctrl-C, a crash) — the one transition that means "this
     // session is over", and the only one that used to emit nothing at all.

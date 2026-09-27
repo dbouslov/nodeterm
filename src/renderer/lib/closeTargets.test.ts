@@ -38,6 +38,26 @@ describe('parseCloseTargets — the single-node form is unchanged', () => {
     expect(parseCloseTargets('loop-x', [...live, { id: 'loop-x' }])).toEqual({ kind: 'single', id: 'loop-x' })
   })
 
+  it('refuses a subagent card id, alone or in a list, and names it', () => {
+    // A subagent card's id is the hook's tool/agent id — no prefix to recognise it by — so the
+    // caller hands in the card ids currently drawn.
+    const cards = new Set(['toolu_1'])
+    for (const raw of ['toolu_1', 'a,toolu_1']) {
+      const r = parseCloseTargets(raw, live, cards)
+      expect(r.kind).toBe('error')
+      if (r.kind === 'error') {
+        expect(r.error).toContain('toolu_1')
+        expect(r.error).toMatch(/subagent card, not a node/)
+        expect(r.error).toMatch(/nothing was closed/)
+      }
+    }
+    // A real node with that id is still a node.
+    expect(parseCloseTargets('toolu_1', [...live, { id: 'toolu_1' }], cards)).toEqual({
+      kind: 'single',
+      id: 'toolu_1'
+    })
+  })
+
   it('trims, and a trailing comma is still one id', () => {
     expect(parseCloseTargets('  a  ', live)).toEqual({ kind: 'single', id: 'a' })
     expect(parseCloseTargets('a,', live)).toEqual({ kind: 'single', id: 'a' })
