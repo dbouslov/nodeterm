@@ -7,7 +7,8 @@ import {
   type CanvasNode
 } from '../state/workspace'
 import { assignNode, assignedTo, defaultKanban } from './kanban'
-import { planRetire, type RetirePlan } from './retire'
+import type { CanvasNodeState } from '@shared/types'
+import { planRetire, planStoredRetire, type RetirePlan } from './retire'
 
 const term = (id: string, x: number, y: number, w: number, h: number, parentId?: string): CanvasNode =>
   ({
@@ -265,5 +266,67 @@ describe('planRetire — refusals change nothing', () => {
       const other = { ...term('succ', 700, 0, 600, 400), type } as CanvasNode
       expect(plan([live[0], other]), type).toEqual({ error: expect.stringMatching(/succ is not a session/) })
     }
+  })
+})
+
+// Off screen (#41): the caller's project is not the one on screen, so there is no live canvas —
+// the plan runs on the project's SERIALIZED nodes and hands back only what must be written.
+describe('planStoredRetire — retire while the project is off screen', () => {
+  const stored = (
+    id: string,
+    kind: CanvasNodeState['kind'],
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    extra: Partial<CanvasNodeState> = {}
+  ): CanvasNodeState => ({ id, kind, position: { x, y }, size: { width: w, height: h }, title: id, color: '#fff', group: null, ...extra })
+
+  const run = (nodes: CanvasNodeState[], over: Partial<Parameters<typeof planStoredRetire>[0]> = {}) =>
+    planStoredRetire({
+      callerId: 'caller',
+      successorId: 'succ',
+      stored: nodes,
+      successorElsewhere: false,
+      kanban: undefined,
+      grid: 0,
+      ...over
+    })
+
+  it('gives the successor the caller\'s saved rect, frame and kanban column', () => {
+    const nodes = [
+      stored('g1', 'group', 0, 0, 1000, 800),
+      stored('caller', 'terminal', 40, 60, 640, 420, { parentId: 'g1', collapsed: true }),
+      stored('succ', 'terminal', 2000, 100, 300, 200),
+      stored('bystander', 'terminal', 3000, 3000, 300, 200)
+    ]
+    let k = defaultKanban()
+    const [todo, doing] = k.columns
+    for (const id of ['a', 'caller', 'b']) k = assignNode(k, id, doing.id, null)
+    k = assignNode(k, 'succ', todo.id, null)
+    const r = run(nodes, { kanban: k })
+    if ('error' in r) throw new Error(r.error)
+    const succ = r.upserts.find((n) => n.id === 'succ')!
+    expect(succ.parentId).toBe('g1')
+    // g1 is refit around its children, so compare in root space: the caller's saved spot.
+    const g1 = r.upserts.find((n) => n.id === 'g1') ?? nodes[0]
+    expect({ x: g1.position.x + succ.position.x, y: g1.position.y + succ.position.y }).toEqual({ x: 40, y: 60 })
+    // The caller was saved collapsed: the successor gets the height it expands to, and is expanded.
+    expect(succ.size).toEqual({ width: 640, height: 420 })
+    expect(succ.collapsed).toBeFalsy()
+    expect(assignedTo(r.kanban!, doing.id)).toEqual(['a', 'succ', 'b'])
+    // Only what the swap touched is written; the caller is left for the stored teardown.
+    expect(r.upserts.map((n) => n.id).sort()).toEqual(['g1', 'succ'])
+  })
+
+  it('keeps every refusal, and writes nothing on one', () => {
+    const nodes = [stored('caller', 'terminal', 0, 0, 600, 400), stored('succ', 'terminal', 700, 0, 600, 400)]
+    expect(run(nodes, { successorId: 'caller' })).toEqual({ error: expect.stringMatching(/names you/) })
+    expect(run(nodes, { successorId: 'gone' })).toEqual({ error: expect.stringMatching(/no node with id gone/) })
+    expect(run(nodes, { successorId: 'far', successorElsewhere: true })).toEqual({
+      error: expect.stringMatching(/far is in another project/)
+    })
+    const sticky = [nodes[0], stored('succ', 'sticky', 700, 0, 200, 200)]
+    expect(run(sticky)).toEqual({ error: expect.stringMatching(/succ is not a session/) })
   })
 })

@@ -48,7 +48,6 @@ const REFUSERS = new Set([
   'restructure',
   'minimize',
   'pin',
-  'retire',
   'snapshot'
 ])
 

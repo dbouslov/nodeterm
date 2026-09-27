@@ -571,7 +571,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  so there is nothing to wait for and nothing to poll. Say where it went rather than assuming',
     '  the user saw it.',
     '- Verbs that act on nodes that ALREADY exist (`write`, `close`, `rename`, `color`, `group`, `move`,',
-    '  `arrange`, `align`, `assign`, `board`, `link`, `restructure`, `retire`, `browser`, …), and',
+    '  `arrange`, `align`, `assign`, `board`, `link`, `restructure`, `browser`, …), and',
     '  `spawn-team` / `open-worktree` (unlike the open verbs above, these do not open cold): each one',
     '  needs your project ON SCREEN. If it is not, the call is refused, because nodeterm',
     "  never switches the user's view for an agent. The user is shown a notice naming your project,",
@@ -697,6 +697,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  restarts; anything else is refused and nothing changes. Verified callers only. No confirm',
     '  dialog: you close only yourself. The reply reaches you before your session is torn down —',
     '  treat it as your last output. Server Edition refuses it by name (permanent, do not retry).',
+    '  It works while your project is off screen too: the successor gets your SAVED rect, frame and',
+    '  column, and frames are refit from saved sizes (on screen they refit from rendered ones).',
     ...settingsVerbDocLines(),
     ...reportIssueDocLines(),
     ...browserVerbDocLines(),
@@ -1115,7 +1117,7 @@ Verbs:
   file is read/fetched back over the connection), but \`show-web --file/--html\` is refused —
   use \`--url\`, or copy the file to the desktop first.
 - Verbs that act on nodes that ALREADY exist (\`write\`, \`close\`, \`rename\`, \`color\`, \`group\`, \`move\`,
-  \`arrange\`, \`align\`, \`assign\`, \`board\`, \`link\`, \`restructure\`, \`retire\`, \`browser\`, …), and
+  \`arrange\`, \`align\`, \`assign\`, \`board\`, \`link\`, \`restructure\`, \`browser\`, …), and
   \`spawn-team\` / \`open-worktree\` (unlike the open verbs above, these do not open cold): each one
   needs your project ON SCREEN. If it is not, the call is refused, because nodeterm
   never switches the user's view for an agent. The user is shown a notice naming your project,
@@ -1292,7 +1294,9 @@ ${snapshotVerbDocLines().join('\n')}
   you closes or restarts, or when the app restarts. Anything else (not yours, missing, you,
   not a session, another project) is refused and nothing changes. Verified callers only. No confirm
   dialog: you close only yourself. The reply reaches you BEFORE your session is torn down — treat it
-  as your last output. Server Edition refuses it by name — permanent, do not retry.
+  as your last output. Server Edition refuses it by name — permanent, do not retry. It works while
+  your project is off screen too: the successor gets your SAVED rect, frame and column, and frames
+  are refit from saved sizes (on screen they refit from rendered ones).
 ${settingsVerbDocLines().join('\n')}
 ${reportIssueDocLines().join('\n')}
 ${browserVerbDocLines().join('\n')}

@@ -560,7 +560,7 @@ import type {
 } from '@shared/types'
 import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/KanbanView'
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
-import { planRetire } from '../lib/retire'
+import { planRetire, planStoredRetire } from '../lib/retire'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
 import { reflow, resizesEnded, settle } from '../lib/reflow'
@@ -12955,44 +12955,66 @@ export function Canvas() {
             // (core/retire-verb.ts); this is the canvas half (the pure `planRetire`) and the
             // teardown. No confirm dialog: the only node closed is the caller itself.
             const store = useProjects.getState()
-            const pid = store.activeProjectId
+            // `ctlProject`, not `activeProjectId`: off canvas (#41) the caller's project is not the
+            // one on screen. On screen they are the same project.
+            const pid = ctlProject?.id
             const successorId = (args.successor ?? '').trim()
             const board = store.getProject(pid ?? '')?.kanban
-            const plan = planRetire({
+            const input = {
               callerId: sourceNodeId,
               successorId,
-              live: nodesRef.current as CanvasNode[],
               successorElsewhere: store.projects.some(
                 (p) => p.id !== pid && p.nodes.some((n) => n.id === successorId)
               ),
               kanban: board,
               grid: snapGridNow()
-            })
+            }
+            const cardTitleIn = (nodes: readonly CanvasNode[]) => (id: string): string => {
+              const n = nodes.find((x) => x.id === id)
+              const card = n ? toKanbanSession(n) : null
+              return card ? card.title || 'Untitled' : ''
+            }
+            const logBoard = (next: ProjectKanban | undefined, nodes: readonly CanvasNode[]): void => {
+              if (!pid || !board || !next || next === board) return
+              store.setProjectKanban(pid, next)
+              // Board-log the successor's move through the funnel `assign` uses, so the feed shows it.
+              // Only the successor's: the caller's card leaves with its node.
+              for (const { nodeId: nid, event } of boardLogEvents(board, next, cardTitleIn(nodes))) {
+                if (nid === successorId) useBoardLog.getState().append(api, pid, { kind: 'event', nodeId: nid, event })
+              }
+            }
+            const done = {
+              ok: true,
+              message: `retired ${sourceNodeId}: ${successorId} took its place — this session closes now`,
+              result: { retired: sourceNodeId, successor: successorId }
+            }
+            if (offCanvas) {
+              // Off canvas: the same plan over the project's saved nodes. The live setters address
+              // the ACTIVE canvas, which is somebody else's here, so the successor (and every frame
+              // the swap refit) is written through the store, as the off-canvas open does, and the
+              // caller goes through `closeStoredNodes`, as an off-canvas `close` does.
+              const plan = planStoredRetire({ ...input, stored: offCanvas.project.nodes })
+              if ('error' in plan) {
+                reply({ ok: false, error: plan.error })
+                return
+              }
+              for (const node of plan.upserts) store.applyNodeMutation(offCanvas.project.id, { op: 'upsert', node })
+              logBoard(plan.kanban, ctlNodes())
+              // Reply FIRST: the teardown below ends the caller's own session, the one waiting on it.
+              reply(done)
+              closeStoredNodesRef.current(offCanvas.project.id, [sourceNodeId])
+              return
+            }
+            const plan = planRetire({ ...input, live: nodesRef.current as CanvasNode[] })
             if ('error' in plan) {
               reply({ ok: false, error: plan.error })
               return
             }
             setNodes(plan.nodes)
-            if (pid && board && plan.kanban && plan.kanban !== board) {
-              store.setProjectKanban(pid, plan.kanban)
-              // Board-log the successor's move through the funnel `assign` uses, so the feed shows it.
-              // Only the successor's: the caller's card leaves with its node.
-              const cardTitle = (id: string): string => {
-                const n = nodesRef.current.find((x) => x.id === id)
-                const card = n ? toKanbanSession(n) : null
-                return card ? card.title || 'Untitled' : ''
-              }
-              for (const { nodeId: nid, event } of boardLogEvents(board, plan.kanban, cardTitle)) {
-                if (nid === successorId) useBoardLog.getState().append(api, pid, { kind: 'event', nodeId: nid, event })
-              }
-            }
+            logBoard(plan.kanban, nodesRef.current as CanvasNode[])
             markDirty()
             // Reply FIRST: the teardown below ends the caller's own session, the one waiting on it.
-            reply({
-              ok: true,
-              message: `retired ${sourceNodeId}: ${successorId} took its place — this session closes now`,
-              result: { retired: sourceNodeId, successor: successorId }
-            })
+            reply(done)
             deleteNodes([sourceNodeId])
             setControlEdges((es) => es.filter((e) => e.source !== sourceNodeId && e.target !== sourceNodeId))
             return
