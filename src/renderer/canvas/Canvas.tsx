@@ -677,6 +677,7 @@ import {
   placeNodeInRect,
   terminalNodeSize,
   isPinned,
+  removeNodesFreeingChildren,
   type CanvasNode
 } from '../state/workspace'
 import { codexAccountSelectable, codexAccountSwitchStillEligible } from './codex-account-switch'
@@ -5684,27 +5685,9 @@ export function Canvas() {
         // A node id revived later faces a fresh dialog, exactly as it faces a fresh grant.
         clearAttachConsent(n.id)
       })
-      setNodes((ns) => {
-        // Free children of any deleted group back to absolute positions.
-        const groupPos = new Map(
-          ns.filter((n) => set.has(n.id) && n.type === 'group').map((g) => [g.id, g.position])
-        )
-        return ns
-          .filter((n) => !set.has(n.id))
-          .map((n) =>
-            n.parentId && groupPos.has(n.parentId)
-              ? {
-                  ...n,
-                  parentId: undefined,
-                  extent: undefined,
-                  position: {
-                    x: n.position.x + groupPos.get(n.parentId)!.x,
-                    y: n.position.y + groupPos.get(n.parentId)!.y
-                  }
-                }
-              : n
-          )
-      })
+      // Free children of any deleted group, keeping their root-space position: they join the
+      // nearest surviving frame, so closing a frame nested inside another does not move its chats.
+      setNodes((ns) => removeNodesFreeingChildren(ns, set))
       markDirty()
       // A deleted group takes its worktree BINDING with it — and the frame is the only thing that
       // goes: its children SURVIVE (freed to absolute positions above), dead `data.cwd` and all. So

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rootPosition, type CanvasNode } from '../state/workspace'
+import { removeNodesFreeingChildren, rootPosition, type CanvasNode } from '../state/workspace'
 import { applyCompaction, compactNote, compactRequested, planCompaction, readingRows } from './closeCompact'
 
 // Minimal node stub: only the fields the layout fns read. Frames use the geometry
@@ -26,23 +26,10 @@ const measured = (nodes: CanvasNode[]): CanvasNode[] =>
 const at = (nodes: CanvasNode[], id: string): CanvasNode => nodes.find((x) => x.id === id)!
 const box = (node: CanvasNode) => ({ ...node.position, width: node.width, height: node.height })
 
-/** Canvas `deleteNodes`' setNodes transform: drop the ids, and free a deleted frame's children by
- *  adding the frame's position — the array `applyCompaction` receives on the live canvas. */
+/** Canvas `deleteNodes`' setNodes transform — the array `applyCompaction` receives on the live
+ *  canvas. The real function, so this cannot drift from what the dispatch runs. */
 function removeLikeDeleteNodes(nodes: CanvasNode[], ids: string[]): CanvasNode[] {
-  const set = new Set(ids)
-  const groupPos = new Map(nodes.filter((x) => set.has(x.id) && x.type === 'group').map((g) => [g.id, g.position]))
-  return nodes
-    .filter((x) => !set.has(x.id))
-    .map((x) =>
-      x.parentId && groupPos.has(x.parentId)
-        ? {
-            ...x,
-            parentId: undefined,
-            extent: undefined,
-            position: { x: x.position.x + groupPos.get(x.parentId)!.x, y: x.position.y + groupPos.get(x.parentId)!.y }
-          }
-        : x
-    )
+  return removeNodesFreeingChildren(nodes, new Set(ids))
 }
 
 /** Plan on the canvas as the close found it, delete, apply — the order the Canvas dispatch runs. */
@@ -218,7 +205,7 @@ describe('close --compact', () => {
     expect(out).toBe(after)
   })
 
-  it('closing a frame node re-packs the frame that held it; its freed children are left where the delete put them', () => {
+  it('closing a frame node re-packs the frame that held it, with the children it freed into that frame', () => {
     // T ⊃ { F ⊃ {k1, k2}, s } in row 1, u in row 2.
     const before = [
       frame('T', 0, 0, 492, 320),
@@ -230,12 +217,17 @@ describe('close --compact', () => {
     ]
     const { plan, after, out } = closeCompact(before, ['F'])
     expect(plan).toMatchObject({ frames: ['T'], pinned: [], emptied: [] })
-    // s and u fill T's 2 columns from F's old corner.
+    // The delete freed k1/k2 into T (F's parent) at their root-space position, so T's re-pack takes
+    // all four survivors in reading order across its 2 columns.
+    for (const k of ['k1', 'k2']) {
+      expect(at(after, k).parentId).toBe('T')
+      expect(rootPosition(at(after, k), after)).toEqual(rootPosition(at(before, k), before))
+    }
     expect(at(out, 's').position).toEqual({ x: 28, y: 62 })
-    expect(at(out, 'u').position).toEqual({ x: 168, y: 62 })
-    expect(box(at(out, 'T'))).toEqual({ x: 0, y: 0, width: 296, height: 140 })
-    // The delete freed k1/k2 to the top level; the top level is never re-laid out.
-    for (const k of ['k1', 'k2']) expect(at(out, k)).toBe(at(after, k))
+    expect(at(out, 'k1').position).toEqual({ x: 168, y: 62 })
+    expect(at(out, 'k2').position).toEqual({ x: 28, y: 152 })
+    expect(at(out, 'u').position).toEqual({ x: 168, y: 152 })
+    expect(box(at(out, 'T'))).toEqual({ x: 0, y: 0, width: 296, height: 230 })
   })
 
   it('closing a top-level node or frame has nothing to compact', () => {

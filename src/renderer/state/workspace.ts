@@ -1428,6 +1428,39 @@ export function containerOrigin(
   return rootPosition(frame, nodes)
 }
 
+/**
+ * Remove `deleted` and free the children of any removed frame. Each freed child joins the nearest
+ * SURVIVING ancestor of its old frame (or the top level) at the same root-space position — the
+ * whole ancestor chain counts, not one parent's offset, or closing a frame nested inside another
+ * makes its chats jump. The walk is cycle-guarded: project.json is hand-editable.
+ */
+export function removeNodesFreeingChildren(nodes: CanvasNode[], deleted: Set<string>): CanvasNode[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const survivingAncestor = (parentId: string): string | undefined => {
+    const seen = new Set<string>()
+    let id: string | undefined = parentId
+    while (id && deleted.has(id) && !seen.has(id)) {
+      seen.add(id)
+      id = byId.get(id)?.parentId
+    }
+    return id && !deleted.has(id) && byId.has(id) ? id : undefined
+  }
+  return nodes
+    .filter((node) => !deleted.has(node.id))
+    .map((node) => {
+      if (!node.parentId || !deleted.has(node.parentId)) return node
+      const parentId = survivingAncestor(node.parentId)
+      const abs = rootPosition(node, nodes)
+      const origin = containerOrigin(parentId, nodes)
+      return {
+        ...node,
+        parentId,
+        extent: parentId ? node.extent : undefined,
+        position: { x: abs.x - origin.x, y: abs.y - origin.y }
+      }
+    })
+}
+
 function isDescendant(nodes: CanvasNode[], candidateId: string, ancestorId: string): boolean {
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const seen = new Set<string>()
