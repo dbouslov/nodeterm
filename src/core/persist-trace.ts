@@ -40,7 +40,11 @@ export function createPersistTrace(opts: {
     let size = sizes.get(file)
     if (size === undefined) size = (await fs.stat(file).catch(() => null))?.size ?? 0
     if (size > 0 && size + bytes > maxBytes) {
-      await renameAtomic(file, `${file}.1`)
+      // A rotation that cannot rename (the `.1` slot is unwritable, a Windows lock outlasting
+      // renameAtomic's retries) empties the live file instead. Losing the older lines keeps the
+      // bound; throwing here would leave the file over the cap, so every later line would retry
+      // the same rename and be dropped — the trace dark for the rest of the run.
+      await renameAtomic(file, `${file}.1`).catch(() => fs.truncate(file, 0))
       size = 0
     }
     await fs.appendFile(file, line, { encoding: 'utf8', mode: 0o600 })

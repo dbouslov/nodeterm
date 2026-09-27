@@ -51,6 +51,24 @@ describe('the persist trace file', () => {
     expect(await fs.readFile(`${file}.1`, 'utf8')).toContain('x'.repeat(550))
   })
 
+  // PR #18 review: a rotation whose rename failed left the live file over the cap, so every later
+  // line re-tried the same rename, failed again, and was dropped — the trace went dark for good.
+  it('a failed rotation keeps the trace writing, still under the cap', async () => {
+    const file = path.join(dir, 'persist-trace.log')
+    await fs.writeFile(file, `${'x'.repeat(550)}\n`)
+    // A non-empty directory where the rotation target goes: the rename cannot succeed.
+    await fs.mkdir(`${file}.1`)
+    await fs.writeFile(path.join(`${file}.1`, 'keep'), 'k')
+    const trace = createPersistTrace({ file, maxBytes: 600 })
+    trace.record({ side: 'main', ev: 'save', n: 1 })
+    trace.record({ side: 'main', ev: 'save', n: 2 })
+    await trace.flushed()
+    const all = await lines(file)
+    expect(all.at(-1)).toContain('"n":2')
+    expect(all.some((l) => l.includes('"n":1'))).toBe(true)
+    expect((await fs.stat(file)).size).toBeLessThanOrEqual(600)
+  })
+
   it('a failed write neither throws nor stops the next record', async () => {
     const good = path.join(dir, 'persist-trace.log')
     let target = path.join(dir, 'missing-dir', 'persist-trace.log')
