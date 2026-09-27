@@ -1212,6 +1212,20 @@ describe('geometry verb', () => {
       expect(body).toMatch(/sticks out of its frame/i)
     }
   })
+
+  it('both bodies say `list` and `geometry` include the cron/loop cards and who owns them (#7)', () => {
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`loop-<agentId>`')
+      expect(body).toMatch(/card of <agentId>/)
+      expect(body).toMatch(/move the agent/i)
+      // Card problems are counted apart, so an orchestrator does not chase overlaps it cannot clear.
+      expect(body).toMatch(/counted\s+SEPARATELY/)
+      expect(body).toMatch(/no layout verb moves a\s+card/)
+    }
+  })
 })
 
 describe('minimize verb', () => {

@@ -14,6 +14,9 @@ import {
   type SnapshotRunDeps
 } from './canvasSnapshot'
 
+import type { CanvasNodeState } from '@shared/types'
+import { nodeStatesToFlow } from '../state/workspace'
+
 const FIT = { margin: 20, minZoom: 0.01, maxZoom: 2 }
 
 const node = (id: string, x: number, y: number, w: number, h: number, extra: Partial<SnapshotNode> = {}): SnapshotNode => ({
@@ -36,6 +39,20 @@ describe('snapshotTarget — what gets framed', () => {
       node('d', -200, 50, 100, 100)
     ]
     expect(snapshotTarget(nodes)).toEqual({ ok: true, bounds: { x: -200, y: 0, width: 1200, height: 800 } })
+  })
+
+  it('#2: right after hydration (nothing measured yet) the whole canvas is still every node', () => {
+    // After a restart the first snapshot can run before React Flow has measured a single node.
+    // The serialized size rides the hydrated node, so the bounds are the whole canvas, not a
+    // subset of whatever happened to be measured.
+    const state = (id: string, x: number, y: number): CanvasNodeState =>
+      ({ id, kind: 'terminal', position: { x, y }, size: { width: 600, height: 400 }, title: id, color: '#fff' }) as CanvasNodeState
+    const hydrated = nodeStatesToFlow([state('a', -3000, -2000), state('b', 4000, 2500)])
+    expect(hydrated.every((n) => !n.measured)).toBe(true)
+    expect(snapshotTarget(hydrated as SnapshotNode[])).toEqual({
+      ok: true,
+      bounds: { x: -3000, y: -2000, width: 7600, height: 4900 }
+    })
   })
 
   it('keep-alive ghosts are not content — they would drag the frame toward the origin', () => {

@@ -26,6 +26,8 @@ export interface GeometryNode {
   collapsed: boolean
   /** It, or a frame it sits in, is pinned: layout verbs will not move it. */
   pinned: boolean
+  /** A cron/loop card (lib/loopCards): the agent node it hangs off. Absent on every other node. */
+  owner?: string
 }
 
 /** Two siblings (same container) whose rectangles intersect with positive area. `width`/`height`
@@ -104,7 +106,8 @@ export function computeGeometry(
     ...absolutePosition(nd as unknown as FocusableNode, all),
     ...renderedSize(nd),
     collapsed: nd.data.collapsed === true,
-    pinned: isPinned(nd, nodes)
+    pinned: isPinned(nd, nodes),
+    ...(typeof nd.data.ownerNodeId === 'string' ? { owner: nd.data.ownerNodeId } : {})
   }))
 
   const overlaps: SiblingOverlap[] = []
@@ -140,16 +143,30 @@ const px = (v: number): string => String(Math.round(v * 10) / 10)
 function geometryMessage(r: GeometryReport): string {
   const byId = new Map(r.nodes.map((g) => [g.id, g]))
   const label = (id: string): string => `${JSON.stringify(byId.get(id)?.title ?? '')} (${id})`
+  // A cron/loop card (it has an `owner`) cannot be moved by any verb — it follows its agent — so
+  // its problems are counted apart: an orchestrator driving `arrange` to "0 overlaps" must not
+  // chase ones that no layout verb can clear (#7).
+  const isCard = (id: string): boolean => byId.get(id)?.owner !== undefined
+  const cards = r.nodes.filter((g) => g.owner !== undefined).length
   const frames = r.nodes.filter((g) => g.kind === 'group').length
+  const nodeOverlaps = r.overlaps.filter((o) => !isCard(o.a) && !isCard(o.b)).length
+  const nodeOutside = r.outside.filter((o) => !isCard(o.id)).length
+  const cardOverlaps = r.overlaps.length - nodeOverlaps
+  const cardOutside = r.outside.length - nodeOutside
   const summary =
-    `${plural(r.nodes.length - frames, 'node')}, ${plural(frames, 'frame')}, ${plural(r.overlaps.length, 'overlap')}` +
-    (r.outside.length
-      ? `, ${r.outside.length} outside ${r.outside.length === 1 ? 'its frame' : 'their frames'}`
+    `${plural(r.nodes.length - frames - cards, 'node')}, ${plural(frames, 'frame')}, ${plural(nodeOverlaps, 'overlap')}` +
+    (nodeOutside ? `, ${nodeOutside} outside ${nodeOutside === 1 ? 'its frame' : 'their frames'}` : '') +
+    (cards
+      ? `; ${plural(cards, 'card')}: ${plural(cardOverlaps, 'overlap')}` +
+        (cardOutside ? `, ${cardOutside} outside ${cardOutside === 1 ? 'its frame' : 'their frames'}` : '')
       : '')
+  const tag = (...ids: string[]): string => (ids.some(isCard) ? 'card ' : '')
   return [
     summary,
-    ...r.overlaps.map((o) => `overlap: ${label(o.a)} and ${label(o.b)} by ${px(o.width)}×${px(o.height)}`),
-    ...r.outside.map((o) => `outside: ${label(o.id)} sticks out of frame ${label(o.frame)}`)
+    ...r.overlaps.map(
+      (o) => `${tag(o.a, o.b)}overlap: ${label(o.a)} and ${label(o.b)} by ${px(o.width)}×${px(o.height)}`
+    ),
+    ...r.outside.map((o) => `${tag(o.id)}outside: ${label(o.id)} sticks out of frame ${label(o.frame)}`)
   ].join('\n')
 }
 

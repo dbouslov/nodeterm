@@ -181,7 +181,7 @@ import { reopenVariants } from '../lib/reopenVariants'
 import { modelsForAgent, type GatewayModel } from '@shared/agents/model-gateway'
 import { useModelGateway } from '../state/modelGateway'
 import { viewportAtZoom } from '../lib/zoomReset'
-import { containerOrigin, snapPointInRootSpace } from '../lib/gridSnap'
+import { containerOrigin } from '../lib/gridSnap'
 import { zoomFromPct } from '../lib/zoomPresets'
 import { CANVAS_MAX_ZOOM, CANVAS_MIN_ZOOM } from './zoom-limits'
 import { isSpaceRelease, spacePanKeydown } from '../lib/spacePan'
@@ -270,6 +270,7 @@ import {
   sourceIsControlCapable,
   storedNodeListing,
   listRowText,
+  type ListRow,
   answerBrowserResolve,
   offScreenNotice,
   type BrowserResolveProject
@@ -321,6 +322,7 @@ import {
 } from '../lib/nodeFocus'
 import { runSnapshot, snapshotViewRefusal, SNAPSHOT_MARGIN_PX, SNAPSHOT_NOT_ON_SCREEN } from '../lib/canvasSnapshot'
 import { geometryReply } from '../lib/geometry'
+import { buildLoopCards, ephemeralDims, loopCardListRows, offsetFrom, type LoopCardUi } from '../lib/loopCards'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
 import { NO_INSETS, measurePinnedInsets, type ScreenInsets } from '../lib/pinnedInsets'
 import { ZONE_GUTTER_PX, ZONES, zoneTargetRect, type ZoneId } from '../lib/nodeZones'
@@ -700,6 +702,22 @@ function snapGridNow(): number {
   return settings.snapToGrid ? settings.gridSize || GRID : 0
 }
 
+/**
+ * The cron/loop cards `nodes` would draw right now (lib/loopCards), for the `list` / `geometry`
+ * verbs (#7). Read through `getState()` for the same reason as snapGridNow; `selectedId` is left
+ * out because no verb reports it.
+ */
+function loopCardsNow(nodes: readonly CanvasNode[]): CanvasNode[] {
+  const ui = useAgentNodes.getState()
+  return buildLoopCards(nodes, useAgentStatus.getState().byId, {
+    positions: ui.positions,
+    sizes: ui.sizes,
+    expanded: ui.expanded,
+    selectedId: null,
+    snap: snapGridNow()
+  }).nodes
+}
+
 /** The empty opaque set (glyphgrid), shared so the render-time compute allocates nothing on the
  *  overwhelmingly common "nothing overlaps / layer off" path. */
 const EMPTY_OPAQUE: string[] = []
@@ -878,35 +896,6 @@ const NO_EPHEMERAL: { ephemeralNodes: CanvasNode[]; ephemeralEdges: Edge[] } = {
   ephemeralEdges: []
 }
 
-/**
- * An ephemeral card's position: its parent agent's position plus either the offset the user
- * dragged it to or the laid-out default. Both live in the AGENT's coordinate space (the card
- * inherits the agent's `parentId`), which is the whole point of storing an offset — grouping or
- * ungrouping the agent flips that space between absolute and group-relative, and a stored
- * position would then teleport the card by the group's own x/y.
- *
- * `snap` (absent = off) rounds the LAID-OUT default onto the grid: React Flow's `snapToGrid` only
- * constrains a drag, so a fan-out card landed off-grid and only jumped into place once the user
- * nudged it. A DRAGGED offset is left alone — it was already snapped at drag time if the mode was
- * on, and re-rounding it here would move cards the user placed by hand while it was off.
- *
- * The snap carries its container's root-space `origin` because the composed position above is
- * container-relative, and React Flow's own drag snap works in root space — see
- * `snapPointInRootSpace`.
- */
-const offsetFrom = (
-  parent: { position: { x: number; y: number } },
-  stored: { x: number; y: number } | undefined,
-  fallback: { x: number; y: number },
-  snap?: { grid: number; origin: { x: number; y: number } }
-): { x: number; y: number } => {
-  const off = stored ?? fallback
-  const position = { x: parent.position.x + off.x, y: parent.position.y + off.y }
-  if (stored || !snap) {
-    return position
-  }
-  return snapPointInRootSpace(position, snap.origin, snap.grid)
-}
 
 
 /** Zoom-step tween. One constant because the same step sits on two surfaces, the dock and the
@@ -2187,70 +2176,20 @@ export function Canvas() {
     const hasLoops = loopSig !== ''
     const hasAgents = Object.keys(agentById).length > 0
     if (!hasLoops && !hasAgents) return NO_EPHEMERAL
-    // Explicit width/height for an ephemeral node (so it resizes like any other node).
-    // Defaults switch with expand; a user resize override wins.
-    const dims = (id: string, baseW: number, expW: number, baseH: number, expH: number) => {
-      const sz = ephSizes[id]
-      const exp = !!ephExpanded[id]
-      const width = sz?.width ?? (exp ? expW : baseW)
-      const height = sz?.height ?? (exp ? expH : baseH)
-      return { width, height, style: { width, height } }
+    const ui: LoopCardUi = {
+      positions: ephemeralPos,
+      sizes: ephSizes,
+      expanded: ephExpanded,
+      selectedId: ephSelId,
+      snap: ephSnap
     }
-    const eNodes: CanvasNode[] = []
-    const eEdges: Edge[] = []
-    // Loop nodes: one per terminal node currently running a /loop, placed below-left.
-    for (const [pid, st] of Object.entries(claudeById)) {
-      // A DISMISSED cron/schedule entry is kept on purpose (it is the hibernation guard's only
-      // evidence that a wakeup is pending — see agentStatus's `loop.dismissed`), so the filter
-      // lives here, in the render layer, and nowhere else.
-      if (!st.loop || st.loop.dismissed) continue
-      const parent = nodes.find((n) => n.id === pid)
-      if (!parent || parent.data.hideFanout) continue
-      const ph = parent.measured?.height ?? (parent.height as number) ?? 400
-      const accent = agentConfig((parent.data.agentId as string) ?? 'claude')?.color ?? '#d97757'
-      const snap = ephSnap
-        ? { grid: ephSnap, origin: containerOrigin(parent.parentId, nodes) }
-        : undefined
-      const lid = `loop-${pid}`
-      eNodes.push({
-        id: lid,
-        type: 'loop',
-        // parent.position is group-relative when the agent sits in a group frame; giving the
-        // card the same parentId keeps this math in one coordinate space (and the card moves
-        // with the group). Deliberately no extent:'parent' — the fan-out may hang below the
-        // frame border without being clamped into it.
-        ...(parent.parentId ? { parentId: parent.parentId } : {}),
-        position: offsetFrom(parent, ephemeralPos[lid], { x: -250, y: ph + 60 }, snap),
-        draggable: true,
-        // NOT selectable: React Flow's rubber band would otherwise sweep a whole fan-out of cards
-        // into the selection alongside the real nodes, and every selection action (Group,
-        // Duplicate, Delete, colors) would then be handed ids it cannot act on — the frame ends up
-        // drawn around the wrong things. Cards select one at a time, by click (`select` below).
-        selectable: false,
-        selected: ephSelId === lid,
-        ...dims(lid, 230, 460, 92, 320),
-        data: {
-          title: st.loop.task ?? '',
-          color: accent,
-          group: null,
-          loopCount: st.loop.count,
-          loopItems: st.loop.items,
-          loopActive: st.state === 'working',
-          loopKind: st.loop.kind,
-          loopSchedule: st.loop.schedule,
-          loopTask: st.loop.task,
-          ephExpanded: !!ephExpanded[lid]
-        }
-      } as CanvasNode)
-      eEdges.push({
-        id: `e-${lid}`,
-        source: pid,
-        type: 'circuit',
-        target: lid,
-        data: { kind: 'fanout', state: { working: st.state === 'working', agentColor: accent } } satisfies EdgeData,
-        animated: st.state === 'working'
-      })
-    }
+    const dims = (id: string, baseW: number, expW: number, baseH: number, expH: number) =>
+      ephemeralDims(ui, id, baseW, expW, baseH, expH)
+    // Loop nodes: one per terminal node currently running a /loop, placed below-left. The same
+    // builder answers `list` / `geometry` (lib/loopCards), so a reported rect is the drawn one.
+    const loops = buildLoopCards(nodes, claudeById, ui)
+    const eNodes: CanvasNode[] = loops.nodes
+    const eEdges: Edge[] = loops.edges
     const byParent: Record<string, string[]> = {}
     for (const id of Object.keys(agentById)) {
       ;(byParent[agentById[id].parentNodeId] ??= []).push(id)
@@ -10503,12 +10442,16 @@ export function Canvas() {
           // `geometry` is store-answered for `list`'s reason (STORE_ANSWERED_VERBS): a read must not
           // travel the human's view. It reads the owning project's serialized nodes.
           if (verb === 'geometry') {
-            const stored = projects.find((p) => p.id === route.projectId)?.nodes ?? []
-            reply(geometryReply(nodeStatesToFlow(stored), args.frame))
+            const stored = nodeStatesToFlow(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
+            reply(geometryReply([...stored, ...loopCardsNow(stored)], args.frame))
             return
           }
           if (!needsLiveCanvas(verb)) {
-            const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
+            const stored = projects.find((p) => p.id === route.projectId)?.nodes ?? []
+            const rows = [
+              ...storedNodeListing(stored),
+              ...loopCardListRows(loopCardsNow(nodeStatesToFlow(stored)))
+            ]
             reply({
               ok: true,
               result: rows,
@@ -11270,7 +11213,7 @@ export function Canvas() {
             // separately would be seven round trips to learn the one thing that changes what it
             // does next.
             const st = useAgentStatus.getState().byId
-            const list = nodesRef.current.map((n) => {
+            const list: ListRow[] = nodesRef.current.map((n) => {
               // Re-validated here: live node data is reachable by a peer canvas mutation, and a
               // role carrying a newline would print a forged row into this text reply.
               const role = normalizeNodeAnnotation(n.data.annotation)?.role
@@ -11283,6 +11226,9 @@ export function Canvas() {
                 ...(role ? { role } : {})
               }
             })
+            // The cron/loop cards under an agent are not React Flow state, so they would be
+            // invisible here without this (#7).
+            list.push(...loopCardListRows(loopCardsNow(nodesRef.current)))
             reply({
               ok: true,
               result: list,
@@ -11292,7 +11238,8 @@ export function Canvas() {
           }
           case 'geometry': {
             // Read-only, like `list`: no dialog, nothing changes. The logic is lib/geometry.
-            reply(geometryReply(nodesRef.current as CanvasNode[], args.frame))
+            const live = nodesRef.current as CanvasNode[]
+            reply(geometryReply([...live, ...loopCardsNow(live)], args.frame))
             return
           }
           case 'open-terminal': {
