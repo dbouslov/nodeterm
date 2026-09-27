@@ -85,3 +85,16 @@ export function traceFromConsole(message: string, trace: PersistTrace): boolean 
   trace.record(rec)
   return true
 }
+
+/**
+ * Whether a console message may write the persist trace: only from the app's own window
+ * (`getType() === 'window'`, never a `<webview>` guest) AND from that window's TOP frame — a
+ * webContents reports its sub-frames' console too, and an iframe (the PDF viewer in an editor node)
+ * is not the app. A message whose frame is unknown is refused.
+ */
+export function traceConsoleSourceAllowed(
+  contentsType: string,
+  frame: { parent: unknown } | null | undefined
+): boolean {
+  return contentsType === 'window' && frame != null && frame.parent === null
+}

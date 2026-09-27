@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { promises as fs } from 'fs'
 import os from 'os'
 import path from 'path'
-import { createPersistTrace, traceFromConsole } from './persist-trace'
+import { createPersistTrace, traceFromConsole, traceConsoleSourceAllowed } from './persist-trace'
 
 let dir: string
 beforeEach(async () => {
@@ -92,5 +92,26 @@ describe('the persist trace file', () => {
     const all = await lines(file)
     expect(all).toHaveLength(1)
     expect(all[0]).toContain('{"side":"renderer","ev":"save","ok":true}')
+  })
+})
+
+// PR #18 review: the listener's filter was `getType() === 'window'` alone, and a webContents'
+// console-message fires for its sub-frames too — so an iframe inside the app window (the PDF viewer
+// in an editor node) could write trace lines. Only the window's own top frame may.
+describe('which console messages may write the trace', () => {
+  const top = { parent: null }
+  const child = { parent: top }
+  it("takes the app window's top frame", () => {
+    expect(traceConsoleSourceAllowed('window', top)).toBe(true)
+  })
+  it('refuses an iframe inside the app window', () => {
+    expect(traceConsoleSourceAllowed('window', child)).toBe(false)
+  })
+  it('refuses a webview guest, even its top frame', () => {
+    expect(traceConsoleSourceAllowed('webview', top)).toBe(false)
+  })
+  it('refuses a message whose frame is unknown', () => {
+    expect(traceConsoleSourceAllowed('window', null)).toBe(false)
+    expect(traceConsoleSourceAllowed('window', undefined)).toBe(false)
   })
 })

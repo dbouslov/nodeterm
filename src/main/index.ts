@@ -55,7 +55,12 @@ import { registerFsHandlers } from '../core/fs-handlers'
 import { TrackpadGestureLedger } from './trackpad-gesture'
 import { LogBuffer } from '../core/log-buffer'
 import { installLogSink, splitTag } from '../core/log-sink'
-import { createPersistTrace, traceFromConsole, PERSIST_TRACE_FILE } from '../core/persist-trace'
+import {
+  createPersistTrace,
+  traceFromConsole,
+  traceConsoleSourceAllowed,
+  PERSIST_TRACE_FILE
+} from '../core/persist-trace'
 import { registerLogHandlers } from '../core/log-handlers'
 import {
   registerBrowserGuest,
@@ -1296,8 +1301,11 @@ app.whenReady().then(async () => {
         // is for, and they triage by tag. Untagged lines fall back to 'renderer'.
         const { tag, rest } = splitTag(String(event.message ?? ''))
         logBuffer.push({ level, tag: tag || 'renderer', msg: rest })
-        // Only the app's own windows may write the persist trace — never a web page in a guest.
-        if (contents.getType() === 'window') traceFromConsole(String(event.message ?? ''), persistTrace)
+        // Only the app's own windows may write the persist trace — never a web page in a guest,
+        // and never an iframe inside the window (the PDF viewer): its top frame only.
+        if (traceConsoleSourceAllowed(contents.getType(), event.frame)) {
+          traceFromConsole(String(event.message ?? ''), persistTrace)
+        }
       } catch {
         /* logging must never break a page */
       }
