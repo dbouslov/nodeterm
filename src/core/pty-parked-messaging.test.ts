@@ -468,6 +468,42 @@ describe.skipIf(process.platform === 'win32')('messaging a parked session (paint
       expect(pastes()).toEqual([])
     })
 
+    it('an open whose tmux check got no answer says so once, and the chat stays unproven', async () => {
+      const { PtyManager } = await import('./pty-manager')
+      const m = new PtyManager()
+      m.init(() => DEFAULT_SETTINGS)
+      m.registerIpc()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        // The has-session probe fails to spawn (EAGAIN under a mount burst): no answer at all.
+        tmux.unreachable = true
+        const opened = (await fake.handlers[IPC.ptyCreate](ALICE, {
+          cols: 80,
+          rows: 24,
+          persistKey: NODE,
+          ownerProjectId: 'p1'
+        })) as { fresh: boolean }
+        tmux.unreachable = false
+        // Fail-closed stays: an unanswered probe folds to "exists", so nothing is recorded ...
+        expect(opened.fresh).toBe(false)
+        expect(paneOwnerProject(NODE)).toBeUndefined()
+        // ... but it is no longer silent. One line, naming the node, the failure and the cost.
+        const lines = warn.mock.calls.map((c) => c.join(' ')).filter((l) => l.includes('ownership not recorded'))
+        expect(lines).toHaveLength(1)
+        expect(lines[0]).toContain(TARGET)
+        expect(lines[0]).toContain('EAGAIN')
+      } finally {
+        warn.mockRestore()
+      }
+      tmux.live.add(TARGET) // `new-session -A` created it anyway
+      tmux.calls.length = 0
+
+      const { outcome } = await deliverFromControl(req(), deps(m, { paneOwnerProject }))
+
+      expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+      expect(pastes()).toEqual([])
+    })
+
     it('a chat closed while parked is no longer owned', async () => {
       const m = await openedParkedRemounted()
       const { sessionId } = (await fake.handlers[IPC.ptyCreate](ALICE, {

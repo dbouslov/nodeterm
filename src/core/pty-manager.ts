@@ -2198,7 +2198,7 @@ export class PtyManager {
       : warmWindowsBackend
         ? false
         : tmuxBacked
-        ? !(await this.tmuxSessionExists(options.persistKey as string))
+        ? await this.freshFromLocalProbe(options.persistKey as string, options.ownerProjectId)
         : true
     // Ensure the login-shell PATH is resolved (prewarmed in init(); usually already settled)
     // so the session env below picks it up — awaiting keeps the event loop free either way.
@@ -2544,20 +2544,44 @@ export class PtyManager {
    *  Async like the remote probe: a bulk project load fires one `create()` per terminal node,
    *  and a synchronous subprocess per probe would serialize on the main event loop. */
   private async tmuxSessionExists(persistKey: string): Promise<boolean> {
-    if (!this.tmuxPath) return false
+    return (await this.tmuxSessionProbe(persistKey)) !== 'absent'
+  }
+
+  /** The same `has-session` read, tri-state: `present`, `absent` (tmux's own exit 1), or the error
+   *  of a probe that got no answer (spawn failure, timeout). `tmuxSessionExists` folds the last one
+   *  into "exists"; callers that must also SAY a read went unanswered take this form. */
+  private async tmuxSessionProbe(persistKey: string): Promise<'present' | 'absent' | { unanswered: unknown }> {
+    if (!this.tmuxPath) return 'absent'
     try {
       // `=`: this session and no other. A bare name that is no session falls back to the ONE session
       // whose name it begins (`nt-b1` finds `nt-b12`, measured on tmux 3.7b): a gone node read live.
       await runAsync(this.tmuxPath, ['-L', TMUX_SOCKET, 'has-session', '-t', `=${sessionName(persistKey)}`], {
         timeout: PROBE_TIMEOUT_MS
       })
-      return true
+      return 'present'
     } catch (e) {
       // Same discrimination as the remote probe: tmux's exit 1 (no session / no server —
       // the reboot case) is absence; a spawn failure (EAGAIN under a bulk project load) is
       // not, and cold-restoring on it would type into a live session.
-      return !probeSaysAbsent(e)
+      return probeSaysAbsent(e) ? 'absent' : { unanswered: e }
     }
+  }
+
+  /** `create()`'s local freshness read. An unanswered probe folds to "exists" (never type a resume
+   *  into a live pane), which also means the ownership ledger records nothing for this open, while
+   *  `new-session -A` may still create the session — so every later `send` to the chat is refused
+   *  `unproven-target-owner`. That stays fail-closed; this only makes it visible in the log. */
+  private async freshFromLocalProbe(persistKey: string, ownerProjectId: string | undefined): Promise<boolean> {
+    const probe = await this.tmuxSessionProbe(persistKey)
+    if (probe === 'absent') return true
+    if (probe !== 'present' && ownerProjectId) {
+      const e = probe.unanswered as { code?: unknown; signal?: unknown } | null
+      console.warn(
+        `[pty] has-session for ${sessionName(persistKey)} got no answer ` +
+          `(code=${String(e?.code ?? '?')} signal=${String(e?.signal ?? '-')}): treated as live, ownership not recorded`
+      )
+    }
+    return false
   }
 
   /** Destructive-confirmation variant of the warm-attach probe. Warm attach treats an unavailable
