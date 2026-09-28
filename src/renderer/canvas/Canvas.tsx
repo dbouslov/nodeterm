@@ -323,8 +323,9 @@ import {
 } from '../lib/nodeFocus'
 import { runSnapshot, settledPaint, snapshotViewRefusal, SNAPSHOT_MARGIN_PX, SNAPSHOT_NOT_ON_SCREEN } from '../lib/canvasSnapshot'
 import { geometryReply } from '../lib/geometry'
-import { buildLoopCards, loopCardListRows, type LoopCardUi } from '../lib/loopCards'
+import { buildLoopCards, loopCardListRows, loopParentIds, type LoopCardUi } from '../lib/loopCards'
 import { buildSubagentCards } from '../lib/subagentCards'
+import { CardBandDriver, SLIDE_MS, cardRowBands, setCardBand } from '../lib/cardBand'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
 import { NO_INSETS, measurePinnedInsets, type ScreenInsets } from '../lib/pinnedInsets'
 import { ZONE_GUTTER_PX, ZONES, zoneTargetRect, type ZoneId } from '../lib/nodeZones'
@@ -724,9 +725,10 @@ function cardsNow(nodes: readonly CanvasNode[]): CanvasNode[] {
   }
   // The subagent cards too (lib/subagentCards): drawn the same way, invisible to the verbs the
   // same way.
+  const status = useAgentStatus.getState().byId
   return [
-    ...buildLoopCards(nodes, useAgentStatus.getState().byId, cardUi).nodes,
-    ...buildSubagentCards(nodes, ui.byId, cardUi).nodes
+    ...buildLoopCards(nodes, status, cardUi).nodes,
+    ...buildSubagentCards(nodes, ui.byId, cardUi, loopParentIds(status)).nodes
   ]
 }
 
@@ -2211,7 +2213,7 @@ export function Canvas() {
     const eEdges: Edge[] = loops.edges
     // Subagent cards, laid out under their agent — the same builder answers `list` / `geometry`
     // (lib/subagentCards).
-    const subs = buildSubagentCards(nodes, agentById, ui)
+    const subs = buildSubagentCards(nodes, agentById, ui, loopParentIds(claudeById))
     eNodes.push(...subs.nodes)
     eEdges.push(...subs.edges)
     return { ephemeralNodes: eNodes, ephemeralEdges: eEdges }
@@ -3635,6 +3637,73 @@ export function Canvas() {
     },
     [setNodes]
   )
+
+  // Helper cards count in layout (lib/cardBand): each chat keeps room under it for its card row, and
+  // the chats below make room once per wave. The driver decides WHEN (trailing window, holds); this
+  // only feeds it the canvas, the per-chat keydown/pointer facts, and applies what it returns.
+  const bandKeysRef = useRef(new Map<string, number>())
+  const bandPointerRef = useRef<string | null>(null)
+  const cardBandRef = useRef<CardBandDriver>(null as unknown as CardBandDriver)
+  if (!cardBandRef.current) {
+    cardBandRef.current = new CardBandDriver({
+      nodes: () => nodesRef.current as CanvasNode[],
+      rows: (ns) => {
+        const ui = useAgentNodes.getState()
+        return cardRowBands(ns, loopParentIds(useAgentStatus.getState().byId), ui.byId, ui.sizes)
+      },
+      env: () => ({
+        busy: draggingRef.current || resizeStartRef.current.size > 0,
+        lastKeydown: bandKeysRef.current,
+        pointerOver: bandPointerRef.current
+      }),
+      grid: snapGridNow,
+      commit: (step) => {
+        // Compared inside the updater: a second application of the same band is a no-op.
+        setNodes((ns) => step.apply.reduce((acc, a) => setCardBand(acc, a.id, a.band, snapGridNow()), ns))
+        // Slide what moved, and its cards, for this one change only.
+        const moved = new Set(step.moved)
+        const byId = useAgentNodes.getState().byId
+        const ids = [
+          ...moved,
+          ...[...moved].map((id) => `loop-${id}`),
+          ...Object.keys(byId).filter((id) => moved.has(byId[id].parentNodeId))
+        ]
+        const els = ids.flatMap((id) => [
+          ...document.querySelectorAll<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
+        ])
+        for (const el of els) el.classList.add('nt-band-slide')
+        setTimeout(() => els.forEach((el) => el.classList.remove('nt-band-slide')), SLIDE_MS + 50)
+        markDirty()
+      }
+    })
+  }
+  useEffect(() => cardBandRef.current.run(), [nodes, agentById, loopSig, ephSizes])
+  useEffect(() => {
+    const driver = cardBandRef.current
+    const nodeIdOf = (t: EventTarget | null): string | null =>
+      (t instanceof Element && t.closest('.react-flow__node')?.getAttribute('data-id')) || null
+    const onKey = (e: KeyboardEvent): void => {
+      const id = nodeIdOf(e.target)
+      if (id) bandKeysRef.current.set(id, Date.now())
+    }
+    const onOver = (e: PointerEvent): void => {
+      const id = nodeIdOf(e.target)
+      if (id === bandPointerRef.current) return
+      bandPointerRef.current = id
+      if (driver.held.size) driver.run()
+    }
+    // Opening a card is a peek: a click anywhere else collapses it.
+    const onDown = (e: PointerEvent): void => useAgentNodes.getState().collapseExpanded(nodeIdOf(e.target) ?? undefined)
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('pointerover', onOver, true)
+    window.addEventListener('pointerdown', onDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('pointerover', onOver, true)
+      window.removeEventListener('pointerdown', onDown, true)
+      driver.dispose()
+    }
+  }, [])
 
   // Resolve a node's agent id, with a tags fallback for not-yet-migrated legacy nodes and a
   // hook-status fallback for plain terminals where the user launched an agent CLI by hand:
@@ -10385,7 +10454,7 @@ export function Canvas() {
           // travel the human's view. It reads the owning project's serialized nodes.
           if (verb === 'geometry') {
             const stored = nodeStatesToFlow(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
-            reply(geometryReply([...stored, ...cardsNow(stored)], args.frame))
+            reply(geometryReply([...stored, ...cardsNow(stored)], args.frame, { held: cardBandRef.current.held }))
             return
           }
           if (!needsLiveCanvas(verb)) {
@@ -11177,7 +11246,7 @@ export function Canvas() {
           case 'geometry': {
             // Read-only, like `list`: no dialog, nothing changes. The logic is lib/geometry.
             const live = nodesRef.current as CanvasNode[]
-            reply(geometryReply([...live, ...cardsNow(live)], args.frame))
+            reply(geometryReply([...live, ...cardsNow(live)], args.frame, { held: cardBandRef.current.held }))
             return
           }
           case 'open-terminal': {

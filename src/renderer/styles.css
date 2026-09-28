@@ -6266,6 +6266,17 @@ body,
   text-align: center;
 }
 
+/* A chat moved to make room for helper cards (lib/cardBand) slides, with its cards, for that one
+   change only: Canvas adds the class for SLIDE_MS and takes it off. No slide on drag or resize. */
+.react-flow__node.nt-band-slide {
+  transition: transform 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__node.nt-band-slide {
+    transition: none;
+  }
+}
+
 /* ---- Group frame node ---- */
 /* Neutralize React Flow's built-in group-node styling (a ~25% white fill, border, and
    selection ring) — our .group-node draws the whole frame itself. */
