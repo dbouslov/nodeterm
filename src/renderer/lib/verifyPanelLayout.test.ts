@@ -134,6 +134,23 @@ describe('layoutVerifyPanel — a review panel never lands on anything', () => {
     expect(second.groupId).toBe(first.groupId)
   })
 
+  it('does not reuse a panel frame whose growth would run over a pinned node; it opens a new one', () => {
+    const start = [node('caller', 0, 0, 600, 400), member('r1')]
+    const first = layoutVerifyPanel(start, { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
+    const g = rectOf(first.nodes.find((n) => n.id === first.groupId)!, first.nodes)
+    // Pinned, right under the earlier panel frame: a new round below the old one would cover it,
+    // and settle cannot move a pinned node out of the way.
+    const pinned = node('pin', g.x, g.y + g.h + 40, 600, 400, { data: { title: 'pin', color: '#fff', group: null, pinned: true } })
+    const second = layoutVerifyPanel([...first.nodes, pinned, member('q1')], {
+      srcId: 'caller',
+      panelIds: ['q1'],
+      label: 'Verify: Build'
+    })
+    expect(second.reused).toBe(false)
+    expect(second.nodes.find((n) => n.id === 'pin')!.position).toEqual(pinned.position)
+    expect(overlaps(second.nodes)).toEqual([])
+  })
+
   it('a different label opens a second panel frame beside the first, overlapping nothing', () => {
     const first = layoutVerifyPanel([...canvas(), member('r1')], { srcId: 'caller', panelIds: ['r1'], label: 'Verify: A' })
     const second = layoutVerifyPanel([...first.nodes, member('q1')], { srcId: 'caller', panelIds: ['q1'], label: 'Verify: B' })

@@ -14,12 +14,14 @@
 //    round goes below the earlier one inside it. Nothing of the earlier round is closed (those are
 //    sessions); the caller closes a finished round itself (`close --node … --compact`).
 //    Only a frame `verify` made is reused (`data.verifyPanel`, persisted): a user's own frame, a
-//    team or a worktree frame that happens to carry the title is never taken over.
+//    team or a worktree frame that happens to carry the title is never taken over. And a reuse whose
+//    growth would run over a PINNED node (which `settle` cannot move) falls through to rule 1.
 
 import { ancestorFrameIds, placeChild, type Box } from '@shared/placement'
 import {
   arrangeNodes,
   groupSelectedNodes,
+  isPinned,
   reparentNode,
   rootPosition,
   GROUP_HEADER,
@@ -66,13 +68,15 @@ export function layoutVerifyPanel(nodes: CanvasNode[], opts: LayoutOpts): Layout
       (n.data.title as string | undefined) === opts.label
   )
   if (earlier) {
-    return { nodes: reuseFrame(nodes, earlier, opts.panelIds, grid), groupId: earlier.id, reused: true }
+    const reused = reuseFrame(nodes, earlier, opts.panelIds, grid)
+    if (reused) return { nodes: reused, groupId: earlier.id, reused: true }
   }
   return newFrame(nodes, src, container, opts, grid, true)
 }
 
-/** Rule 2: the new round below the earlier one, inside its frame. */
-function reuseFrame(nodes: CanvasNode[], earlier: CanvasNode, panelIds: string[], grid: number): CanvasNode[] {
+/** Rule 2: the new round below the earlier one, inside its frame — or null when the frame's growth
+ *  would run over a pinned node. */
+function reuseFrame(nodes: CanvasNode[], earlier: CanvasNode, panelIds: string[], grid: number): CanvasNode[] | null {
   const at = rootPosition(earlier, nodes)
   const kids = nodes.filter((n) => n.parentId === earlier.id)
   const bottom = kids.length
@@ -81,7 +85,24 @@ function reuseFrame(nodes: CanvasNode[], earlier: CanvasNode, panelIds: string[]
   let next = arrangeNodes(nodes, panelIds, { layout: 'grid', origin: { x: at.x + GROUP_PAD, y: bottom } })
   for (const id of panelIds) next = reparentNode(next, id, earlier.id)
   next = settle(next, panelIds[0], grid)
-  return next
+  return pinnedOverlaps(next) > pinnedOverlaps(nodes) ? null : next
+}
+
+/** Sibling pairs (same container) that overlap where at least one is pinned: what `settle` leaves
+ *  behind when a growing frame meets a node it may not move. */
+function pinnedOverlaps(nodes: CanvasNode[]): number {
+  const boxes = nodes.map((n) => ({ n, pinned: isPinned(n, nodes), ...rootPosition(n, nodes), w: w(n), h: h(n) }))
+  let count = 0
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]
+      const b = boxes[j]
+      if (!a.pinned && !b.pinned) continue
+      if ((a.n.parentId ?? null) !== (b.n.parentId ?? null)) continue
+      if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) count++
+    }
+  }
+  return count
 }
 
 /** Rule 1: build the frame box anywhere, then place the whole box and file it into `container`. */
