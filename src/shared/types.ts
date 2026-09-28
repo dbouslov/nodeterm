@@ -392,6 +392,9 @@ export interface CanvasNodeState {
   /** Pinned in place: automatic layout (arrange, align, Restructure, frame fitting) never moves it
    *  or anything inside it. The file is hand-editable, so only a literal `true` is honoured. */
   pinned?: boolean
+  /** group-only: this frame is a `verify` review panel, so a re-verify with the same label may add
+   *  its round to it. Only a literal `true` counts; a frame without it is never taken over. */
+  verifyPanel?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /**

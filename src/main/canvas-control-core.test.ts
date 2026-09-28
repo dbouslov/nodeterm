@@ -142,6 +142,20 @@ describe('parseControlRequest', () => {
     expect(isDestructiveVerb('verify')).toBe(false)
   })
 
+  // Candidates item 3: the panel joins the caller's frame and a same-label re-verify reuses the
+  // earlier panel frame. An orchestrator that is not told so opens a new label every round.
+  it('both agent-facing texts say where a verify panel goes and that a same-label re-verify reuses it', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      const at = body.indexOf('`verify --node <id>')
+      expect(at, 'documented').toBeGreaterThan(-1)
+      const entry = body.slice(at, body.indexOf('\n- ', at))
+      expect(entry).toMatch(/your\s+(own\s+)?frame/i)
+      expect(entry).toMatch(/same\s+label[\s\S]*reuses/i)
+      const t = body.indexOf('`spawn-team --label')
+      expect(body.slice(t, body.indexOf('\n- ', t))).toMatch(/inside\s+your\s+own\s+frame/i)
+    }
+  })
+
   it('open-agent requires --agent, and is not destructive', () => {
     expect(parseControlRequest('open-agent', {})).toEqual({ error: 'open-agent requires --agent <id>' })
     expect(parseControlRequest('open-agent', { agent: 'codex' })).toEqual({
@@ -1287,6 +1301,13 @@ describe('minimize verb', () => {
     ]) {
       expect(body).toContain('`minimize --node <id,id> [--set on|off]`')
       expect(body).toContain('(minimized)')
+      // Answered off screen from the saved canvas (candidates item 8), never refused.
+      const answered = body.split('\n').find((l) => l.includes('Answered whether or not that project is on screen'))
+      expect(answered, 'off-screen answered list').toMatch(/\bminimize\b/)
+      const refused = body.split('\n').find((l) => l.includes('REFUSED while that project is off screen'))
+      expect(refused, 'off-screen refused list').not.toMatch(/\bminimize\b/)
+      const at = body.indexOf('`minimize --node <id,id> [--set on|off]`')
+      expect(body.slice(at, body.indexOf('\n- ', at))).toMatch(/off screen too/i)
     }
   })
 })

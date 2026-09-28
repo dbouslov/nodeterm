@@ -83,6 +83,8 @@ export interface NodeData {
   collapsed?: boolean
   /** Pinned in place — see `CanvasNodeState.pinned` and `isPinned`. */
   pinned?: boolean
+  /** A `verify` review panel frame — see `CanvasNodeState.verifyPanel`. */
+  verifyPanel?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /** Expanded height to restore when un-collapsing (kept out of the persisted size). */
@@ -2081,6 +2083,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         collapsed,
         // Hand-editable input: only a literal true pins — a stray "yes" must not freeze a layout.
         pinned: n.pinned === true ? true : undefined,
+        verifyPanel: n.verifyPanel === true ? true : undefined,
         hideFanout: n.hideFanout,
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
         // node data — so every surface that renders an icon gets a value this module vouched for
@@ -2164,6 +2167,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         tags: n.data.tags,
         collapsed: n.data.collapsed,
         pinned: n.data.pinned === true ? true : undefined,
+        verifyPanel: n.data.verifyPanel === true ? true : undefined,
         hideFanout: n.data.hideFanout,
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out
         // untyped. Re-validating on the way OUT (not just on the way in) also means a value a
