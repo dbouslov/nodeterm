@@ -380,6 +380,29 @@ describe('HeadlessNodeFactory', () => {
     expect(after.some((n) => n.id === 'dock-page')).toBe(true)
   })
 
+  it('refuses an implicit open from a Dock member and lists the frames it can use (T8)', async () => {
+    const workspace = await store.load({ sideline: false })
+    const project = workspace.projects[0]
+    project.nodes.push({
+      id: 'dock',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      size: { width: 1400, height: 1100 },
+      title: 'GO',
+      color: '#fff',
+      group: null,
+      pinned: true,
+      fixture: 'dock'
+    } as CanvasNodeState)
+    const src = project.nodes.find((n) => n.id === 'term-source')!
+    src.parentId = 'dock'
+    await store.save(workspace)
+    const res = await factory.openAgent('term-source', { agent: 'claude', prompt: 'x' }, true)
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('--group') })
+    expect(res.error).toContain('dock (the Dock)')
+    expect((await store.load({ sideline: false })).projects[0].nodes).toHaveLength(project.nodes.length)
+  })
+
   it('refuses a different caller without killing or removing the owned spawn', async () => {
     const opened = await factory.openTerminal('term-source', {}, true)
     const id = (opened.result as { id: string }).id

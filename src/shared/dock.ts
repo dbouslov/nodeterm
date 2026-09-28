@@ -13,7 +13,8 @@ export interface DockShape {
   type?: string
   kind?: string
   fixture?: unknown
-  data?: { fixture?: unknown }
+  title?: string
+  data?: { fixture?: unknown; title?: unknown }
 }
 
 /** A frame carrying the literal 'dock'. The project file is hand-editable, so anything else, or
@@ -70,11 +71,16 @@ export function dockRefusal(
   nodes: readonly MarkShape[],
   action: DockAction,
   ids: readonly string[],
-  target?: string | null
+  target?: string | null,
+  callerId?: string
 ): string | null {
   const dock = dockOf(nodes)
   if (!dock) return null
   const targetInDock = !!target && (target === dock.id || inDock(target, nodes))
+  // Moving INTO the Dock is the seat's call alone: only a caller inside the Dock may do it.
+  if (action === 'move' && targetInDock && !(callerId && inDock(callerId, nodes))) {
+    return 'move: nodes go into the Dock only from inside the Dock'
+  }
   for (const id of ids) {
     const n = nodes.find((x) => x.id === id)
     if (!n) continue
@@ -91,4 +97,49 @@ export function dockRefusal(
 /** `ids` less the Dock frame: the human close and unpin paths skip it (Release Dock comes first). */
 export function withoutDock(ids: readonly string[], nodes: readonly DockShape[]): string[] {
   return ids.filter((id) => !isDock(nodes.find((n) => n.id === id)))
+}
+
+const titleOf = (n: DockShape): string => {
+  const t = n.data?.title ?? n.title
+  return typeof t === 'string' && t ? t : n.id
+}
+
+/**
+ * Why an agent's open (open-terminal / open-claude / open-agent) must be refused because of the
+ * Dock, or null. An IMPLICIT open (no `--group`) from a Dock member, or `--after` a Dock member,
+ * would join the Dock or land loose beside it, so it is refused and the reply lists the frames the
+ * caller can name instead. An explicit `--group <dock>` is allowed only from inside the Dock.
+ */
+export function dockOpenRefusal(
+  nodes: readonly DockShape[],
+  verb: string,
+  sourceId: string,
+  after: readonly string[],
+  group: string | undefined
+): string | null {
+  const dock = dockOf(nodes)
+  if (!dock) return null
+  const member = (id: string): boolean => inDock(id, nodes)
+  if (group) {
+    if ((group === dock.id || member(group)) && !member(sourceId)) {
+      return `${verb}: --group ${group} is the Dock; nodes open there only from inside the Dock`
+    }
+    return null
+  }
+  const anchors = after.filter((id) => id !== sourceId)
+  const implicit = anchors.length ? anchors.some(member) : member(sourceId)
+  if (!implicit) return null
+  const frames = nodes
+    .filter((n) => (n.type ?? n.kind) === 'group' && !isDock(n) && !member(n.id))
+    .map((n) => `${n.id} (${titleOf(n)})`)
+  const options = [...frames.slice(0, 8), ...(member(sourceId) ? [`${dock.id} (the Dock)`] : [])]
+  return (
+    `${verb}: this would land in or beside the Dock; name its frame with --group <id>` +
+    (options.length ? `: ${options.join(', ')}` : ' (no other frame exists yet: create one with `group` first)')
+  )
+}
+
+/** A raw comma list (`--after a,b`) as ids, for `dockOpenRefusal`. */
+export function idList(raw: string | undefined): string[] {
+  return (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 }

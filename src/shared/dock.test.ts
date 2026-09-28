@@ -116,8 +116,8 @@ describe('dockRefusal: what an agent may not do to the Dock', () => {
     expect(dockRefusal(nodes, 'move', ['seat'], null)).toMatch(/out of the Dock/)
     expect(dockRefusal(nodes, 'move', ['page'], 'W')).toMatch(/out of the Dock/)
     expect(dockRefusal(nodes, 'move', ['D'], 'W')).toMatch(/is the Dock/)
-    expect(dockRefusal(nodes, 'move', ['w1'], 'D')).toBeNull()
-    expect(dockRefusal(nodes, 'move', ['page'], 'inner')).toBeNull()
+    expect(dockRefusal(nodes, 'move', ['w1'], 'D', 'seat')).toBeNull()
+    expect(dockRefusal(nodes, 'move', ['page'], 'inner', 'seat')).toBeNull()
   })
   it('reads the stored shape too (off-canvas and Server Edition closes)', () => {
     const stored = [
@@ -137,5 +137,41 @@ describe('isDock is group-only (review fix 1)', () => {
     expect(isDock({ id: 't', type: 'terminal', data: { fixture: 'dock' } })).toBe(false)
     expect(isDock({ id: 't', kind: 'sticky', fixture: 'dock' })).toBe(false)
     expect(isDock({ id: 'x', fixture: 'dock' })).toBe(false)
+  })
+})
+
+import { dockOpenRefusal } from './dock'
+
+describe('dockOpenRefusal: a Dock member names where a new node goes (review fix 3)', () => {
+  const nodes = [
+    { id: 'D', type: 'group', data: { fixture: 'dock', title: 'GO' } },
+    { id: 'seat', parentId: 'D', type: 'terminal', data: {} },
+    { id: 'page', parentId: 'D', type: 'terminal', data: {} },
+    { id: 'W', type: 'group', data: { title: 'Overnight fixes' } },
+    { id: 'w1', parentId: 'W', type: 'terminal', data: {} },
+    { id: 'loose', type: 'terminal', data: {} }
+  ]
+  it('refuses an implicit open from a Dock member and lists the frames it can use', () => {
+    const no = dockOpenRefusal(nodes, 'open-agent', 'seat', [], undefined)!
+    expect(no).toMatch(/--group/)
+    expect(no).toContain('W (Overnight fixes)')
+    expect(no).toContain('D (the Dock)')
+  })
+  it('refuses --after a Dock member without --group, from anyone', () => {
+    expect(dockOpenRefusal(nodes, 'open-agent', 'loose', ['page'], undefined)).toMatch(/--group/)
+    expect(dockOpenRefusal(nodes, 'open-agent', 'seat', ['w1'], undefined)).toBeNull()
+  })
+  it('--group <dock> only from inside the Dock', () => {
+    expect(dockOpenRefusal(nodes, 'open-agent', 'seat', [], 'D')).toBeNull()
+    expect(dockOpenRefusal(nodes, 'open-agent', 'w1', [], 'D')).toMatch(/only from inside the Dock/)
+    expect(dockOpenRefusal(nodes, 'open-agent', 'seat', [], 'W')).toBeNull()
+  })
+  it('nothing to say away from the Dock', () => {
+    expect(dockOpenRefusal(nodes, 'open-terminal', 'w1', [], undefined)).toBeNull()
+    expect(dockOpenRefusal(nodes, 'open-terminal', 'loose', [], undefined)).toBeNull()
+  })
+  it('move into the Dock only by a caller inside it', () => {
+    expect(dockRefusal(nodes, 'move', ['w1'], 'D', 'loose')).toMatch(/only from inside the Dock/)
+    expect(dockRefusal(nodes, 'move', ['w1'], 'D', 'seat')).toBeNull()
   })
 })

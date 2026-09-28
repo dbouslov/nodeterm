@@ -63,7 +63,7 @@ describe('Dock guards: every path (T8 step 4)', () => {
     expect(caseBody('ungroup')).toContain("dockRefusal(live, 'ungroup', [gid])")
   })
   it('the move verb refuses move-out and moving the Dock', () => {
-    expect(caseBody('move')).toContain("dockRefusal(live, 'move', ids, targetGroup)")
+    expect(caseBody('move')).toContain("dockRefusal(live, 'move', ids, targetGroup, ")
   })
   it('pin --set off refuses the Dock', () => {
     expect(caseBody('pin')).toContain("dockRefusal(nodesRef.current as CanvasNode[], 'unpin', [id])")
@@ -90,5 +90,21 @@ describe('Dock guards: every path (T8 step 4)', () => {
       expect(body).not.toContain(bad)
     }
     expect(body).toContain('fixture: undefined')
+  })
+})
+
+describe('Dock placement rules on the live and cold open paths (review fix 3)', () => {
+  it('resolveIntoGroup refuses through dockOpenRefusal before any --group is used', () => {
+    const at = src.indexOf('const resolveIntoGroup = ')
+    const body = src.slice(at, src.indexOf('const resolveAfter = ', at))
+    expect(body).toContain('dockOpenRefusal(ctlNodes(), verb, sourceNodeId, ')
+    // Checked before the "no --group" early return, so an implicit open is covered too.
+    expect(body.indexOf('dockOpenRefusal(')).toBeLessThan(body.indexOf('if (!args.group) return undefined'))
+  })
+  it('the cold open refuses the same way', () => {
+    expect(src).toContain('dockOpenRefusal(coldNodes, verb, coldSrc.id, ')
+  })
+  it('move passes the caller, so only a Dock member moves nodes in', () => {
+    expect(caseBody('move')).toContain("dockRefusal(live, 'move', ids, targetGroup, sourceNodeId)")
   })
 })

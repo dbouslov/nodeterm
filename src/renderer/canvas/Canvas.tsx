@@ -621,7 +621,7 @@ import {
 } from '@shared/settings-verb'
 import { applySettingsChange } from '../lib/settingsVerb'
 import { useExpiringDialog } from '../lib/useExpiringDialog'
-import { dockMarkRefusal, dockRefusal, isDock, withoutDock } from '@shared/dock'
+import { dockMarkRefusal, dockOpenRefusal, dockRefusal, idList, isDock, withoutDock } from '@shared/dock'
 import { dockFrameMenu } from '../lib/dockMenu'
 import {
   alwaysConfirms,
@@ -10573,6 +10573,11 @@ export function Canvas() {
             // `--group` / `--after` name ids INSIDE this project, which is the caller's own — the
             // reason `--project` refuses both (spec §2.2) does not apply here, so both are resolved
             // against the serialized nodes rather than declined.
+            const coldDockNo = dockOpenRefusal(coldNodes, verb, coldSrc.id, idList(args.after), args.group || undefined)
+            if (coldDockNo) {
+              reply({ ok: false, error: coldDockNo })
+              return
+            }
             const coldGroup = coldResolveGroup(coldNodes, args.group, verb)
             if (!coldGroup.ok) {
               reply({ ok: false, error: coldGroup.error })
@@ -11153,6 +11158,13 @@ export function Canvas() {
       // Validate `--group` (open-terminal / open-claude / open-agent): must name an existing
       // group frame. Returns its id, or null with the error already replied.
       const resolveIntoGroup = (): string | null | undefined => {
+        // The Dock (@shared/dock): a Dock member names where its node goes (an implicit open would
+        // join the Dock or land loose beside it), and only a Dock member opens into the Dock.
+        const dockNo = dockOpenRefusal(ctlNodes(), verb, sourceNodeId, idList(args.after), args.group || undefined)
+        if (dockNo) {
+          reply({ ok: false, error: dockNo })
+          return null
+        }
         if (!args.group) return undefined
         const g = nodesRef.current.find((nd) => nd.id === args.group)
         if (!g || g.type !== 'group') {
@@ -11696,7 +11708,7 @@ export function Canvas() {
               return
             }
             // Nothing moves out of the Dock and the Dock itself never moves (@shared/dock).
-            const dockNo = dockRefusal(live, 'move', ids, targetGroup)
+            const dockNo = dockRefusal(live, 'move', ids, targetGroup, sourceNodeId)
             if (dockNo) {
               reply({ ok: false, error: dockNo })
               return
