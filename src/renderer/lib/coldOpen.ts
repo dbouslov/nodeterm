@@ -38,6 +38,8 @@ import {
 export interface ColdNode {
   id: string
   kind?: string
+  /** 'dock' on the Dock frame (@shared/dock): implicit placement never files into it. */
+  fixture?: unknown
   title?: string
   parentId?: string
   position: { x: number; y: number }

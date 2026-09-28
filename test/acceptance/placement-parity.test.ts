@@ -27,6 +27,8 @@ interface Spec {
   h?: number
   parentId?: string
   group?: boolean
+  /** The Dock frame (T8): `fixture: 'dock'`, pinned. */
+  dock?: boolean
 }
 
 const liveNodes = (scene: Spec[]): CanvasNode[] =>
@@ -39,7 +41,7 @@ const liveNodes = (scene: Spec[]): CanvasNode[] =>
         width: n.w ?? 600,
         height: n.h ?? 400,
         ...(n.parentId ? { parentId: n.parentId, extent: 'parent' } : {}),
-        data: { title: n.id, color: '#fff', group: null }
+        data: { title: n.id, color: '#fff', group: null, ...(n.dock ? { fixture: 'dock', pinned: true } : {}) }
       }) as CanvasNode
   )
 
@@ -49,7 +51,8 @@ const coldNodes = (scene: Spec[]): ColdNode[] =>
     kind: n.group ? 'group' : 'terminal',
     position: { x: n.x, y: n.y },
     size: { width: n.w ?? 600, height: n.h ?? 400 },
-    ...(n.parentId ? { parentId: n.parentId } : {})
+    ...(n.parentId ? { parentId: n.parentId } : {}),
+    ...(n.dock ? { fixture: 'dock' as const, pinned: true } : {})
   }))
 
 const storedProject = (scene: Spec[]): Project =>
@@ -70,7 +73,8 @@ const storedProject = (scene: Spec[]): Project =>
           color: '#fff',
           group: null,
           tags: [],
-          ...(n.parentId ? { parentId: n.parentId } : {})
+          ...(n.parentId ? { parentId: n.parentId } : {}),
+          ...(n.dock ? { fixture: 'dock', pinned: true } : {})
         }) as CanvasNodeState
     ),
     bridges: [],
@@ -208,5 +212,38 @@ describe('placement parity — live, cold and headless place an opened node iden
     expect(r.live).toEqual(at)
     expect(r.cold).toEqual(at)
     expect(r.headless).toEqual(at)
+  })
+})
+
+describe('the Dock (T8): implicit joining skips it, and nothing an agent opens lands on it', () => {
+  // GO's frame, top-left, with the seat and a page below it. A lineage child of the seat would
+  // join the seat's frame; the Dock is walled off, so it goes top-level and must clear the Dock.
+  const dock = { x: 40, y: 40, w: 1400, h: 1100 }
+  const scene: Spec[] = [
+    { id: 'D', ...dock, group: true, dock: true },
+    { id: 'seat', x: 24, y: 56, parentId: 'D' },
+    { id: 'page', x: 24, y: 536, parentId: 'D' },
+    { id: 'ws', x: 1600, y: 40 }
+  ]
+  const disjoint = (p: { x: number; y: number }) =>
+    p.x + SIZE.w <= dock.x || p.x >= dock.x + dock.w || p.y + SIZE.h <= dock.y || p.y >= dock.y + dock.h
+
+  it.each([
+    ['a lineage child of the seat', 'seat', [] as string[]],
+    ['a dependent whose dep is a Dock page', 'ws', ['page']]
+  ])('%s: rect disjoint from the Dock on the live, cold and headless paths', (_n, source, after) => {
+    const r = allThree(scene, source, after)
+    expect(disjoint(r.live)).toBe(true)
+    expect(disjoint(r.cold)).toBe(true)
+    expect(disjoint(r.headless)).toBe(true)
+    expect(r.cold).toEqual(r.live)
+    expect(r.headless).toEqual(r.live)
+  })
+
+  it('files nothing into the Dock (live and cold)', () => {
+    const live = liveNodes(scene)
+    expect(openedFrameId(live, live.find((n) => n.id === 'seat')!, [])).toBeUndefined()
+    const cold = coldNodes(scene)
+    expect(coldFileIntoFrame(cold, cold.find((n) => n.id === 'seat')!, [{ x: 0, y: 1300, ...SIZE }]).frameId).toBeUndefined()
   })
 })
