@@ -565,11 +565,13 @@ import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/Kan
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { planStoredMinimize } from '../lib/storedMinimize'
+import { emptiedVerifyPanels, pruneEmptyVerifyPanels } from '../lib/verifyPanelCleanup'
+import { planArrange, planGroup, planStoredLayout, type StoredLayoutPlan } from '../lib/layoutVerbs'
 import { layoutTeamFrame, layoutVerifyPanel } from '../lib/verifyPanelLayout'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
-import { nodeRect, reflow, resizesEnded, settle } from '../lib/reflow'
-import { commonChatSize, frameChatSize, parseChatSize, resizeChats, withChatSize } from '../lib/chatSize'
+import { reflow, resizesEnded, settle } from '../lib/reflow'
+import { frameChatSize, resizeChats, withChatSize } from '../lib/chatSize'
 import { snapResizeChanges } from '../lib/resizeSnap'
 import { canClearDirty, canCreateOnCanvas, commitSkipReason } from '../state/persistGuards'
 import { tracePersist, traceErrorCode } from '../lib/persistTrace'
@@ -629,7 +631,7 @@ import {
   parseCloseTargets,
   CLOSE_BULK_MAX
 } from '../lib/closeTargets'
-import { applyCompaction, compactNote, compactRequested, planCompaction } from '../lib/closeCompact'
+import { applyCompaction, compactNote, compactRequested, planCompaction, planStoredCompaction } from '../lib/closeCompact'
 import { canvasSyncTarget } from './collab-sync'
 import { menuMinimizeRow, minimizeIds, minimizeReply, planMinimize } from '@shared/minimize'
 import {
@@ -638,9 +640,6 @@ import {
   agentLaunchOverride,
   claudeLaunchCommand,
   setCollapsed,
-  alignNodes,
-  arrangeNodes,
-  commonParentId,
   fitGroupToChildren,
   createAccountLoginNode,
   createCodexAccountLoginNode,
@@ -2606,8 +2605,11 @@ export function Canvas() {
     // A RETURNING project's pages navigated while ghosted: load its nodes with the pool's live
     // url/title already applied, in the SAME setNodes — a later correction would move the `url`
     // prop under the surviving surface and navigate the very page the pool preserved.
+    // An empty `verify` panel frame is dropped here, where the WHOLE project is hydrated
+    // (lib/verifyPanelCleanup) — never inside `nodeStatesToFlow`, which also hydrates one node at a
+    // time (a peer upsert) and would see every frame as childless there.
     const flow = overlayKeepAliveData(
-      nodeStatesToFlow(project.nodes),
+      nodeStatesToFlow(pruneEmptyVerifyPanels(project.nodes)),
       useWebviewKeepAlive.getState().entries,
       project.id
     )
@@ -5533,9 +5535,12 @@ export function Canvas() {
         // A node id revived later faces a fresh dialog, exactly as it faces a fresh grant.
         clearAttachConsent(n.id)
       })
+      // A `verify` panel frame this close empties goes with its last member (lib/verifyPanelCleanup).
+      // Only the removal sees it: it is not a session, so nothing above is owed for it.
+      const gone = new Set([...set, ...emptiedVerifyPanels(nodesRef.current, set)])
       // Free children of any deleted group, keeping their root-space position: they join the
       // nearest surviving frame, so closing a frame nested inside another does not move its chats.
-      setNodes((ns) => removeNodesFreeingChildren(ns, set))
+      setNodes((ns) => removeNodesFreeingChildren(ns, gone))
       markDirty()
       // A deleted group takes its worktree BINDING with it — and the frame is the only thing that
       // goes: its children SURVIVE (freed to absolute positions above), dead `data.cwd` and all. So
@@ -10788,6 +10793,19 @@ export function Canvas() {
       // against a stranger's project.
       const ctlNodes = (): CanvasNode[] =>
         offCanvas ? offCanvas.nodes : (nodesRef.current as CanvasNode[])
+      // An off-screen `group` / `arrange` / `align` (lib/layoutVerbs): the plan ran over the owning
+      // project's saved nodes, and only the nodes it changed are written back through the store —
+      // the live setters address the ACTIVE canvas, which is somebody else's here.
+      const replyStoredLayout = (plan: StoredLayoutPlan): void => {
+        if (!plan.ok || !offCanvas) {
+          reply(plan.ok ? { ok: false, error: `${verb}: no project to write to` } : { ok: false, error: plan.error })
+          return
+        }
+        const store = useProjects.getState()
+        for (const node of plan.upserts) store.applyNodeMutation(offCanvas.project.id, { op: 'upsert', node })
+        if (plan.upserts.length) void writeDisk()
+        reply({ ok: true, message: plan.message, result: plan.result })
+      }
       // `linkEndpointOf` off canvas. Same answer, read out of the hydrated array: the live one
       // holds another project's nodes, so every id would resolve to null (or, worse, to a
       // same-named node over there).
@@ -11466,46 +11484,19 @@ export function Canvas() {
                 return
               }
             }
-            const ids = (args.nodes ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-            const live = nodesRef.current as CanvasNode[]
-            const resolvable = ids.filter((id) => live.some((node) => node.id === id))
-            if (resolvable.length === 0) {
-              reply({ ok: false, error: 'group: none of the given node ids exist' })
+            const groupPlan = (live: CanvasNode[]) => planGroup(live, args, groupColor, snapGridNow())
+            if (offCanvas) {
+              replyStoredLayout(planStoredLayout(offCanvas.project.nodes, 'group', groupPlan))
               return
             }
-            const groupCount = live.filter((nd) => nd.type === 'group').length
-            let grouped = groupSelectedNodes(live, resolvable, groupCount, snapGridNow())
-            // The new frame is no longer guaranteed to be first (it is emitted in tree order),
-            // and a refused set returns the array unchanged — find it by id instead.
-            const oldIds = new Set(live.map((node) => node.id))
-            const groupNode = grouped.find((node) => !oldIds.has(node.id) && node.type === 'group')
-            if (!groupNode) {
-              reply({ ok: false, error: 'group: nodes must be siblings in one container and may not include an ancestor with its descendant' })
+            const plan = groupPlan(nodesRef.current as CanvasNode[])
+            if (!plan.ok) {
+              reply({ ok: false, error: plan.error })
               return
             }
-            if (args.label || groupColor) {
-              grouped = grouped.map((nd) =>
-                nd.id === groupNode.id
-                  ? {
-                      ...nd,
-                      data: {
-                        ...nd.data,
-                        ...(args.label ? { title: args.label } : {}),
-                        ...(groupColor ? { color: groupColor } : {})
-                      }
-                    }
-                  : nd
-              )
-            }
-            setNodes(grouped)
+            setNodes(plan.nodes)
             markDirty()
-            const skippedGrouped = ids.length - resolvable.length
-            const groupNote = skippedGrouped > 0 ? ` (${skippedGrouped} unknown id(s) skipped)` : ''
-            reply({
-              ok: true,
-              message: `grouped ${resolvable.length} node(s) into ${groupNode.id}${groupNote}`,
-              result: { groupId: groupNode.id, grouped: resolvable, skipped: skippedGrouped }
-            })
+            reply({ ok: true, message: plan.message, result: plan.result })
             return
           }
           case 'ungroup': {
@@ -11576,65 +11567,19 @@ export function Canvas() {
           }
           case 'arrange':
           case 'align': {
-            const ids = (args.nodes ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-            const live = nodesRef.current as CanvasNode[]
-            const edge = (['left', 'right', 'top', 'bottom', 'hcenter', 'vcenter'] as const).find((e2) => e2 === args.edge)
-            if (verb === 'align' && !edge) {
-              reply({ ok: false, error: 'align requires --edge left|right|top|bottom|hcenter|vcenter' })
+            const arrangePlan = (live: CanvasNode[]) => planArrange(live, verb, args, snapGridNow())
+            if (offCanvas) {
+              replyStoredLayout(planStoredLayout(offCanvas.project.nodes, verb, arrangePlan))
               return
             }
-            // arrange/align run in ONE coordinate space: all top-level, or all children of one
-            // frame. A mixed set (framed + loose, or two frames) is refused with a clear reason
-            // rather than the old misleading "none are top-level".
-            const container = commonParentId(live, ids)
-            if (container === undefined) {
-              const known = ids.filter((id) => live.some((n) => n.id === id))
-              reply({
-                ok: false,
-                error: known.length === 0
-                  ? `${verb}: none of the given node ids exist`
-                  : `${verb}: the nodes are in different containers — arrange the children of one frame (or top-level nodes) at a time`
-              })
+            const plan = arrangePlan(nodesRef.current as CanvasNode[])
+            if (!plan.ok) {
+              reply({ ok: false, error: plan.error })
               return
             }
-            const layout = (['grid', 'row', 'column'] as const).find((l) => l === args.layout) ?? 'grid'
-            const cols = args.cols ? parseInt(args.cols, 10) || undefined : undefined
-            // One chat size per frame (lib/chatSize): `--size WxH`, else — for a frame's children —
-            // the most common expanded chat size among them. Top-level arranges keep their sizes.
-            const askedSize = verb === 'arrange' ? parseChatSize(args.size) : null
-            if (askedSize && 'error' in askedSize) {
-              reply({ ok: false, error: `arrange: ${askedSize.error}` })
-              return
-            }
-            const chatSize = askedSize ?? (verb === 'arrange' && container ? commonChatSize(live, ids) : null)
-            const sizedLive = chatSize ? resizeChats(live, ids, chatSize) : live
-            let next = verb === 'arrange'
-              ? arrangeNodes(sizedLive, ids, { layout, cols, order: 'given' }) // --nodes order, not array order
-              : alignNodes(live, ids, edge!)
-            // Tidying a frame's children usually leaves the frame oversized (it was sized to their
-            // old scattered spots) — shrink it to hug the new layout, then let its neighbours and
-            // the frames above it follow (lib/reflow). Top-level sets have no frame.
-            if (container) {
-              const frameBefore = live.find((n) => n.id === container)
-              next = fitGroupToChildren(next, container, snapGridNow())
-              if (frameBefore) {
-                // The fit leaves `measured` at the old size and reflow reads it first: drop it.
-                next = next.map((n) => (n.id === container && n !== frameBefore ? { ...n, measured: undefined } : n))
-                next = reflow(next, container, nodeRect(frameBefore), snapGridNow())
-              }
-            }
-            setNodes(next)
+            setNodes(plan.nodes)
             markDirty()
-            const how = verb === 'arrange' ? `as ${layout}` : `to ${edge}`
-            // Pinned members (or members of a pinned frame) were left where they are — say so.
-            const pinnedIds = ids.filter((id) => {
-              const nd = live.find((x) => x.id === id)
-              return !!nd && isPinned(nd, live)
-            })
-            const count = ids.length - pinnedIds.length
-            const note = pinnedIds.length ? ` (${pinnedIds.length} pinned, left in place)` : ''
-            const sizeNote = chatSize ? `, chats sized ${chatSize.width}x${chatSize.height}` : ''
-            reply({ ok: true, message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${count} node(s) ${how}${sizeNote}${note}`, result: { count, container, pinned: pinnedIds, ...(chatSize ? { chatSize } : {}) } })
+            reply({ ok: true, message: plan.message, result: plan.result })
             return
           }
           case 'restructure': {
@@ -12598,16 +12543,25 @@ export function Canvas() {
                 // cross-project teardown the sessions sidebar has always used — it still ends the
                 // tmux session (remote included, resolved from the persisted index), frees a
                 // closed frame's children, and records the close against the stored project.
+                // `--compact` is planned off the SAVED canvas as the close finds it, sizes included
+                // (nothing measured them), and applied once the close has removed the nodes: only the
+                // re-packed nodes and re-fitted frames are written back (lib/closeCompact.ts).
+                const storedCompact = compactRequested(args)
+                  ? planStoredCompaction(offCanvas.project.nodes, closeIds, snapGridNow())
+                  : null
                 closeStoredNodesRef.current(offCanvas.project.id, closeIds)
-                // `--compact` plans from MEASURED sizes (lib/closeCompact.ts), which an off-screen
-                // project does not have — so it is skipped, and the reply says so.
+                if (storedCompact?.upserts.length) {
+                  const store = useProjects.getState()
+                  for (const node of storedCompact.upserts) store.applyNodeMutation(offCanvas.project.id, { op: 'upsert', node })
+                  void writeDisk()
+                }
                 reply({
                   ok: true,
                   message:
                     (closeIds.length === 1
                       ? `closed ${closeIds[0]}`
                       : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) +
-                    (compactRequested(args) ? ' (not compacted: that project is not on screen)' : '')
+                    (storedCompact ? storedCompact.note : '')
                 })
                 return
               }
@@ -12615,6 +12569,8 @@ export function Canvas() {
               // grid it HAD (lib/closeCompact.ts). Planned here, so a waived and a confirmed close
               // both compact, and a denied or expired one never gets this far.
               const compact = compactRequested(args) ? planCompaction(ctlNodes(), closeIds) : null
+              // A verify panel frame the close empties is removed by `deleteNodes`; the note says so.
+              const dissolved = compact ? emptiedVerifyPanels(ctlNodes(), new Set(closeIds)) : []
               // Canonical teardown: deleteNodes() destroys the local tmux session (remote-guarded),
               // drops persisted agentStatus, and reparents any group children. Don't hand-roll it.
               // ONE call for the whole list — its own paths are batched, and N calls would give N
@@ -12631,7 +12587,7 @@ export function Canvas() {
                 message:
                   (closeIds.length === 1
                     ? `closed ${closeIds[0]}`
-                    : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) + (compact ? compactNote(compact) : '')
+                    : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) + (compact ? compactNote(compact, dissolved) : '')
               })
             }
             // Waived? Same decision table as `write` (@shared/control-confirm).
@@ -12949,6 +12905,7 @@ export function Canvas() {
       // A deleted frame's children SURVIVE it. `removeNodes` is the serialized twin of deleteNodes'
       // conversion (the same helper): each child joins the frame's nearest surviving ancestor at the
       // same canvas position, instead of keeping a `parentId` that names a node no longer there.
+      // It also takes a `verify` panel frame the close empties, as `deleteNodes` does on screen.
       store.removeNodes(projectId, ids)
       void writeDisk()
     },

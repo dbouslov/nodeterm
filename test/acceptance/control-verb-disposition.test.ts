@@ -28,12 +28,10 @@ import {
 /** The verbs that deliberately refuse off screen, each with its reason in `OFF_SCREEN_REFUSALS`. */
 const REFUSERS = new Set([
   // Structural: they re-fit frames / lay out from MEASURED node sizes, which only a rendered
-  // canvas has.
-  'group',
+  // canvas has. (`group`, `arrange` and `align` lay out from the saved sizes off screen instead —
+  // lib/layoutVerbs.ts.)
   'ungroup',
   'move',
-  'arrange',
-  'align',
   // Compose --after arming and bridges over nodes created in the same tick, against the live canvas.
   'verify',
   'spawn-team',

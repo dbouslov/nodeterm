@@ -86,7 +86,7 @@ describe('offScreenNotice — the human half of an off-screen refusal', () => {
   const offScreen = { kind: 'switch', projectId: 'p-code' } as const
 
   it('names the agent, the project and the verb for every verb refused off screen', () => {
-    for (const verb of ['group', 'move', 'arrange', 'align', 'browser', 'spawn-team', 'open-worktree', 'restructure', 'pin', 'snapshot']) {
+    for (const verb of ['ungroup', 'move', 'browser', 'spawn-team', 'open-worktree', 'restructure', 'pin', 'snapshot']) {
       const n = offScreenNotice(projects, offScreen, verb, 'term-lead')
       expect(n, verb).not.toBeNull()
       expect(n!.projectId).toBe('p-code')
@@ -97,7 +97,7 @@ describe('offScreenNotice — the human half of an off-screen refusal', () => {
   })
 
   it('stays quiet for every verb answered off screen', () => {
-    for (const verb of ['list', 'geometry', 'sticky', 'annotate', 'open-claude', 'open-terminal', 'show-web', 'open-browser', 'close', 'write', 'assign', 'rename', 'board', 'retire', 'minimize']) {
+    for (const verb of ['list', 'geometry', 'sticky', 'annotate', 'open-claude', 'open-terminal', 'show-web', 'open-browser', 'close', 'write', 'assign', 'rename', 'board', 'retire', 'minimize', 'group', 'arrange', 'align']) {
       expect(offScreenNotice(projects, offScreen, verb, 'term-lead'), verb).toBeNull()
     }
   })
@@ -109,14 +109,14 @@ describe('offScreenNotice — the human half of an off-screen refusal', () => {
   })
 
   it('says a CLOSED project is closed', () => {
-    const n = offScreenNotice(projects, { kind: 'reopen', projectId: 'p-parked' }, 'group', 'term-sr')
+    const n = offScreenNotice(projects, { kind: 'reopen', projectId: 'p-parked' }, 'ungroup', 'term-sr')
     expect(n!.text).toContain('"Research"')
     expect(n!.text).toContain('closed')
     expect(n!.projectId).toBe('p-parked')
   })
 
   it('falls back to ids when the project or the node carries no name', () => {
-    const n = offScreenNotice([{ id: 'p-bare', nodes: [{ id: 'term-bare' }] }], { kind: 'switch', projectId: 'p-bare' }, 'group', 'term-bare')
+    const n = offScreenNotice([{ id: 'p-bare', nodes: [{ id: 'term-bare' }] }], { kind: 'switch', projectId: 'p-bare' }, 'ungroup', 'term-bare')
     expect(n!.text).toContain('"p-bare"')
     expect(n!.text).toContain('term-bare')
   })
@@ -467,6 +467,15 @@ describe('the off-screen disposition table (the verbs that used to travel)', () 
     }
   })
 
+  it('group, arrange and align lay out from the saved node sizes off screen instead of refusing', () => {
+    // Chats opened while their tab was off screen never got a frame and floated loose: `group` was
+    // refused there, and nothing came back to frame them (lib/layoutVerbs.ts).
+    for (const v of ['group', 'arrange', 'align']) {
+      expect(answersFromStoredNodes(v), v).toBe(true)
+      expect(offScreenDisposition(v), v).toEqual({ kind: 'stored-node' })
+    }
+  })
+
   it('the structural verbs refuse, and each says WHY in its own words', () => {
     // A refusal an agent can act on beats hijacking the human's screen. The reasons are per verb
     // because the caller's next move differs: an `arrange` can wait for the human, a `branch`
@@ -476,15 +485,14 @@ describe('the off-screen disposition table (the verbs that used to travel)', () 
       expect(d.kind, v).toBe('refuse')
       return d.kind === 'refuse' ? d.why : ''
     }
-    expect(why('arrange')).toMatch(/measured/)
-    expect(why('group')).toMatch(/measured/)
+    expect(why('ungroup')).toMatch(/measured/)
     expect(why('branch')).toMatch(/parks the original/)
     expect(why('verify')).toMatch(/live canvas/)
     expect(why('open-worktree')).toMatch(/worktree store/)
     expect(why('browser')).toMatch(/webview/)
     // …and no two structural verbs share a copy-pasted sentence that names the wrong mechanism.
     expect(why('move')).toContain('reparenting')
-    expect(why('align')).toContain('aligning')
+    expect(why('restructure')).toContain('restructuring')
   })
 
   it('an unknown verb refuses — the fail-closed direction', () => {
@@ -509,8 +517,8 @@ describe('the off-screen disposition table (the verbs that used to travel)', () 
   })
 
   it('the refusal sentence names the project, the reason and the fact that nothing happened', () => {
-    const msg = offScreenRefusal('group', 'web-app')
-    expect(msg.startsWith('group: project "web-app" is not on screen')).toBe(true)
+    const msg = offScreenRefusal('ungroup', 'web-app')
+    expect(msg.startsWith('ungroup: project "web-app" is not on screen')).toBe(true)
     expect(msg).toContain('measured node sizes')
     expect(msg).toContain('Open that project and run this again')
     expect(msg).toContain('nothing was changed')

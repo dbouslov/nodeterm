@@ -29,6 +29,7 @@ import {
   reorderGroupWithinParent
 } from './workspace'
 import { markWorkspaceDirty } from './workspaceDirty'
+import { emptiedVerifyPanels } from '../lib/verifyPanelCleanup'
 import { folderName } from '../lib/projectOpen'
 // One order-independent key for an edge's endpoints — the SAME rule `hiddenLinkIds` uses, so a
 // rope and the bridge it covers are recognized as one relationship here too.
@@ -622,7 +623,14 @@ export const useProjects = create<ProjectsState>((set, get) => ({
   },
 
   removeNodes(projectId, nodeIds) {
-    const deleted = new Set(nodeIds)
+    // A `verify` panel frame the removal empties goes with its last member, as on screen
+    // (`deleteNodes`, lib/verifyPanelCleanup). Ropes and bridges never touch a frame.
+    const stored = get().getProject(projectId)?.nodes ?? []
+    const emptied = emptiedVerifyPanels(
+      stored.map((n) => ({ id: n.id, parentId: n.parentId, type: n.kind, data: { title: n.title, verifyPanel: n.verifyPanel } })),
+      new Set(nodeIds)
+    )
+    const deleted = new Set([...nodeIds, ...emptied])
     set((s) => ({
       projects: s.projects.map((p) =>
         p.id !== projectId

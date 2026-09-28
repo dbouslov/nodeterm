@@ -575,15 +575,16 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  Nothing is queued: unlike a session, a page or an image is finished the moment it is placed,',
     '  so there is nothing to wait for and nothing to poll. Say where it went rather than assuming',
     '  the user saw it.',
-    '- Verbs that act on nodes that ALREADY exist (`write`, `close`, `rename`, `color`, `group`, `move`,',
-    '  `arrange`, `align`, `assign`, `board`, `link`, `restructure`, `browser`, …), and',
+    '- Verbs that need the rendered canvas (`ungroup`, `move`, `restructure`, `pin`, `snapshot`,',
+    '  `browser`, …; the full list is under NO VERB EVER SWITCHES THE USER\'S VIEW), and',
     '  `spawn-team` / `open-worktree` (unlike the open verbs above, these do not open cold): each one',
     '  needs your project ON SCREEN. If it is not, the call is refused, because nodeterm',
     "  never switches the user's view for an agent. The user is shown a notice naming your project,",
     '  with a button to go there. Do not loop on the refusal: retry once they have opened your project,',
     '  or tell them what you need.',
     '- `group --nodes <id,id> [--label L] [--color C]` — wrap sibling nodes or sibling groups in a new labeled frame.',
-    '  Every id must share one container. `ungroup --group <id>` dissolves a frame and promotes its direct',
+    '  Every id must share one container. Answered off screen too, from the saved canvas: the frame is',
+    '  sized from the saved node sizes, and the reply says so. `ungroup --group <id>` dissolves a frame and promotes its direct',
     '  children into the frame\'s parent. `move --nodes <id,id> [--group <id>]` reparents nodes or groups INTO an',
     '  existing frame (omit `--group`, or pass `top`/`none`, to pull them out to the top level) — this is',
     '  how you move a node from one frame to another. What it lands on in the frame moves out of its',
@@ -598,7 +599,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  expanded chat size among them (a tie goes to the larger), or `--size WxH` (e.g. `--size 640x420`,',
     '  which also works top-level). Notes keep their size; a minimized chat takes the width and stays',
     '  minimized. A chat that joins a frame (`open-* --group`, `move --group`) takes that frame\'s common chat',
-    '  size. Neighbours and frames then move to follow.',
+    '  size. Neighbours and frames then move to follow. Both are answered off screen too, from the',
+    '  saved canvas: nodes are laid out by their saved sizes (nothing measured them), and the reply says so.',
     '- `geometry [--frame <groupId>]` — where everything is (read-only): every node and frame, or one',
     '  frame\'s subtree, with id, kind, title, parentId, absolute x/y, rendered width/height (a collapsed',
     '  node reports its collapsed height), collapsed and pinned. The reply is one summary line ("21',
@@ -626,7 +628,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  told not to change files. Prefer this over asking one agent to double-check itself. The panel is',
     '  a frame placed inside your own frame (which grows to hold it), clear of other nodes; a re-verify',
     '  with the same label (default `Verify: <target title>`) reuses that frame, the new round below the',
-    '  old. Close a finished round yourself: `close --node <ids> --compact`.',
+    '  old. Close a finished round yourself: `close --node <ids> --compact`; the panel frame goes with',
+    '  its last member.',
     '- `spawn-team --label L --team \'[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]\'` — one agent per',
     '  role (max 8), arranged in a grid, wrapped in a labeled group placed inside your own frame (which',
     '  grows to hold it), clear of other nodes, each connected + context-linked to you.',
@@ -674,7 +677,9 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  count it had) and is re-fitted to them, and each enclosing frame that changed size does the',
     '  same; the top level is never re-laid out. A pinned frame, everything inside one, and a frame',
     '  holding a pinned node at any depth are left as is; a frame the close emptied stays, empty',
-    '  (`ungroup` it). A denied or expired close moves nothing. Server Edition refuses `--compact`.',
+    '  (`ungroup` it) — except a verify panel frame, which goes with its last member. Answered off',
+    '  screen too, from the saved canvas: frames are re-fitted from the saved node sizes, and the reply',
+    '  says so. A denied or expired close moves nothing. Server Edition refuses `--compact`.',
     '- `send --node <id> --text "..."` / `reply --node <id> --text "..."` — deliver a message into',
     '  an AGENT node the caller opened this run (no confirm dialog: verified-only, gated by the project\'s',
     '  agent-messaging switch — off by default; the settings verb\'s `--set agentMessaging --value true`',
@@ -1143,8 +1148,8 @@ Verbs:
   render on the DESKTOP: \`show-image\` and \`show-video\` still work with a host path (the
   file is read/fetched back over the connection), but \`show-web --file/--html\` is refused —
   use \`--url\`, or copy the file to the desktop first.
-- Verbs that act on nodes that ALREADY exist (\`write\`, \`close\`, \`rename\`, \`color\`, \`group\`, \`move\`,
-  \`arrange\`, \`align\`, \`assign\`, \`board\`, \`link\`, \`restructure\`, \`browser\`, …), and
+- Verbs that need the rendered canvas (\`ungroup\`, \`move\`, \`restructure\`, \`pin\`, \`snapshot\`,
+  \`browser\`, …; the full list is under NO VERB EVER SWITCHES THE USER'S VIEW), and
   \`spawn-team\` / \`open-worktree\` (unlike the open verbs above, these do not open cold): each one
   needs your project ON SCREEN. If it is not, the call is refused, because nodeterm
   never switches the user's view for an agent. The user is shown a notice naming your project,
@@ -1152,6 +1157,8 @@ Verbs:
   or tell them what you need.
 - \`group --nodes <id,id> [--label "Frontend Team"] [--color C]\` — wrap sibling nodes or sibling groups in a
   new labeled frame. Every id must share one container; an ancestor cannot be grouped with its descendant.
+  Answered off screen too, from the saved canvas: the frame is sized from the saved node sizes, and the
+  reply says so.
 - \`ungroup --group <id>\` — dissolve a group frame, promoting its direct children into the frame's
   parent (the nodes stay put; only the frame is removed).
 - \`move --nodes <id,id> [--group <id>]\` — reparent nodes or group subtrees INTO an existing group, keeping
@@ -1162,7 +1169,9 @@ Verbs:
 - \`arrange --nodes <id,id> [--layout grid|row|column] [--cols N] [--size WxH]\` — tidy layout, no overlap. Works
   on top-level nodes OR on the children of ONE frame — every id must share a container (you cannot
   arrange nodes from two different frames, or mix framed + loose, in one call). When the ids are a
-  frame's children, the frame is also shrunk to hug the tidied layout. Since grouping preserves each
+  frame's children, the frame is also shrunk to hug the tidied layout. \`arrange\` and \`align\` are
+  answered off screen too, from the saved canvas: nodes are laid out by their saved sizes (nothing
+  measured them), and the reply says so. Since grouping preserves each
   node's scattered position, a fresh frame is usually too wide: \`arrange\` its children to fix that.
   Nodes land in exactly the order of \`--nodes\` (a pinned node keeps its spot and is skipped):
   \`row\` left to right, \`column\` top to bottom, \`grid\` row by row. To put A directly left of B:
@@ -1217,7 +1226,7 @@ Verbs:
   grows to hold it and moves its neighbours aside), clear of other nodes. A re-verify with the same
   label (\`--label\`, default \`Verify: <target title>\`) reuses that frame: the new round goes below
   the earlier one and nothing of it is closed, so close a finished round yourself
-  (\`close --node <ids> --compact\`).
+  (\`close --node <ids> --compact\`); the panel frame goes with its last member.
 - \`spawn-team --label "Frontend Team" --team '[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]'\` —
   open one agent per role (each prompt starts that member working), arrange them in a grid,
   wrap them in a labeled group placed inside your own frame (which grows to hold it), clear of
@@ -1281,7 +1290,9 @@ Verbs:
   size gets the same; the top level is never re-laid out. A pinned frame, everything inside one,
   and a frame holding a pinned node at any depth are left as is (re-packing would move the pinned
   node or stack the rest on it), and the walk up stops there. A frame the close emptied stays, empty —
-  \`ungroup\` it. The reply names each frame that held a closed node and what happened to it. It
+  \`ungroup\` it — except a verify panel frame, which goes with its last member. The reply names
+  each frame that held a closed node and what happened to it. Answered off screen too, from the
+  saved canvas: frames are re-fitted from the saved node sizes, and the reply says so. It
   applies only when the close does: a denied or expired close moves nothing. Server Edition
   refuses \`--compact\`.
 - \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during

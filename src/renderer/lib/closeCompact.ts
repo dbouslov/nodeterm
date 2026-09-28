@@ -35,7 +35,18 @@
 //
 // PURE, like `closeTargets.ts`: the Canvas dispatch plans before `deleteNodes` and applies in a
 // `setNodes` updater after it.
-import { arrangeNodes, fitGroupToChildren, isPinned, type CanvasNode } from '../state/workspace'
+import type { CanvasNodeState } from '@shared/types'
+import {
+  arrangeNodes,
+  fitGroupToChildren,
+  flowToNodeStates,
+  isPinned,
+  nodeStatesToFlow,
+  removeNodesFreeingChildren,
+  type CanvasNode
+} from '../state/workspace'
+import { emptiedVerifyPanels } from './verifyPanelCleanup'
+import { nonFinitePositionIds } from './layoutVerbs'
 
 // The measure `arrangeNodes` packs by (see restructure.ts).
 const nodeW = (n: CanvasNode): number => n.measured?.width ?? (n.width as number) ?? 0
@@ -175,12 +186,67 @@ export function applyCompaction(after: CanvasNode[], plan: CompactPlan, grid = 0
   return next
 }
 
-/** The reply's account of what `--compact` did with each frame that held a closed node. */
-export function compactNote(plan: CompactPlan): string {
+/**
+ * The reply's account of what `--compact` did with each frame that held a closed node. `dissolved`
+ * are the emptied frames the close removed outright — a `verify` panel frame goes with its last
+ * member (lib/verifyPanelCleanup) — so the caller is not told to ungroup a frame that is gone.
+ */
+export function compactNote(plan: CompactPlan, dissolved: readonly string[] = []): string {
+  const gone = new Set(dissolved)
+  const emptied = plan.emptied.filter((id) => !gone.has(id))
+  const removed = plan.emptied.filter((id) => gone.has(id))
   const parts = [
     plan.frames.length ? `re-packed ${plan.frames.join(', ')}` : '',
     plan.pinned.length ? `left ${plan.pinned.join(', ')} as is (pinned, or holds a pinned node)` : '',
-    plan.emptied.length ? `left ${plan.emptied.join(', ')} empty (ungroup it)` : ''
+    emptied.length ? `left ${emptied.join(', ')} empty (ungroup it)` : '',
+    removed.length ? `removed the empty verify panel frame ${removed.join(', ')}` : ''
   ].filter(Boolean)
   return ` — compact: ${parts.length ? parts.join('; ') : 'no frame held these nodes'}`
+}
+
+/**
+ * `close --compact` for a project that is NOT on screen. The same plan, over the project's SAVED
+ * nodes hydrated with `nodeStatesToFlow` — so every frame keeps the grid it had and is re-fitted
+ * from the saved sizes (nothing measured them), the pattern of the off-screen `retire` and
+ * `minimize`. `upserts` are only the nodes the compaction changed; the close itself is the store's
+ * `removeNodes` (via `closeStoredNodes`), which frees a closed frame's children and takes an emptied
+ * verify panel frame exactly as the `after` computed here does.
+ */
+export function planStoredCompaction(
+  stored: CanvasNodeState[],
+  closedIds: readonly string[],
+  grid = 0
+): { plan: CompactPlan; upserts: CanvasNodeState[]; note: string } {
+  const before = nodeStatesToFlow(stored)
+  const plan = planCompaction(before, closedIds)
+  const dissolved = emptiedVerifyPanels(before, new Set(closedIds))
+  const after = removeNodesFreeingChildren(before, new Set([...closedIds, ...dissolved]))
+  // `applyCompaction` rebuilds every child it lays out, moved or not: compare the geometry, so only
+  // a node that actually moved or resized is written back.
+  const was = new Map(after.map((n) => [n.id, n]))
+  const changed = applyCompaction(after, plan, grid).filter((n) => {
+    const w = was.get(n.id)
+    return (
+      !w ||
+      w.position.x !== n.position.x ||
+      w.position.y !== n.position.y ||
+      w.width !== n.width ||
+      w.height !== n.height
+    )
+  })
+  // Off screen nothing renders the result before it is saved: a non-finite position (a hand-edited
+  // project.json) is refused here, and the close goes ahead uncompacted (lib/layoutVerbs).
+  const bad = nonFinitePositionIds(changed)
+  if (bad.length) {
+    return {
+      plan,
+      upserts: [],
+      note: ` — not compacted: the layout came out with a non-finite position for ${bad.join(', ')} (a saved position in that project's file is not a number)`
+    }
+  }
+  return {
+    plan,
+    upserts: flowToNodeStates(changed),
+    note: `${compactNote(plan, dissolved)} (project not on screen: laid out from the saved node sizes)`
+  }
 }

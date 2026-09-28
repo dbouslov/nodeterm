@@ -234,7 +234,14 @@ const STORED_NODE_VERBS: ReadonlySet<string> = new Set([
   // `minimize` (candidates item 8): the collapsed flag and the expanded height both live in the
   // saved node, so it is a flag flip over the serialized canvas (`planStoredMinimize`). Like the
   // on-screen verb it re-fits no frame, so it needs no measured size.
-  'minimize'
+  'minimize',
+  // `group` / `arrange` / `align`: the same pure plan as on screen (lib/layoutVerbs.ts) over the
+  // serialized canvas, sizing every node and frame from its SAVED size (a hydrated node has no
+  // measurement) — and the reply says so. Chats opened at night while their tab was off screen
+  // were never framed, because `group` was refused there and nothing came back to do it.
+  'group',
+  'arrange',
+  'align'
 ])
 
 export function answersFromStoredNodes(verb: string): boolean {
@@ -251,16 +258,12 @@ export function answersFromStoredNodes(verb: string): boolean {
  * verb unable to act, it says so.
  */
 const OFF_SCREEN_REFUSALS: Readonly<Record<string, string>> = {
-  // The five structural verbs rewrite the WHOLE node array through React Flow's parent/extent
-  // model and re-fit frames from MEASURED sizes (`nodeW`/`nodeH` prefer `measured` over the
-  // persisted `size`), which the serialized copy does not carry — nothing rendered it. Laying a
-  // canvas out to geometry the user would not get on screen, and round-tripping every node
-  // through the serializers to persist it, is drift no reply could report.
-  group: 'grouping re-fits frames from measured node sizes, which only a rendered canvas has',
+  // These two structural verbs rewrite the node array through React Flow's parent/extent model and
+  // re-fit frames from MEASURED sizes (`nodeW`/`nodeH` prefer `measured` over the persisted
+  // `size`), which the serialized copy does not carry — nothing rendered it. (`group`, `arrange`
+  // and `align` are answered off screen from the saved sizes instead; see STORED_NODE_VERBS.)
   ungroup: 'ungrouping re-fits frames from measured node sizes, which only a rendered canvas has',
   move: 'reparenting re-fits both frames from measured node sizes, which only a rendered canvas has',
-  arrange: 'arranging lays nodes out from measured node sizes, which only a rendered canvas has',
-  align: 'aligning lays nodes out from measured node sizes, which only a rendered canvas has',
   // Both compose `--after` arming and context bridges over nodes created in the SAME tick, and
   // check each dep against the live canvas before arming it. A cold open defers ONE node's launch;
   // these defer a graph, and an armed station is fired by the live canvas effect.

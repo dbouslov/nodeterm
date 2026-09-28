@@ -2467,10 +2467,12 @@ still sees a station that finished before a relaunch; see Dependency edges, item
     because `cwdForNewNodeIn` subtracts `staleGroupIds`, which is epoch-scoped to the ACTIVE
     project.
   Since upstream v0.3.9 the whole table lives in `@shared/control-off-screen` (see above), and a
-  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`/`retire`/`minimize`), is
-  answered against the owning project's serialized nodes. Everything else is **REFUSED while its
-  project is not on screen** (`OFF_SCREEN_REFUSALS`; fork Fix #16, 2026-09-13):
-  `group`/`ungroup`/`move`/`arrange`/`align`/`verify`/`spawn-team`/`branch`/`open-worktree`/
+  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`/`retire`/`minimize`/
+  `group`/`arrange`/`align`), is answered against the owning project's serialized nodes — the three
+  layout verbs run the on-screen plan (`renderer/lib/layoutVerbs.ts`) over the hydrated saved nodes,
+  so nodes and frames are sized from their SAVED sizes, and the reply says so. Everything else is
+  **REFUSED while its project is not on screen** (`OFF_SCREEN_REFUSALS`; fork Fix #16, 2026-09-13):
+  `ungroup`/`move`/`verify`/`spawn-team`/`branch`/`open-worktree`/
   `close-worktree`/`browser`, plus the fork verbs `restructure`/`pin`/`snapshot`
   — they read live canvas state the serialized copy does not carry (measured node sizes, worktree
   staleness, a mounted guest, the rendered picture). They used to TRAVEL there — the G5 hijack, and
@@ -2638,7 +2640,11 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   stays as is, and the walk up stops at the first such frame: re-packing moves every child (a
   child frame carries its pinned node along), and `arrangeNodes` keeps a pinned member in place but
   starts the rest at the first slot, so re-packing around one stacks a node on it. An emptied
-  frame stays for the caller to `ungroup`. Canvas plans off
+  frame stays for the caller to `ungroup`, except a `verify` panel frame, which any close that
+  empties it removes (`renderer/lib/verifyPanelCleanup.ts`: `deleteNodes` on screen, the store's
+  `removeNodes` off screen; every project load also drops an empty one marked `verifyPanel`). Off screen, `planStoredCompaction`
+  runs the same plan over the hydrated SAVED nodes (frames re-fit from saved sizes) and writes back
+  only the nodes that moved, after `closeStoredNodes`. Canvas plans off
   `nodesRef` inside `runClose` (so waived and confirmed closes compact, and a denied or expired one
   never reaches it) and applies in a `setNodes` updater queued after `deleteNodes`' own. A resized
   frame drops its stale `measured` (as `placeNodeInRect` does), or the frame above it is laid out
