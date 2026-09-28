@@ -5,9 +5,12 @@ import {
   NodeResizer,
   Position,
   useReactFlow,
+  useStore,
   useUpdateNodeInternals,
   type NodeProps
 } from '@xyflow/react'
+import { isDock } from '@shared/dock'
+import { helperChip } from '../lib/dockSeat'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -1630,6 +1633,19 @@ export function TerminalNode({
   const fanoutCount = useAgentNodes(
     (s) => Object.values(s.byId).filter((v) => v.parentNodeId === id).length
   )
+  // Inside the Dock (@shared/dock) this chat draws no helper cards (lib/cardBand `fanoutHidden`),
+  // so its header carries a count instead. Read reactively: marking or releasing the Dock re-renders.
+  const seatInDock = useStore((s) => {
+    const seen = new Set<string>()
+    let p = parentId
+    while (p && !seen.has(p)) {
+      seen.add(p)
+      const frame = s.nodeLookup.get(p)
+      if (isDock(frame)) return true
+      p = frame?.parentId
+    }
+    return false
+  })
   // Transient, per-launch: what this node's Codex launcher reported it actually got. Undefined for
   // every non-codex node and for a codex node whose launcher never spoke.
   const codexIdentity = useCodexIdentity((s) => s.byId[id])
@@ -5399,6 +5415,19 @@ export function TerminalNode({
           }
           warning={accountFallback}
         />
+        {seatInDock &&
+          (() => {
+            const chip = helperChip(fanoutCount, !!status?.loop && !status.loop.dismissed)
+            return chip ? (
+              <span
+                className="node-account-chip node-helper-chip"
+                title="Helper cards are not drawn inside the Dock; this counts them."
+              >
+                {chip.text}
+                {chip.loop ? ' ↻' : ''}
+              </span>
+            ) : null
+          })()}
         {data.ssh ? (
           <span
             className="term-ssh-chip"

@@ -20,6 +20,7 @@
 //    and is a no-op when the band is already there, so a second application cannot shift twice.
 import { GROUP_GAP } from '@shared/placement'
 import { isPinned, type CanvasNode } from '../state/workspace'
+import { inDock } from '@shared/dock'
 import { absolutePosition, type FocusableNode } from './nodeFocus'
 import type { Rect } from './nodeSizing'
 import { reflow } from './reflow'
@@ -45,6 +46,13 @@ const nodeH = (n: CanvasNode): number => n.measured?.height ?? (n.height as numb
 export function bandOf(n: { data?: Record<string, unknown> }): number {
   const b = n.data?.cardBand
   return typeof b === 'number' && Number.isFinite(b) && b > 0 ? b : 0
+}
+
+/** Whether `chat` draws no helper cards: its eye is closed (`hideFanout`), or it sits in the Dock
+ *  (@shared/dock), which is fixed-size and pinned, so a card row there could only cover its pages.
+ *  The Dock seat's header shows a helper count instead (lib/dockSeat). */
+export function fanoutHidden(chat: CanvasNode, nodes: readonly CanvasNode[]): boolean {
+  return !!chat.data.hideFanout || inDock(chat.id, nodes)
 }
 
 /** The rect every layout step measures a node by: its own, grown downward by its band. */
@@ -129,7 +137,7 @@ export function cardRowBands(
   const out = new Map<string, number>()
   for (const pid of new Set([...loopParents, ...subsOf.keys()])) {
     const chat = nodes.find((n) => n.id === pid)
-    if (!chat || chat.data.hideFanout) continue
+    if (!chat || fanoutHidden(chat, nodes)) continue
     out.set(pid, cardRowOf(chat, loopParents.has(pid), subsOf.get(pid) ?? [], sizes).band)
   }
   return out

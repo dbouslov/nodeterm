@@ -5,7 +5,7 @@ import type { CanvasNode } from '../state/workspace'
 import type { AgentNodeStatus } from '../state/agentStatus'
 import type { EdgeData } from './edgeKinds'
 import { containerOrigin, snapPointInRootSpace } from './gridSnap'
-import { cardOffset, cardRowOf, clampToChat } from './cardBand'
+import { cardOffset, cardRowOf, clampToChat, fanoutHidden } from './cardBand'
 
 /**
  * The cron / schedule / loop cards drawn under an agent node: ONE builder for the canvas render
@@ -101,7 +101,7 @@ export function buildLoopCards(
     // lives here, in the render layer, and nowhere else.
     if (!st.loop || st.loop.dismissed) continue
     const parent = nodes.find((n) => n.id === pid)
-    if (!parent || parent.data.hideFanout) continue
+    if (!parent || fanoutHidden(parent, nodes)) continue
     const accent = agentConfig((parent.data.agentId as string) ?? 'claude')?.color ?? '#d97757'
     const snap = ui.snap ? { grid: ui.snap, origin: containerOrigin(parent.parentId, nodes as CanvasNode[]) } : undefined
     const lid = `loop-${pid}`
