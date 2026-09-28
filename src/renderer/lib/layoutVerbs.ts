@@ -123,7 +123,13 @@ export function planArrange(
   // The Dock (@shared/dock) is pinned, so it never moves; a top-level set must not be laid OVER it
   // either. The laid-out block moves as ONE piece, right of the Dock or below it (whichever is the
   // shorter move), so the layout the caller asked for keeps its shape.
-  if (!container) next = shiftClearOfDock(live, next, ids)
+  let dockNote = ''
+  if (!container) {
+    const cleared = shiftClearOfDock(live, next, ids)
+    if ('error' in cleared) return { ok: false, error: `${verb}: ${cleared.error}` }
+    next = cleared.nodes
+    if (cleared.shifted) dockNote = ', moved as one block clear of the Dock'
+  }
   // Tidying a frame's children usually leaves the frame oversized (it was sized to their
   // old scattered spots) — shrink it to hug the new layout, then let its neighbours and
   // the frames above it follow (lib/reflow). Top-level sets have no frame.
@@ -148,7 +154,7 @@ export function planArrange(
   return {
     ok: true,
     nodes: next,
-    message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${count} node(s) ${how}${sizeNote}${note}`,
+    message: `${verb === 'arrange' ? 'arranged' : 'aligned'} ${count} node(s) ${how}${sizeNote}${dockNote}${note}`,
     result: { count, container, pinned: pinnedIds, ...(chatSize ? { chatSize } : {}) }
   }
 }
@@ -202,23 +208,69 @@ export function planStoredLayout(
   }
 }
 
-/** `next` with the top-level members of `ids` translated as one block clear of the Dock, when any
- *  of them would overlap it (PLACEMENT_GAP of air). Unchanged otherwise. */
-function shiftClearOfDock(live: CanvasNode[], next: CanvasNode[], ids: readonly string[]): CanvasNode[] {
+/** How far a block may travel looking for a clear spot beside the Dock before the verb refuses. */
+const DOCK_SHIFT_BOUND = 4000
+
+type Rect4 = { x: number; y: number; width: number; height: number }
+const hitWithGap = (a: Rect4, b: Rect4): boolean =>
+  a.x < b.x + b.width + PLACEMENT_GAP &&
+  b.x - PLACEMENT_GAP < a.x + a.width &&
+  a.y < b.y + b.height + PLACEMENT_GAP &&
+  b.y - PLACEMENT_GAP < a.y + a.height
+
+/**
+ * `next` with the movable top-level members of `ids` translated as ONE block clear of the Dock,
+ * when any of them would sit on it (PLACEMENT_GAP of air). Pinned members never move and are not
+ * part of the block. The shift must not land the block on anything else either: each direction
+ * (down, right, up, left) starts at the smallest move that clears the Dock and walks on in
+ * PLACEMENT_GAP steps until nothing top-level is hit; the smallest clear move wins (ties in that
+ * order). No clear spot within DOCK_SHIFT_BOUND: an error, never a silent overlap.
+ */
+function shiftClearOfDock(
+  live: CanvasNode[],
+  next: CanvasNode[],
+  ids: readonly string[]
+): { nodes: CanvasNode[]; shifted: boolean } | { error: string } {
   const dock = dockOf(live)
-  if (!dock) return next
+  if (!dock) return { nodes: next, shifted: false }
   const d = nodeRect(dock)
-  const members = next.filter((m) => ids.includes(m.id) && m.id !== dock.id && !m.parentId)
+  const members = next.filter((m) => ids.includes(m.id) && m.id !== dock.id && !m.parentId && !isPinned(m, next))
+  if (!members.length) return { nodes: next, shifted: false }
   const rects = members.map(nodeRect)
-  const hit = rects.some(
-    (r) => r.x < d.x + d.width + PLACEMENT_GAP && d.x - PLACEMENT_GAP < r.x + r.width && r.y < d.y + d.height + PLACEMENT_GAP && d.y - PLACEMENT_GAP < r.y + r.height
-  )
-  if (!hit) return next
+  if (!rects.some((r) => hitWithGap(r, d))) return { nodes: next, shifted: false }
+  const moving = new Set(members.map((m) => m.id))
+  // Everything else at the top level is an obstacle: the Dock, bystanders, pinned members.
+  const obstacles = next.filter((n) => !n.parentId && !moving.has(n.id)).map(nodeRect)
   const left = Math.min(...rects.map((r) => r.x))
   const top = Math.min(...rects.map((r) => r.y))
-  const dx = d.x + d.width + PLACEMENT_GAP - left
-  const dy = d.y + d.height + PLACEMENT_GAP - top
-  const shift = dx <= dy ? { x: dx, y: 0 } : { x: 0, y: dy }
-  const moving = new Set(members.map((m) => m.id))
-  return next.map((n) => (moving.has(n.id) ? { ...n, position: { x: n.position.x + shift.x, y: n.position.y + shift.y } } : n))
+  const right = Math.max(...rects.map((r) => r.x + r.width))
+  const bottom = Math.max(...rects.map((r) => r.y + r.height))
+  const starts: { x: number; y: number }[] = [
+    { x: 0, y: d.y + d.height + PLACEMENT_GAP - top }, // down
+    { x: d.x + d.width + PLACEMENT_GAP - left, y: 0 }, // right
+    { x: 0, y: d.y - PLACEMENT_GAP - bottom }, // up
+    { x: d.x - PLACEMENT_GAP - right, y: 0 } // left
+  ]
+  const clearAt = (dx: number, dy: number): boolean =>
+    rects.every((r) => obstacles.every((o) => !hitWithGap({ ...r, x: r.x + dx, y: r.y + dy }, o)))
+  let best: { x: number; y: number } | null = null
+  for (const s0 of starts) {
+    const step = { x: Math.sign(s0.x) * PLACEMENT_GAP, y: Math.sign(s0.y) * PLACEMENT_GAP }
+    for (let k = 0; ; k++) {
+      const cand = { x: s0.x + step.x * k, y: s0.y + step.y * k }
+      if (Math.abs(cand.x) + Math.abs(cand.y) > DOCK_SHIFT_BOUND) break
+      if (clearAt(cand.x, cand.y)) {
+        if (!best || Math.abs(cand.x) + Math.abs(cand.y) < Math.abs(best.x) + Math.abs(best.y)) best = cand
+        break
+      }
+    }
+  }
+  if (!best) {
+    return { error: `no clear spot beside the Dock for ${[...moving].join(', ')} within ${DOCK_SHIFT_BOUND}px; lay them out elsewhere first` }
+  }
+  const shift = best
+  return {
+    shifted: true,
+    nodes: next.map((n) => (moving.has(n.id) ? { ...n, position: { x: n.position.x + shift.x, y: n.position.y + shift.y } } : n))
+  }
 }

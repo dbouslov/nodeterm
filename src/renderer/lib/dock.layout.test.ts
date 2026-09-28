@@ -83,3 +83,49 @@ describe('a top-level arrange shifts the whole block clear of the Dock (review f
     unmoved(plan.nodes)
   })
 })
+
+describe('the Dock shift respects pins and bystanders (review round 2)', () => {
+  const rect = (x: CanvasNode) => ({ x: x.position.x, y: x.position.y, w: x.width as number, h: x.height as number })
+  const hits = (a: ReturnType<typeof rect>, b: ReturnType<typeof rect>) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+  it('a pinned member p is never shifted, and the reply says so', () => {
+    const nodes = [...scene(), n('p', 1600, 1300, {}, { pinned: true })]
+    const plan = planArrange(nodes, 'arrange', { nodes: 'a,b,p' }, 0)
+    if (!plan.ok) throw new Error(plan.error)
+    expect(plan.nodes.find((x) => x.id === 'p')!.position).toEqual({ x: 1600, y: 1300 })
+    expect(plan.message).toMatch(/1 pinned, left in place/)
+    expect(plan.nodes.filter(onDock).map((x) => x.id)).toEqual([])
+  })
+
+  it('align left a,b beside a bystander x: the block never lands on x', () => {
+    // Align left puts a and b at x=0 (on the Dock). Straight down is blocked by x.
+    const nodes = [...scene(), n('x', 0, 1180, { width: 1500, height: 900 })]
+    const plan = planArrange(nodes, 'align', { nodes: 'a,c', edge: 'left' }, 0)
+    if (!plan.ok) {
+      expect(plan.error).toMatch(/Dock/)
+      return
+    }
+    const x = plan.nodes.find((q) => q.id === 'x')!
+    for (const id of ['a', 'c']) {
+      const m = plan.nodes.find((q) => q.id === id)!
+      expect(hits(rect(m), rect(x))).toBe(false)
+      expect(onDock(m)).toBe(false)
+    }
+    expect(x.position).toEqual({ x: 0, y: 1180 })
+    unmoved(plan.nodes)
+  })
+
+  it('refuses with a clear message when no direction is clear', () => {
+    const wall = [
+      n('N', -3000, -6000, { width: 8000, height: 5980 }),
+      n('S', -3000, 1180, { width: 8000, height: 6000 }),
+      n('W', -6000, -6000, { width: 5980, height: 14000 }),
+      n('E', 1480, -6000, { width: 6000, height: 14000 })
+    ]
+    const nodes = [...scene().filter((q) => q.id !== 'c'), ...wall]
+    const plan = planArrange(nodes, 'align', { nodes: 'a,b', edge: 'left' }, 0)
+    expect(plan.ok).toBe(false)
+    if (!plan.ok) expect(plan.error).toMatch(/no clear spot beside the Dock/)
+  })
+})
