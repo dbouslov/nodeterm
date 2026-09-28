@@ -110,13 +110,21 @@ describe('registerBoardLogHandlers — change subscription', () => {
     // so create it before subscribing (an initial append does that).
     await append(f, 'p1', entry({ id: 'a' }))
     f.listeners[IPC.boardLogSubscribe]('p1')
-    await append(f, 'p1', entry({ id: 'b' }))
-    // fs.watch is debounced 250ms in the store; give it margin
-    await new Promise((r) => setTimeout(r, 500))
-    const pushed = f.sent.filter((s) => s.channel === IPC.boardLogChanged('p1'))
-    expect(pushed.length).toBeGreaterThanOrEqual(1)
+    // fs.watch is debounced 250ms in the store, and macOS FSEvents can drop a change made right
+    // after the watch starts (it goes live asynchronously; a fixed 500ms sleep lost this race under
+    // full-suite load). Keep appending until the live watcher broadcasts; the retry interval stays
+    // above the debounce so the broadcast can land.
+    const pushed = () => f.sent.filter((s) => s.channel === IPC.boardLogChanged('p1')).length
+    let n = 0
+    await vi.waitFor(
+      async () => {
+        if (pushed() === 0) await append(f, 'p1', entry({ id: `b${n++}` }))
+        expect(pushed()).toBeGreaterThanOrEqual(1)
+      },
+      { timeout: 15_000, interval: 500 }
+    )
     f.listeners[IPC.boardLogUnsubscribe]('p1')
-  })
+  }, 30_000)
 
   it('remote poll: broadcasts only when the fingerprint changes; stops on last unsubscribe', async () => {
     vi.useFakeTimers()

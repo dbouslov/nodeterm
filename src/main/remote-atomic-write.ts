@@ -9,7 +9,8 @@ export interface RemoteAtomicWrite {
 export interface RemoteAtomicWriteOptions {
   /** Apply umask 077 before creating either the parent or the temp. */
   restrictPermissions?: boolean
-  /** Belt-and-braces for credential files: enforce 0600 on the temp before it is published. */
+  /** Belt-and-braces for credential files: enforce 0600 on the temp before it is published.
+   *  Implies `restrictPermissions`, so the temp is never created under a default umask first. */
   chmod600?: boolean
   /** False when the caller already created and permissioned the parent directory. */
   makeParent?: boolean
@@ -51,11 +52,13 @@ export function remoteAtomicWrite(
         : `${parentPath}/${temporaryLeaf}`
   const target = quoteRemotePath(path)
   const temporary = quoteRemotePath(temporaryPath)
-  const prefix = options.restrictPermissions ? 'umask 077; ' : ''
+  const prefix = options.restrictPermissions || options.chmod600 ? 'umask 077; ' : ''
   const parent = options.makeParent === false
     ? ''
     : `mkdir -p -- ${quoteRemotePath(parentPath)} && `
-  const protect = options.chmod600 ? ` && chmod 600 -- ${temporary}` : ''
+  // `--` BEFORE the mode: BSD/macOS chmod stops option parsing at the mode, so `chmod 600 -- f`
+  // there names a file called `--` and fails; only GNU getopt permutes it back into an option.
+  const protect = options.chmod600 ? ` && chmod -- 600 ${temporary}` : ''
   const command =
     `${prefix}${parent}{ cat > ${temporary}${protect} && mv -f -- ${temporary} ${target}; ` +
     `nt_status=$?; ` +

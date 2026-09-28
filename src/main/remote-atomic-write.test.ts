@@ -60,7 +60,7 @@ describe('remoteAtomicWrite', () => {
     expect(second.temporaryPath).not.toBe(first.temporaryPath)
     expect(first.command).toContain('umask 077; mkdir -p -- ~/' + "'a b'")
     expect(first.command).toContain(`cat > ${quoteRemotePath(first.temporaryPath)}`)
-    expect(first.command).toContain(`chmod 600 -- ${quoteRemotePath(first.temporaryPath)}`)
+    expect(first.command).toContain(`chmod -- 600 ${quoteRemotePath(first.temporaryPath)}`)
     expect(first.command).toContain(`mv -f -- ${quoteRemotePath(first.temporaryPath)} ${quoteRemotePath("~/a b/quo'te\\name.json")}`)
     expect(first.command).toContain(`rm -f -- ${quoteRemotePath(first.temporaryPath)}`)
     expect(first.command).toContain('exit "$nt_status"')
@@ -130,6 +130,32 @@ describe('remoteAtomicWrite', () => {
         stdio: ['pipe', 'pipe', 'pipe']
       })
 
+      expect(statSync(target).mode & 0o777).toBe(0o600)
+    }
+  )
+
+  it.skipIf(!SHELL || process.platform === 'win32')(
+    'chmod600 alone creates the temp private BEFORE chmod runs, even from a default umask',
+    () => {
+      const root = mkdtempSync(path.join(os.tmpdir(), 'nt-remote-umask-'))
+      roots.push(root)
+      // A PATH-shadowing chmod records the temp's mode at the moment chmod is reached, then
+      // delegates: the secret must never sit in a group/world-readable temp, not even briefly.
+      const bin = path.join(root, 'bin')
+      const record = path.join(root, 'mode-at-chmod')
+      execFileSync(SHELL!, ['-c', `mkdir -p "$1" && cat > "$1/chmod" && /bin/chmod 755 "$1/chmod"`, 'x', bin], {
+        input: `#!/bin/sh\nls -l "$3" | cut -c1-10 > '${record}'\nexec /bin/chmod "$@"\n`
+      })
+      const target = path.join(root, 'token')
+      const write = remoteAtomicWrite(target, { chmod600: true })
+
+      execFileSync(SHELL!, ['-c', 'umask 022; eval "$1"', 'x', write.command], {
+        input: 'credential',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+
+      expect(readFileSync(record, 'utf8').trim()).toBe('-rw-------')
       expect(statSync(target).mode & 0o777).toBe(0o600)
     }
   )
