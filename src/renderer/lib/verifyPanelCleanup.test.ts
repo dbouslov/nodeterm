@@ -71,7 +71,7 @@ describe('emptiedVerifyPanels — a panel frame dissolves when its last member c
 })
 
 describe('pruneEmptyVerifyPanels — on load, empty panel frames go', () => {
-  it('drops empty marked and legacy panel frames, keeps every frame with a child and every user frame', () => {
+  it('drops only empty MARKED panel frames; keeps every frame with a child, and every unmarked frame', () => {
     const kept = pruneEmptyVerifyPanels([
       frame('go', 'GO'),
       frame('vp', 'Verify: a', { parentId: 'go', verifyPanel: true }),
@@ -81,7 +81,14 @@ describe('pruneEmptyVerifyPanels — on load, empty panel frames go', () => {
       frame('marked', 'Round 2', { verifyPanel: true }),
       frame('empty-user', 'Scratch')
     ])
-    expect(kept.map((n) => n.id)).toEqual(['go', 'full', 'r', 'empty-user'])
+    // `legacy` is titled "Verify: " but unmarked: at load that is not proof a panel made it (a user
+    // may title their own frame that way), and the deletion would be saved to the git-shared file.
+    expect(kept.map((n) => n.id)).toEqual(['go', 'legacy', 'full', 'r', 'empty-user'])
+  })
+
+  it('keeps an empty unmarked "Verify: " frame at load, though a close would dissolve it', () => {
+    const states = [frame('legacy', 'Verify: b')]
+    expect(pruneEmptyVerifyPanels(states)).toBe(states)
   })
 
   it('drops a panel frame whose only child was an empty panel frame', () => {

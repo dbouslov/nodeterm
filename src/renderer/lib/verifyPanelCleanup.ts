@@ -12,13 +12,14 @@
 // 2. A close that leaves a panel frame with no child removes that frame too (`emptiedVerifyPanels`),
 //    on screen (`deleteNodes`) and off screen (`closeStoredNodes`). Only a frame that HELD a closed
 //    node is considered: this is "the last member closed", not a sweep.
-// 3. Every project load drops a panel frame with no child (`pruneEmptyVerifyPanels`, run where
+// 3. Every project load drops a MARKED panel frame with no child (`pruneEmptyVerifyPanels`, run where
 //    Canvas hydrates the WHOLE project), which clears the frames earlier builds left behind. Not in
 //    `nodeStatesToFlow`: that also hydrates one node at a time (`applyMutationToFlow`, a peer's
 //    upsert), and a lone frame always looks childless.
 // A LEAF (types only).
 // A frame with any child is never removed, and a frame that is neither marked nor titled
-// "Verify: " is never removed, empty or not: an empty frame of the user's own is theirs.
+// "Verify: " is never removed, empty or not: an empty frame of the user's own is theirs. At load
+// the title alone is not enough either (rule 3).
 
 
 const LEGACY_TITLE_PREFIX = 'Verify: '
@@ -71,11 +72,10 @@ export function pruneEmptyVerifyPanels<
   let cur = states
   for (;;) {
     const parents = new Set(cur.map((s) => s.parentId).filter((g): g is string => !!g))
-    const next = cur.filter(
-      (s) =>
-        parents.has(s.id) ||
-        !isVerifyPanelFrame({ type: s.kind, data: { verifyPanel: s.verifyPanel, title: s.title } })
-    )
+    // MARKED frames only. The legacy title is enough when a close empties the frame (the caller just
+    // closed its members), but at load an empty frame titled "Verify: …" is not proof a panel made
+    // it, and the deletion would be saved to the git-shared project.json.
+    const next = cur.filter((s) => parents.has(s.id) || !(s.kind === 'group' && s.verifyPanel === true))
     if (next.length === cur.length) return cur
     cur = next
   }
