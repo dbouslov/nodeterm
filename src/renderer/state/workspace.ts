@@ -42,7 +42,6 @@ export { applyCanvasMutation } from '@shared/canvas-mutations'
 export { accountNodeColor, agentAccountColor } from '@shared/agents/account-color'
 import { sanitizeInboundNode } from '@shared/node-exec'
 import { SYSTEM_NODE_COLORS } from '@shared/node-colors'
-import { pruneEmptyVerifyPanels } from '../lib/verifyPanelCleanup'
 
 // Preserve the renderer's long-standing import surface; validation and the palette now live in
 // shared so Server Edition and canvas-control accept exactly what these pickers display.
@@ -2033,9 +2032,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
   // React Flow requires a parent node to appear before its children. With nested frames a flat
   // "groups first" sort is not enough (two frames compare equal), so `groupsFirst` re-emits the
   // frames depth-first from the root at the end of this function.
-  // A `verify` panel frame with nothing left in it is dropped on every load (lib/verifyPanelCleanup):
-  // earlier builds left one behind after each review round.
-  const mapped = pruneEmptyVerifyPanels(states).map((raw) => {
+  const mapped = states.map((raw) => {
     // The SDK chat node was removed (2026-07). A persisted chat node degrades into a sticky that
     // keeps its place and tells the user how to continue the conversation — chat sessions are
     // ordinary Claude sessions, resumable in any terminal. (position/size are normalized

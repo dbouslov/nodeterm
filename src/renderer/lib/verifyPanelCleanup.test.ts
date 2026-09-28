@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CanvasNodeState } from '@shared/types'
-import { nodeStatesToFlow, type CanvasNode } from '../state/workspace'
+import { applyMutationToFlow, nodeStatesToFlow, type CanvasNode } from '../state/workspace'
 import { emptiedVerifyPanels, isVerifyPanelFrame, pruneEmptyVerifyPanels } from './verifyPanelCleanup'
 
 const state = (id: string, extra: Partial<CanvasNodeState> = {}): CanvasNodeState => ({
@@ -97,8 +97,24 @@ describe('pruneEmptyVerifyPanels — on load, empty panel frames go', () => {
     expect(pruneEmptyVerifyPanels(states)).toBe(states)
   })
 
-  it('runs on every load: nodeStatesToFlow never hydrates an empty panel frame', () => {
-    const nodes = nodeStatesToFlow([frame('vp', 'Verify: a', { verifyPanel: true }), frame('go', 'GO')])
-    expect(nodes.map((n) => n.id)).toEqual(['go'])
+  it('is not part of nodeStatesToFlow, which also hydrates ONE node at a time', () => {
+    // A single frame state has no children in its own array; pruning there dropped it.
+    const nodes = nodeStatesToFlow([frame('vp', 'Verify: a', { verifyPanel: true })])
+    expect(nodes.map((n) => n.id)).toEqual(['vp'])
+  })
+})
+
+describe('a peer upsert of a verify panel frame (applyMutationToFlow hydrates one node)', () => {
+  const vp = frame('vp', 'Verify: GO', { verifyPanel: true })
+  const canvas = live([vp, state('r1', { parentId: 'vp' })])
+
+  it('updates an existing panel frame', () => {
+    const next = applyMutationToFlow(canvas, { op: 'upsert', node: { ...vp, title: 'Verify: GO (round 2)' } })
+    expect(next.find((n) => n.id === 'vp')!.data.title).toBe('Verify: GO (round 2)')
+  })
+
+  it('appends a new panel frame', () => {
+    const next = applyMutationToFlow(canvas, { op: 'upsert', node: frame('vq', 'Verify: other', { verifyPanel: true }) })
+    expect(next.some((n) => n.id === 'vq')).toBe(true)
   })
 })

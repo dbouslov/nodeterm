@@ -565,7 +565,7 @@ import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/Kan
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { planStoredMinimize } from '../lib/storedMinimize'
-import { emptiedVerifyPanels } from '../lib/verifyPanelCleanup'
+import { emptiedVerifyPanels, pruneEmptyVerifyPanels } from '../lib/verifyPanelCleanup'
 import { planArrange, planGroup, planStoredLayout, type StoredLayoutPlan } from '../lib/layoutVerbs'
 import { layoutTeamFrame, layoutVerifyPanel } from '../lib/verifyPanelLayout'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
@@ -2605,8 +2605,11 @@ export function Canvas() {
     // A RETURNING project's pages navigated while ghosted: load its nodes with the pool's live
     // url/title already applied, in the SAME setNodes — a later correction would move the `url`
     // prop under the surviving surface and navigate the very page the pool preserved.
+    // An empty `verify` panel frame is dropped here, where the WHOLE project is hydrated
+    // (lib/verifyPanelCleanup) — never inside `nodeStatesToFlow`, which also hydrates one node at a
+    // time (a peer upsert) and would see every frame as childless there.
     const flow = overlayKeepAliveData(
-      nodeStatesToFlow(project.nodes),
+      nodeStatesToFlow(pruneEmptyVerifyPanels(project.nodes)),
       useWebviewKeepAlive.getState().entries,
       project.id
     )

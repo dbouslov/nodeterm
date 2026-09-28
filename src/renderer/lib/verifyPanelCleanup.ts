@@ -12,12 +12,14 @@
 // 2. A close that leaves a panel frame with no child removes that frame too (`emptiedVerifyPanels`),
 //    on screen (`deleteNodes`) and off screen (`closeStoredNodes`). Only a frame that HELD a closed
 //    node is considered: this is "the last member closed", not a sweep.
-// 3. Every load drops a panel frame with no child (`pruneEmptyVerifyPanels`, run by
-//    `nodeStatesToFlow`), which clears the frames earlier builds left behind.
+// 3. Every project load drops a panel frame with no child (`pruneEmptyVerifyPanels`, run where
+//    Canvas hydrates the WHOLE project), which clears the frames earlier builds left behind. Not in
+//    `nodeStatesToFlow`: that also hydrates one node at a time (`applyMutationToFlow`, a peer's
+//    upsert), and a lone frame always looks childless.
+// A LEAF (types only).
 // A frame with any child is never removed, and a frame that is neither marked nor titled
 // "Verify: " is never removed, empty or not: an empty frame of the user's own is theirs.
-//
-// A LEAF (types only), because state/workspace.ts imports it.
+
 
 const LEGACY_TITLE_PREFIX = 'Verify: '
 
