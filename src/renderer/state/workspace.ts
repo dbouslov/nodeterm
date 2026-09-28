@@ -86,6 +86,8 @@ export interface NodeData {
   pinned?: boolean
   /** A `verify` review panel frame — see `CanvasNodeState.verifyPanel`. */
   verifyPanel?: boolean
+  /** The orchestrator's fixed frame, see `CanvasNodeState.fixture` and @shared/dock. */
+  fixture?: 'dock'
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /** Canvas px reserved under the node for its docked card row — see `CanvasNodeState.cardBand`. */
@@ -2078,6 +2080,8 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
       // Default to 'terminal' for nodes saved before the kind field existed.
       type: n.kind ?? 'terminal',
       ...((n.kind ?? 'terminal') === 'group' ? { dragHandle: '.group-node__label' } : {}),
+      // The Dock keeps its slot: not even a hand drag moves it (@shared/dock).
+      ...(n.fixture === 'dock' ? { draggable: false } : {}),
       position: n.position,
       width: n.size.width,
       height,
@@ -2093,8 +2097,10 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         tags: n.tags,
         collapsed,
         // Hand-editable input: only a literal true pins — a stray "yes" must not freeze a layout.
-        pinned: n.pinned === true ? true : undefined,
+        // The Dock is always pinned (@shared/dock).
+        pinned: n.pinned === true || n.fixture === 'dock' ? true : undefined,
         verifyPanel: n.verifyPanel === true ? true : undefined,
+        fixture: n.fixture === 'dock' ? ('dock' as const) : undefined,
         hideFanout: n.hideFanout,
         cardBand: normalizeCardBand(n.cardBand),
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
@@ -2180,6 +2186,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         collapsed: n.data.collapsed,
         pinned: n.data.pinned === true ? true : undefined,
         verifyPanel: n.data.verifyPanel === true ? true : undefined,
+        fixture: n.data.fixture === 'dock' ? ('dock' as const) : undefined,
         hideFanout: n.data.hideFanout,
         cardBand: normalizeCardBand(n.data.cardBand),
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out
