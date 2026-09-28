@@ -397,6 +397,9 @@ export interface CanvasNodeState {
   verifyPanel?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
+  /** Agent nodes only: canvas px reserved under the node for its docked subagent/loop card row
+   *  (lib/cardBand). Layout-only; never part of `size`. Only a finite number 0..2000 survives. */
+  cardBand?: number
   /**
    * A user-chosen icon shown wherever this node is listed (canvas header, kanban card, sessions
    * sidebar): one emoji/character, or an image file. Absent = the node draws exactly as it did

@@ -87,6 +87,8 @@ export interface NodeData {
   verifyPanel?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
+  /** Canvas px reserved under the node for its docked card row — see `CanvasNodeState.cardBand`. */
+  cardBand?: number
   /** Expanded height to restore when un-collapsing (kept out of the persisted size). */
   expandedHeight?: number
   /**
@@ -2028,6 +2030,12 @@ export function reorderNodeBefore(
 }
 
 /** Converts persisted node states into live React Flow nodes (parents first). */
+/** `cardBand` comes from a git-shared, hand-editable file: only a finite number 0..2000 survives,
+ *  so a stray value can never push a column off the canvas. */
+export function normalizeCardBand(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2000 ? v : undefined
+}
+
 export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
   // React Flow requires a parent node to appear before its children. With nested frames a flat
   // "groups first" sort is not enough (two frames compare equal), so `groupsFirst` re-emits the
@@ -2085,6 +2093,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         pinned: n.pinned === true ? true : undefined,
         verifyPanel: n.verifyPanel === true ? true : undefined,
         hideFanout: n.hideFanout,
+        cardBand: normalizeCardBand(n.cardBand),
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
         // node data — so every surface that renders an icon gets a value this module vouched for
         // rather than each one re-deciding. An unrecognized icon becomes no icon.
@@ -2169,6 +2178,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         pinned: n.data.pinned === true ? true : undefined,
         verifyPanel: n.data.verifyPanel === true ? true : undefined,
         hideFanout: n.data.hideFanout,
+        cardBand: normalizeCardBand(n.data.cardBand),
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out
         // untyped. Re-validating on the way OUT (not just on the way in) also means a value a
         // peer canvas mutation or a future caller put on live node data cannot be written to the
