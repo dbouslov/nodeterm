@@ -2640,7 +2640,11 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   stays as is, and the walk up stops at the first such frame: re-packing moves every child (a
   child frame carries its pinned node along), and `arrangeNodes` keeps a pinned member in place but
   starts the rest at the first slot, so re-packing around one stacks a node on it. An emptied
-  frame stays for the caller to `ungroup`. Canvas plans off
+  frame stays for the caller to `ungroup`, except a `verify` panel frame, which any close that
+  empties it removes (`renderer/lib/verifyPanelCleanup.ts`: `deleteNodes` on screen, the store's
+  `removeNodes` off screen; every load also drops an empty one). Off screen, `planStoredCompaction`
+  runs the same plan over the hydrated SAVED nodes (frames re-fit from saved sizes) and writes back
+  only the nodes that moved, after `closeStoredNodes`. Canvas plans off
   `nodesRef` inside `runClose` (so waived and confirmed closes compact, and a denied or expired one
   never reaches it) and applies in a `setNodes` updater queued after `deleteNodes`' own. A resized
   frame drops its stale `measured` (as `placeNodeInRect` does), or the frame above it is laid out

@@ -625,6 +625,12 @@ describe('parseControlRequest', () => {
       expect(body).toMatch(/emptied stays, empty/)
       expect(body).toMatch(/denied or expired close moves nothing/)
       expect(body).toMatch(/Server Edition\s+refuses `--compact`/)
+      // fix/tidy-offscreen: answered off screen from the saved sizes, and a verify panel frame
+      // does not stay behind empty.
+      const at = body.indexOf('close --node <id,id> --compact')
+      const entry = body.slice(at, body.indexOf('\n- ', at))
+      expect(entry).toMatch(/off\s+screen too[\s\S]*saved node sizes/i)
+      expect(entry).toMatch(/verify panel frame,\s+which goes with its last member/)
     }
   })
 

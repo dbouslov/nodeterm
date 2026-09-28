@@ -631,7 +631,7 @@ import {
   parseCloseTargets,
   CLOSE_BULK_MAX
 } from '../lib/closeTargets'
-import { applyCompaction, compactNote, compactRequested, planCompaction } from '../lib/closeCompact'
+import { applyCompaction, compactNote, compactRequested, planCompaction, planStoredCompaction } from '../lib/closeCompact'
 import { canvasSyncTarget } from './collab-sync'
 import { menuMinimizeRow, minimizeIds, minimizeReply, planMinimize } from '@shared/minimize'
 import {
@@ -12540,16 +12540,25 @@ export function Canvas() {
                 // cross-project teardown the sessions sidebar has always used — it still ends the
                 // tmux session (remote included, resolved from the persisted index), frees a
                 // closed frame's children, and records the close against the stored project.
+                // `--compact` is planned off the SAVED canvas as the close finds it, sizes included
+                // (nothing measured them), and applied once the close has removed the nodes: only the
+                // re-packed nodes and re-fitted frames are written back (lib/closeCompact.ts).
+                const storedCompact = compactRequested(args)
+                  ? planStoredCompaction(offCanvas.project.nodes, closeIds, snapGridNow())
+                  : null
                 closeStoredNodesRef.current(offCanvas.project.id, closeIds)
-                // `--compact` plans from MEASURED sizes (lib/closeCompact.ts), which an off-screen
-                // project does not have — so it is skipped, and the reply says so.
+                if (storedCompact?.upserts.length) {
+                  const store = useProjects.getState()
+                  for (const node of storedCompact.upserts) store.applyNodeMutation(offCanvas.project.id, { op: 'upsert', node })
+                  void writeDisk()
+                }
                 reply({
                   ok: true,
                   message:
                     (closeIds.length === 1
                       ? `closed ${closeIds[0]}`
                       : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) +
-                    (compactRequested(args) ? ' (not compacted: that project is not on screen)' : '')
+                    (storedCompact ? `${storedCompact.note} (project not on screen: laid out from the saved node sizes)` : '')
                 })
                 return
               }
@@ -12557,6 +12566,8 @@ export function Canvas() {
               // grid it HAD (lib/closeCompact.ts). Planned here, so a waived and a confirmed close
               // both compact, and a denied or expired one never gets this far.
               const compact = compactRequested(args) ? planCompaction(ctlNodes(), closeIds) : null
+              // A verify panel frame the close empties is removed by `deleteNodes`; the note says so.
+              const dissolved = compact ? emptiedVerifyPanels(ctlNodes(), new Set(closeIds)) : []
               // Canonical teardown: deleteNodes() destroys the local tmux session (remote-guarded),
               // drops persisted agentStatus, and reparents any group children. Don't hand-roll it.
               // ONE call for the whole list — its own paths are batched, and N calls would give N
@@ -12573,7 +12584,7 @@ export function Canvas() {
                 message:
                   (closeIds.length === 1
                     ? `closed ${closeIds[0]}`
-                    : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) + (compact ? compactNote(compact) : '')
+                    : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) + (compact ? compactNote(compact, dissolved) : '')
               })
             }
             // Waived? Same decision table as `write` (@shared/control-confirm).

@@ -628,7 +628,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  told not to change files. Prefer this over asking one agent to double-check itself. The panel is',
     '  a frame placed inside your own frame (which grows to hold it), clear of other nodes; a re-verify',
     '  with the same label (default `Verify: <target title>`) reuses that frame, the new round below the',
-    '  old. Close a finished round yourself: `close --node <ids> --compact`.',
+    '  old. Close a finished round yourself: `close --node <ids> --compact`; the panel frame goes with',
+    '  its last member.',
     '- `spawn-team --label L --team \'[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]\'` — one agent per',
     '  role (max 8), arranged in a grid, wrapped in a labeled group placed inside your own frame (which',
     '  grows to hold it), clear of other nodes, each connected + context-linked to you.',
@@ -676,7 +677,9 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  count it had) and is re-fitted to them, and each enclosing frame that changed size does the',
     '  same; the top level is never re-laid out. A pinned frame, everything inside one, and a frame',
     '  holding a pinned node at any depth are left as is; a frame the close emptied stays, empty',
-    '  (`ungroup` it). A denied or expired close moves nothing. Server Edition refuses `--compact`.',
+    '  (`ungroup` it) — except a verify panel frame, which goes with its last member. Answered off',
+    '  screen too, from the saved canvas: frames are re-fitted from the saved node sizes, and the reply',
+    '  says so. A denied or expired close moves nothing. Server Edition refuses `--compact`.',
     '- `send --node <id> --text "..."` / `reply --node <id> --text "..."` — deliver a message into',
     '  an AGENT node the caller opened this run (no confirm dialog: verified-only, gated by the project\'s',
     '  agent-messaging switch — off by default; the settings verb\'s `--set agentMessaging --value true`',
@@ -1223,7 +1226,7 @@ Verbs:
   grows to hold it and moves its neighbours aside), clear of other nodes. A re-verify with the same
   label (\`--label\`, default \`Verify: <target title>\`) reuses that frame: the new round goes below
   the earlier one and nothing of it is closed, so close a finished round yourself
-  (\`close --node <ids> --compact\`).
+  (\`close --node <ids> --compact\`); the panel frame goes with its last member.
 - \`spawn-team --label "Frontend Team" --team '[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]'\` —
   open one agent per role (each prompt starts that member working), arrange them in a grid,
   wrap them in a labeled group placed inside your own frame (which grows to hold it), clear of
@@ -1287,7 +1290,9 @@ Verbs:
   size gets the same; the top level is never re-laid out. A pinned frame, everything inside one,
   and a frame holding a pinned node at any depth are left as is (re-packing would move the pinned
   node or stack the rest on it), and the walk up stops there. A frame the close emptied stays, empty —
-  \`ungroup\` it. The reply names each frame that held a closed node and what happened to it. It
+  \`ungroup\` it — except a verify panel frame, which goes with its last member. The reply names
+  each frame that held a closed node and what happened to it. Answered off screen too, from the
+  saved canvas: frames are re-fitted from the saved node sizes, and the reply says so. It
   applies only when the close does: a denied or expired close moves nothing. Server Edition
   refuses \`--compact\`.
 - \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
