@@ -982,8 +982,11 @@ const newNodeSize = (): BoxSize => {
 }
 
 
+// An uncolored node's minimap stroke stays neutral: blue is the unread state (`--glow-unread`).
+const MINIMAP_NEUTRAL = 'rgba(var(--tint-rgb), 0.35)'
+
 const minimapNodeColor = (n: Node): string =>
-  (n.data as { color?: string })?.color ?? '#0a84ff'
+  (n.data as { color?: string })?.color ?? MINIMAP_NEUTRAL
 
 /** The agent a terminal node was CREATED as. Deliberately NOT `agentIdOf`, whose extra hook-status
  *  fallback also reports a plain terminal someone typed `claude` into by hand: TerminalNode's
@@ -1057,7 +1060,7 @@ function StatusAwareMiniMap({ onNodeDoubleClick }: { onNodeDoubleClick: (node: N
       if (st?.state === 'working') return 'var(--glow-working)'
       if (st?.state === 'waiting' || st?.state === 'blocked') return '#ff453a'
       if (st?.unread) return 'var(--glow-unread)'
-      return (n.data as { color?: string })?.color ?? '#0a84ff'
+      return (n.data as { color?: string })?.color ?? MINIMAP_NEUTRAL
     },
     [statusById]
   )

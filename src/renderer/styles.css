@@ -9631,7 +9631,7 @@ button.group-node__setup:disabled {
 .ov-node--attention { box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.6); }
 .ov-node__head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ov-node__title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ov-node__unread { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #d97757; }
+.ov-node__unread { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--glow-unread); }
 .ov-node__count { margin-left: auto; font-size: 10px; background: rgba(255, 159, 10, 0.2); border-radius: 999px; padding: 0 6px; }
 .ov-node__role { font-size: 12px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-node__role--none { color: rgba(var(--tint-rgb), 0.4); }
