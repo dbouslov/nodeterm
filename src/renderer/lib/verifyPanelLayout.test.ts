@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { ROW_GAP } from '@shared/placement'
 import { rootPosition, type CanvasNode } from '../state/workspace'
 import { layoutVerifyPanel } from './verifyPanelLayout'
 
@@ -83,6 +84,17 @@ describe('layoutVerifyPanel — a review panel never lands on anything', () => {
     for (const id of ['r1', 'r2', 'r3']) expect(nodes.find((n) => n.id === id)!.parentId).toBe(groupId)
     expect(overlaps(nodes)).toEqual([])
     expect(strays(nodes)).toEqual([])
+  })
+
+  it('sits directly below the caller inside its frame, not below the whole frame', () => {
+    // Treating the caller's own frame as an obstacle would push the panel below that frame.
+    const start = [frame('go', 0, 0, 700, 560, 'General Orchestrator'), child('caller', 'go', 28, 62, 600, 400), member('r1'), member('r2')]
+    const { nodes, groupId } = layoutVerifyPanel(start, { srcId: 'caller', panelIds: ['r1', 'r2'], label: 'Verify: Build' })
+    const callerR = rectOf(nodes.find((n) => n.id === 'caller')!, nodes)
+    const gR = rectOf(nodes.find((n) => n.id === groupId)!, nodes)
+    expect(gR.x).toBe(callerR.x)
+    expect(gR.y - (callerR.y + callerR.h)).toBeGreaterThanOrEqual(0)
+    expect(gR.y - (callerR.y + callerR.h)).toBeLessThanOrEqual(ROW_GAP)
   })
 
   it('a re-verify with the same label reuses the earlier panel frame instead of stacking a new one', () => {
