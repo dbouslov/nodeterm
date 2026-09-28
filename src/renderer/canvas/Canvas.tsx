@@ -575,6 +575,7 @@ import { frameChatSize, resizeChats, withChatSize } from '../lib/chatSize'
 import { snapResizeChanges } from '../lib/resizeSnap'
 import { canClearDirty, canCreateOnCanvas, commitSkipReason } from '../state/persistGuards'
 import { tracePersist, traceErrorCode } from '../lib/persistTrace'
+import { useNodesEpoch } from './nodesEpoch'
 import { isHidden } from '../lib/ui-visibility'
 import { boardLogEvents } from '../lib/boardLogDiff'
 import { useBoardLog } from '../state/boardLog'
@@ -1559,14 +1560,16 @@ export function Canvas() {
     clearModels
   ])
   const viewportRef = useRef<Viewport>({ x: 0, y: 0, zoom: 1 })
-  const nodesRef = useRef<CanvasNode[]>(nodes)
   /**
-   * WHICH project's nodes `nodesRef` currently holds — the epoch tag that pairs with
-   * `activeProjectId` (see canCommitCanvas). Written only where the load effect installs a
-   * project's nodes, and invalidated (null) on its bail-out paths; null until the first load, so
-   * the initial empty `useNodesState([])` can never be committed as some project's canvas.
+   * `nodesRef` mirrors the live node array; `nodesProjectIdRef` says WHICH project's nodes it holds
+   * — the epoch tag that pairs with `activeProjectId` (see canCommitCanvas). Both are mirrored from
+   * React state as ONE pair (useNodesEpoch): the tag used to be a ref written only by the load
+   * effect, and a SyncLane re-render between that effect and its `setNodes` landing re-mirrored the
+   * PREVIOUS project's nodes under the NEW project's tag (field bug 2026-09-26). Installed by the
+   * load effect, cleared (null) on its bail-out paths; null until the first load, so the initial
+   * empty `useNodesState([])` can never be committed as some project's canvas.
    */
-  const nodesProjectIdRef = useRef<string | null>(null)
+  const { nodesRef, nodesProjectIdRef, installEpoch } = useNodesEpoch(nodes)
   /**
    * The project whose webview nodes the NEXT load must retire into the keep-alive pool. Separate
    * from `nodesProjectIdRef` on purpose: the epoch tag is invalidated on the load effect's
@@ -1735,7 +1738,6 @@ export function Canvas() {
   /** The active project runs on a remote host → every worktree affordance is off (see
    *  WORKTREE_SSH_HINT). Reactive, so the menus rebuild when the user switches projects. */
   const isSshProject = !!activeSshServer
-  nodesRef.current = nodes
   // The context-link push reads the live canvas from a timer, so it takes the edges, the nodes and
   // the project they belong to from ONE render: across a switch `nodesRef` and `nodesProjectIdRef`
   // are re-pointed before the new edges land (see lib/contextLinkSync).
@@ -2527,13 +2529,13 @@ export function Canvas() {
     // Both bail-outs below leave the PREVIOUS project's nodes mounted in React Flow. Invalidate the
     // epoch tag on the way out so nothing commits them under the new id (field bug 2026-08-10).
     if (!activeProjectId) {
-      nodesProjectIdRef.current = null
+      installEpoch(null)
       tracePersist('load-bail', { reason: 'no-active-project', loading: loadingRef.current })
       return
     }
     const project = useProjects.getState().getProject(activeProjectId)
     if (!project) {
-      nodesProjectIdRef.current = null
+      installEpoch(null)
       tracePersist('load-bail', {
         reason: 'unknown-project',
         active: activeProjectId,
@@ -2615,11 +2617,11 @@ export function Canvas() {
     )
     setNodes(flow)
     // React Flow now holds THIS project's canvas: the commit guard may pair it with the active id
-    // again. Both refs are assigned HERE, synchronously, because `setNodes` only lands on the next
-    // render — mirroring the nodes (same idiom as the peer-mutation path) keeps the array and its
-    // epoch tag atomic, so no timer firing in between can commit the previous project's nodes.
-    nodesRef.current = flow
-    nodesProjectIdRef.current = project.id
+    // again. installEpoch assigns both refs HERE, synchronously, because `setNodes` only lands on a
+    // later render — and queues the tag as STATE in the same lane as that `setNodes`, so a SyncLane
+    // re-render in between (any store write below) mirrors the old nodes WITH the old tag instead
+    // of pairing them with this project's id. See useNodesEpoch.
+    installEpoch(project.id, flow)
     tracePersist('load', { project: project.id, reload: preserveViewportRef.current, nodes: flow.length })
     // Worktree facts are per project: drop the previous project's (reset also clears its
     // statuses), then re-resolve from this project's cwd. SSH projects are skipped — local git
@@ -2728,7 +2730,7 @@ export function Canvas() {
     }, 0)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId, reloadNonce, setNodes, setViewport])
+  }, [activeProjectId, reloadNonce, setNodes, setViewport, installEpoch])
 
   // Keep-alive pool hygiene: a PERMANENTLY deleted project's ghosts must die now, not at the next
   // switch (an invisible page is still a live Chromium process). Keyed on the id signature — the
