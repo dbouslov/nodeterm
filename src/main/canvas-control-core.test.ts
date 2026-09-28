@@ -1232,8 +1232,8 @@ describe('pin verb', () => {
       args: { node: 'n1', set: 'off' }
     })
     expect(parseControlRequest('pin', { set: 'on' })).toEqual({ error: 'pin requires --node <id>' })
-    expect(parseControlRequest('pin', { node: 'n1' })).toEqual({ error: 'pin requires --set on|off' })
-    expect(parseControlRequest('pin', { node: 'n1', set: 'yes' })).toEqual({ error: 'pin requires --set on|off' })
+    expect(parseControlRequest('pin', { node: 'n1' })).toEqual({ error: 'pin requires --set on|off|dock' })
+    expect(parseControlRequest('pin', { node: 'n1', set: 'yes' })).toEqual({ error: 'pin requires --set on|off|dock' })
   })
 
   it('accepts --set dock, the one-time Dock mark (T8)', () => {
@@ -1241,7 +1241,7 @@ describe('pin verb', () => {
       verb: 'pin',
       args: { node: 'f1', set: 'dock' }
     })
-    expect(parseControlRequest('pin', { node: 'f1', set: 'Dock' })).toEqual({ error: 'pin requires --set on|off' })
+    expect(parseControlRequest('pin', { node: 'f1', set: 'Dock' })).toEqual({ error: 'pin requires --set on|off|dock' })
     for (const body of [
       buildCanvasSkillBody('/tmp/nodeterm.sh'),
       buildCanvasControlInstructions('/tmp/nodeterm.sh')

@@ -70,3 +70,29 @@ describe('Dock persistence is group-only and single (review fix 1)', () => {
     expect(later.data.pinned).toBeUndefined()
   })
 })
+
+import { applyMutationToFlow } from './workspace'
+
+describe('a canvas:mut peer cannot set, clear or duplicate the Dock (review fix 2)', () => {
+  const up = (node: CanvasNodeState) => ({ op: 'upsert' as const, node })
+  const local = () => nodeStatesToFlow([frame('dock'), { ...frame(undefined), id: 'g', pinned: undefined }])
+  it('an upsert of the Dock without the flag keeps it, pinned and fixed', () => {
+    const out = applyMutationToFlow(local(), up({ ...frame(undefined), pinned: undefined }))
+    const d = out.find((n) => n.id === 'dock')!
+    expect(d.data.fixture).toBe('dock')
+    expect(d.data.pinned).toBe(true)
+    expect(d.draggable).toBe(false)
+  })
+  it('an upsert cannot mark an existing frame', () => {
+    const out = applyMutationToFlow(local(), up({ ...frame('dock'), id: 'g' }))
+    const g = out.find((n) => n.id === 'g')!
+    expect(g.data.fixture).toBeUndefined()
+    expect(g.draggable).toBeUndefined()
+  })
+  it('a new node from a peer arrives without the flag', () => {
+    const out = applyMutationToFlow(local(), up({ ...frame('dock'), id: 'new' }))
+    const n = out.find((x) => x.id === 'new')!
+    expect(n.data.fixture).toBeUndefined()
+    expect(n.draggable).toBeUndefined()
+  })
+})

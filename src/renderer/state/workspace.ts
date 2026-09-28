@@ -2255,7 +2255,9 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
   // A peer's node never brings the exec-enabling fields with it (@shared/node-exec): they are
   // per-machine settings, and letting one into the live array is exactly how it ends up harvested
   // into this machine's "trusted" workspace.json on the next save.
-  const incoming = nodeStatesToFlow([sanitizeInboundNode(m.node)])[0]
+  // The Dock flag (@shared/dock) is local too: a peer can neither set, clear nor duplicate it, so
+  // it is stripped here and the local node's own flag is carried across below.
+  const incoming = nodeStatesToFlow([{ ...sanitizeInboundNode(m.node), fixture: undefined }])[0]
   const idx = nodes.findIndex((n) => n.id === m.node.id)
   if (idx === -1) {
     // Append, then re-sort: React Flow requires a parent to appear BEFORE its children, and a peer
@@ -2264,8 +2266,10 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
   }
   const prev = nodes[idx]
   const next = nodes.slice()
+  const keepDock = prev.data.fixture === 'dock'
   next[idx] = {
     ...incoming,
+    ...(keepDock ? { draggable: false } : {}),
     selected: prev.selected,
     // Local-only data (initialCommand / respawnNonce / remote) is not serialized, so it
     // is not in `incoming` — carry it. Every serialized key IS present on incoming.data (as a value
@@ -2279,6 +2283,8 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
       ...prev.data,
       ...incoming.data,
       shell: prev.data.shell,
+      fixture: prev.data.fixture,
+      ...(keepDock ? { pinned: true } : {}),
       ...(incoming.data.ssh && prev.data.ssh?.extraArgs
         ? {
             ssh: {

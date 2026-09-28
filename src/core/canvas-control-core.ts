@@ -374,7 +374,7 @@ export function parseControlRequest(
     return { error: 'geometry --frame requires a group id' }
   }
   if (v === 'pin' && !args.node) return { error: 'pin requires --node <id>' }
-  if (v === 'pin' && args.set !== 'on' && args.set !== 'off' && args.set !== 'dock') return { error: 'pin requires --set on|off' }
+  if (v === 'pin' && args.set !== 'on' && args.set !== 'off' && args.set !== 'dock') return { error: 'pin requires --set on|off|dock' }
   if (v === 'minimize' && !args.node) return { error: 'minimize requires --node <id,id>' }
   if (v === 'minimize' && args.set !== undefined && args.set !== 'on' && args.set !== 'off') {
     return { error: 'minimize --set must be on or off' }
