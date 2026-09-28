@@ -380,7 +380,7 @@ describe('HeadlessNodeFactory', () => {
     expect(after.some((n) => n.id === 'dock-page')).toBe(true)
   })
 
-  it('refuses an implicit open from a Dock member and lists the frames it can use (T8)', async () => {
+  it('an implicit open from a Dock member lands top-level, clear of the Dock (T8)', async () => {
     const workspace = await store.load({ sideline: false })
     const project = workspace.projects[0]
     project.nodes.push({
@@ -398,9 +398,15 @@ describe('HeadlessNodeFactory', () => {
     src.parentId = 'dock'
     await store.save(workspace)
     const res = await factory.openAgent('term-source', { agent: 'claude', prompt: 'x' }, true)
-    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('--group') })
-    expect(res.error).toContain('dock (the Dock)')
-    expect((await store.load({ sideline: false })).projects[0].nodes).toHaveLength(project.nodes.length)
+    expect(res).toMatchObject({ ok: true })
+    // Allowed (kickoff's open-then-group), filed top-level and clear of the Dock.
+    const id = (res.result as { id: string }).id
+    const after = (await store.load({ sideline: false })).projects[0].nodes
+    const n = after.find((x) => x.id === id)!
+    expect(n.parentId).toBeUndefined()
+    const clear =
+      n.position.x >= 1400 || n.position.y >= 1100 || n.position.x + n.size.width <= 0 || n.position.y + n.size.height <= 0
+    expect(clear).toBe(true)
   })
 
   it('refuses a different caller without killing or removing the owned spawn', async () => {

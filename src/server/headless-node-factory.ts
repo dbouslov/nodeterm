@@ -14,7 +14,7 @@ import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/s
 import { applyAnnotation, parseAnnotateArgs } from '../shared/node-annotation'
 import { minimizeIds, minimizeReply, planMinimize } from '../shared/minimize'
 import { containerJoinedBy, framesJoinedBy, placeOpened, type Box } from '../shared/placement'
-import { dockOpenRefusal, dockRefusal } from '../shared/dock'
+import { dockRefusal } from '../shared/dock'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
   AGENT_CONFIG,
@@ -1224,13 +1224,6 @@ export class HeadlessNodeFactory {
       if ('ok' in target) return target
       const after = this.resolveAfter(target, args.after, verb)
       if (!Array.isArray(after)) return after
-      // The Dock (@shared/dock): an implicit open from a Dock member, or --after one, is refused
-      // with the frames it could name instead (the Server Edition has no --group to name them with,
-      // so the desktop answers it).
-      if (after.length || target === source.project) {
-        const dockNo = dockOpenRefusal(target.nodes, verb, source.node.id, after, undefined)
-        if (dockNo) return { ok: false, error: dockNo }
-      }
       const unownedAfter = this.unownedMutation(sourceNodeId, after)
       if (unownedAfter) return this.ownershipRefusal(verb, sourceNodeId, unownedAfter)
 

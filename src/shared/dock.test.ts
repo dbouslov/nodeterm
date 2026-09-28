@@ -151,14 +151,9 @@ describe('dockOpenRefusal: a Dock member names where a new node goes (review fix
     { id: 'w1', parentId: 'W', type: 'terminal', data: {} },
     { id: 'loose', type: 'terminal', data: {} }
   ]
-  it('refuses an implicit open from a Dock member and lists the frames it can use', () => {
-    const no = dockOpenRefusal(nodes, 'open-agent', 'seat', [], undefined)!
-    expect(no).toMatch(/--group/)
-    expect(no).toContain('W (Overnight fixes)')
-    expect(no).toContain('D (the Dock)')
-  })
-  it('refuses --after a Dock member without --group, from anyone', () => {
-    expect(dockOpenRefusal(nodes, 'open-agent', 'loose', ['page'], undefined)).toMatch(/--group/)
+  it('allows an implicit open from a Dock member (kickoff open-then-group): it lands top-level', () => {
+    expect(dockOpenRefusal(nodes, 'open-claude', 'seat', [], undefined)).toBeNull()
+    expect(dockOpenRefusal(nodes, 'open-agent', 'loose', ['page'], undefined)).toBeNull()
     expect(dockOpenRefusal(nodes, 'open-agent', 'seat', ['w1'], undefined)).toBeNull()
   })
   it('--group <dock> only from inside the Dock', () => {

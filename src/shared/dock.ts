@@ -99,44 +99,25 @@ export function withoutDock(ids: readonly string[], nodes: readonly DockShape[])
   return ids.filter((id) => !isDock(nodes.find((n) => n.id === id)))
 }
 
-const titleOf = (n: DockShape): string => {
-  const t = n.data?.title ?? n.title
-  return typeof t === 'string' && t ? t : n.id
-}
-
 /**
  * Why an agent's open (open-terminal / open-claude / open-agent) must be refused because of the
- * Dock, or null. An IMPLICIT open (no `--group`) from a Dock member, or `--after` a Dock member,
- * would join the Dock or land loose beside it, so it is refused and the reply lists the frames the
- * caller can name instead. An explicit `--group <dock>` is allowed only from inside the Dock.
+ * Dock, or null. Only an explicit `--group <dock>` (or a frame inside it) from a caller OUTSIDE the
+ * Dock is refused. An implicit open from a Dock member is allowed: `containerJoinedBy` files it
+ * top-level with the Dock as an obstacle, which is kickoff's open-then-`group` flow.
  */
 export function dockOpenRefusal(
   nodes: readonly DockShape[],
   verb: string,
   sourceId: string,
-  after: readonly string[],
+  _after: readonly string[],
   group: string | undefined
 ): string | null {
   const dock = dockOf(nodes)
-  if (!dock) return null
-  const member = (id: string): boolean => inDock(id, nodes)
-  if (group) {
-    if ((group === dock.id || member(group)) && !member(sourceId)) {
-      return `${verb}: --group ${group} is the Dock; nodes open there only from inside the Dock`
-    }
-    return null
+  if (!dock || !group) return null
+  if ((group === dock.id || inDock(group, nodes)) && !inDock(sourceId, nodes)) {
+    return `${verb}: --group ${group} is the Dock; nodes open there only from inside the Dock`
   }
-  const anchors = after.filter((id) => id !== sourceId)
-  const implicit = anchors.length ? anchors.some(member) : member(sourceId)
-  if (!implicit) return null
-  const frames = nodes
-    .filter((n) => (n.type ?? n.kind) === 'group' && !isDock(n) && !member(n.id))
-    .map((n) => `${n.id} (${titleOf(n)})`)
-  const options = [...frames.slice(0, 8), ...(member(sourceId) ? [`${dock.id} (the Dock)`] : [])]
-  return (
-    `${verb}: this would land in or beside the Dock; name its frame with --group <id>` +
-    (options.length ? `: ${options.join(', ')}` : ' (no other frame exists yet: create one with `group` first)')
-  )
+  return null
 }
 
 /** A raw comma list (`--after a,b`) as ids, for `dockOpenRefusal`. */
