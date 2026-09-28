@@ -2045,6 +2045,8 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
   // React Flow requires a parent node to appear before its children. With nested frames a flat
   // "groups first" sort is not enough (two frames compare equal), so `groupsFirst` re-emits the
   // frames depth-first from the root at the end of this function.
+  // One Dock per canvas (@shared/dock): only the FIRST frame carrying the flag keeps it.
+  let dockSeen = false
   const mapped = states.map((raw) => {
     // The SDK chat node was removed (2026-07). A persisted chat node degrades into a sticky that
     // keeps its place and tells the user how to continue the conversation — chat sessions are
@@ -2071,6 +2073,9 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
     }
     const collapsed = !!n.collapsed
     const height = collapsed ? COLLAPSED_HEIGHT : n.size.height
+    // The Dock flag is frame-only, and the first Dock wins; a later one or a non-frame loses it.
+    const dock = n.fixture === 'dock' && n.kind === 'group' && !dockSeen
+    if (dock) dockSeen = true
     // Legacy migration: nodes saved before `agentId` existed marked Claude via the 'claude'
     // tag. Backfill agentId so saved workspaces keep working.
     let agentId = n.agentId
@@ -2081,7 +2086,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
       type: n.kind ?? 'terminal',
       ...((n.kind ?? 'terminal') === 'group' ? { dragHandle: '.group-node__label' } : {}),
       // The Dock keeps its slot: not even a hand drag moves it (@shared/dock).
-      ...(n.fixture === 'dock' ? { draggable: false } : {}),
+      ...(dock ? { draggable: false } : {}),
       position: n.position,
       width: n.size.width,
       height,
@@ -2098,9 +2103,9 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         collapsed,
         // Hand-editable input: only a literal true pins — a stray "yes" must not freeze a layout.
         // The Dock is always pinned (@shared/dock).
-        pinned: n.pinned === true || n.fixture === 'dock' ? true : undefined,
+        pinned: n.pinned === true || dock ? true : undefined,
         verifyPanel: n.verifyPanel === true ? true : undefined,
-        fixture: n.fixture === 'dock' ? ('dock' as const) : undefined,
+        fixture: dock ? ('dock' as const) : undefined,
         hideFanout: n.hideFanout,
         cardBand: normalizeCardBand(n.cardBand),
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
@@ -2186,7 +2191,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         collapsed: n.data.collapsed,
         pinned: n.data.pinned === true ? true : undefined,
         verifyPanel: n.data.verifyPanel === true ? true : undefined,
-        fixture: n.data.fixture === 'dock' ? ('dock' as const) : undefined,
+        fixture: n.data.fixture === 'dock' && n.type === 'group' ? ('dock' as const) : undefined,
         hideFanout: n.data.hideFanout,
         cardBand: normalizeCardBand(n.data.cardBand),
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out

@@ -9,13 +9,17 @@ export const DOCK_FIXTURE = 'dock'
 export interface DockShape {
   id: string
   parentId?: string
+  /** Live node kind (React Flow `type`) or stored kind: the Dock is always a frame. */
+  type?: string
+  kind?: string
   fixture?: unknown
   data?: { fixture?: unknown }
 }
 
-/** Only the literal 'dock' counts: the project file is hand-editable. */
+/** A frame carrying the literal 'dock'. The project file is hand-editable, so anything else, or
+ *  the flag on a node that is not a frame, does not count. */
 export function isDock(n: DockShape | undefined): boolean {
-  return !!n && (n.fixture === DOCK_FIXTURE || n.data?.fixture === DOCK_FIXTURE)
+  return !!n && (n.type ?? n.kind) === 'group' && (n.fixture === DOCK_FIXTURE || n.data?.fixture === DOCK_FIXTURE)
 }
 
 /** The Dock frame on this canvas, if any. */
@@ -37,10 +41,7 @@ export function inDock(id: string, nodes: readonly DockShape[]): boolean {
   return false
 }
 
-interface MarkShape extends DockShape {
-  type?: string
-  kind?: string
-}
+type MarkShape = DockShape
 
 /**
  * Why `pin --node <frameId> --set dock` from `callerId` must be refused, or null when it may go

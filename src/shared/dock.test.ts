@@ -3,14 +3,14 @@ import { isDock, dockOf, inDock } from './dock'
 
 // Both node shapes: the stored one (flat `fixture`) and the live one (`data.fixture`).
 const live = [
-  { id: 'D', data: { fixture: 'dock' } },
+  { id: 'D', type: 'group', data: { fixture: 'dock' } },
   { id: 'seat', parentId: 'D', data: {} },
   { id: 'sub', parentId: 'F', data: {} },
-  { id: 'F', parentId: 'D', data: {} },
+  { id: 'F', parentId: 'D', type: 'group', data: {} },
   { id: 'out', data: {} }
 ]
 const stored = [
-  { id: 'D', fixture: 'dock' },
+  { id: 'D', kind: 'group', fixture: 'dock' },
   { id: 'seat', parentId: 'D' },
   { id: 'out' }
 ]
@@ -19,8 +19,8 @@ describe('dock helpers', () => {
   it('isDock reads either shape and only the literal', () => {
     expect(isDock(live[0])).toBe(true)
     expect(isDock(stored[0])).toBe(true)
-    expect(isDock({ id: 'x', fixture: 'Dock' })).toBe(false)
-    expect(isDock({ id: 'x', data: { fixture: true } })).toBe(false)
+    expect(isDock({ id: 'x', kind: 'group', fixture: 'Dock' })).toBe(false)
+    expect(isDock({ id: 'x', type: 'group', data: { fixture: true } })).toBe(false)
   })
   it('dockOf finds the Dock frame', () => {
     expect(dockOf(live)?.id).toBe('D')
@@ -129,5 +129,13 @@ describe('dockRefusal: what an agent may not do to the Dock', () => {
   })
   it('withoutDock drops the Dock frame from a list, for the human close and unpin paths', () => {
     expect(withoutDock(['seat', 'D', 'w1'], nodes)).toEqual(['seat', 'w1'])
+  })
+})
+
+describe('isDock is group-only (review fix 1)', () => {
+  it('a non-frame carrying the flag is not the Dock', () => {
+    expect(isDock({ id: 't', type: 'terminal', data: { fixture: 'dock' } })).toBe(false)
+    expect(isDock({ id: 't', kind: 'sticky', fixture: 'dock' })).toBe(false)
+    expect(isDock({ id: 'x', fixture: 'dock' })).toBe(false)
   })
 })

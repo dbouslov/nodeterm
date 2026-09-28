@@ -50,3 +50,23 @@ describe('Dock is always pinned', () => {
     expect(flow.data.pinned).toBe(true)
   })
 })
+
+describe('Dock persistence is group-only and single (review fix 1)', () => {
+  const term = { ...frame('dock'), id: 't', kind: 'terminal' } as unknown as CanvasNodeState
+  it('a terminal carrying fixture dock loses it, both ways', () => {
+    const [flow] = nodeStatesToFlow([term])
+    expect(flow.data.fixture).toBeUndefined()
+    expect(flow.draggable).toBeUndefined()
+    const [back] = flowToNodeStates([{ ...flow, data: { ...flow.data, fixture: 'dock' as const } }])
+    expect(back.fixture).toBeUndefined()
+  })
+  it('only the first Dock keeps the flag on load', () => {
+    const second = { ...frame('dock'), id: 'dock2', pinned: undefined } as CanvasNodeState
+    const flow = nodeStatesToFlow([frame('dock'), second])
+    expect(flow.find((n) => n.id === 'dock')!.data.fixture).toBe('dock')
+    const later = flow.find((n) => n.id === 'dock2')!
+    expect(later.data.fixture).toBeUndefined()
+    expect(later.draggable).toBeUndefined()
+    expect(later.data.pinned).toBeUndefined()
+  })
+})

@@ -141,7 +141,7 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const bound = !!wt
   // The Dock (@shared/dock) is furniture: its own neutral chrome, no color paint, no selection
   // ring, no resize handle and no hover Ungroup (its frame menu offers Release Dock instead).
-  const dock = isDock({ id, data })
+  const dock = isDock({ id, type: 'group', data })
   const frameClass = [
     'group-node',
     dock ? 'group-node--dock' : '',
