@@ -623,7 +623,10 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `verify --node <id> [--lenses correctness,security,tests] [--focus "..."] [--synthesis off]` — open a',
     '  review panel over that node\'s work: one reviewer per lens, each armed behind the target and linked',
     '  to it, plus a judge armed behind the panel that merges the findings into one verdict. Reviewers are',
-    '  told not to change files. Prefer this over asking one agent to double-check itself.',
+    '  told not to change files. Prefer this over asking one agent to double-check itself. The panel is',
+    '  a frame placed inside your own frame (which grows to hold it), clear of other nodes; a re-verify',
+    '  with the same label (default `Verify: <target title>`) reuses that frame, the new round below the',
+    '  old. Close a finished round yourself: `close --node <ids> --compact`.',
     '- `spawn-team --label L --team \'[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]\'` — one agent per',
     '  role (max 8), arranged in a grid, wrapped in a labeled group, each connected + context-linked to you.',
     '  `model` is per role, so one team can mix tiers — give an expensive model to the role that needs it',
@@ -1209,7 +1212,11 @@ Verbs:
   works as a lens, known ones just get a sharper brief. Reviewers are told NOT to change files —
   they share one checkout, and finding is a separate job from fixing. Use this instead of asking
   one agent "are you sure?": several INDEPENDENT looks from different angles catch what one pass,
-  or several identical passes, cannot.
+  or several identical passes, cannot. The panel is a frame placed inside your own frame (which
+  grows to hold it and moves its neighbours aside), clear of other nodes. A re-verify with the same
+  label (\`--label\`, default \`Verify: <target title>\`) reuses that frame: the new round goes below
+  the earlier one and nothing of it is closed, so close a finished round yourself
+  (\`close --node <ids> --compact\`).
 - \`spawn-team --label "Frontend Team" --team '[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]'\` —
   open one agent per role (each prompt starts that member working), arrange them in a grid,
   wrap them in a labeled group, and connect + context-link each to you. Max 8 roles per call.

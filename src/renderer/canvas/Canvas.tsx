@@ -566,6 +566,7 @@ import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/Kan
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { planStoredMinimize } from '../lib/storedMinimize'
+import { layoutVerifyPanel } from '../lib/verifyPanelLayout'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
 import { nodeRect, reflow, resizesEnded, settle } from '../lib/reflow'
@@ -11817,27 +11818,17 @@ export function Canvas() {
                 )
               : null
             const panelIds = [...reviewerIds, ...(judge ? [judge.id] : [])]
-            let next: CanvasNode[] = [...live, ...reviewers, ...(judge ? [judge] : [])]
-            // `origin` is a TOP-LEFT: the first clear child slot below the source (the old call
-            // passed placeBelow's CENTER straight through, half a node off).
-            next = arrangeNodes(next, panelIds, {
-              layout: 'grid',
-              origin: placeChild(obstacles(), srcBox, newNodeSize(), 0)
+            // The panel joins the caller's frame (which grows and moves its neighbours), placed as
+            // one box clear of everything; a re-verify with the same label reuses the earlier
+            // panel frame instead of stacking a new one on top (lib/verifyPanelLayout).
+            const vPanel = layoutVerifyPanel([...live, ...reviewers, ...(judge ? [judge] : [])], {
+              srcId: sourceNodeId,
+              panelIds,
+              label: args.label || `Verify: ${targetTitle}`,
+              grid: snapGridNow(),
+              skip: new Set(Object.keys(useAgentNodes.getState().byId))
             })
-            const vGroupCount = next.filter((nd) => nd.type === 'group').length
-            const existingGroupIds = new Set(
-              next.filter((node) => node.type === 'group').map((node) => node.id)
-            )
-            next = groupSelectedNodes(next, panelIds, vGroupCount, snapGridNow())
-            const vGroup = next.find(
-              (node) => node.type === 'group' && !existingGroupIds.has(node.id)
-            )!
-            next = next.map((nd) =>
-              nd.id === vGroup.id
-                ? { ...nd, data: { ...nd.data, title: args.label || `Verify: ${targetTitle}` } }
-                : nd
-            )
-            setNodes(next)
+            setNodes(vPanel.nodes)
             panelIds.forEach((pid) => connect(pid))
             // `connect` only ropes the CALLER to each member — lineage. The panel's sequencing is
             // its own relation, so each held wait gets its own rope and the group reads as the DAG
@@ -11859,9 +11850,11 @@ export function Canvas() {
                 `verifying ${targetTitle} (${targetId}) with ${lenses.length} lens(es): ${lenses.join(', ')}` +
                 `\nreviewers: ${reviewerIds.join(', ')}` +
                 (judge ? `\nverdict node (runs after all reviewers): ${judge.id}` : '') +
-                `\nthey start when ${targetId} goes idle`,
+                `\nthey start when ${targetId} goes idle` +
+                (vPanel.reused ? `\nadded to the earlier panel frame ${vPanel.groupId} (same label)` : ''),
               result: {
-                groupId: vGroup.id,
+                groupId: vPanel.groupId,
+                reusedGroup: vPanel.reused,
                 targetId,
                 lenses,
                 reviewerIds,

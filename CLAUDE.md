@@ -2842,6 +2842,11 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   **Review panel (`verify`, 2026-07):** `verify --node <id> [--lenses …] [--focus …] [--agent …]
   [--synthesis off]` opens one reviewer per LENS, each armed behind the target (`--after`) and
   bridged to it, wrapped in a `Verify: <title>` group, plus a judge armed behind the whole panel.
+  Placement is `renderer/lib/verifyPanelLayout.ts`: the panel frame joins the CALLER's frame (the
+  lineage rule; the frame grows and its neighbours move, lib/reflow) and the WHOLE panel box is
+  placed clear, not just its first member; a re-verify with the same label in the same container
+  reuses the earlier panel frame, the new round below the old (nothing of the old round is closed).
+  It used to be a top-level frame on top of the caller's own frame, one more per re-verify.
   It is **composition, not new machinery** — the two primitives above are the whole implementation.
   Prompt/lens logic is the pure, unit-tested `renderer/lib/verifyPanel.ts`; two wordings there are
   load-bearing and must not be "tightened away": reviewers are told **not to edit** (a panel is N
