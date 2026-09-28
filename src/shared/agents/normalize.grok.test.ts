@@ -158,12 +158,25 @@ describe('normalizeGrok — published 1.0.13 events', () => {
     ).toEqual({
       nodeId: 'n1',
       agentId: 'grok',
-      sessionId: 's1',
       kind: 'state',
       cancelReason: reason,
       subagentType: 'explore',
       lastMessage: 'not allowed'
     })
+  })
+
+  it("keeps a session-level StopCancelled's sessionId and drops a SUBAGENT's (it is the child's)", () => {
+    // The mirror and Canvas record identity off ANY event's sessionId, and the mirror treats any
+    // defined subagentType (even '') as a subagent cancellation.
+    const parent = normalizeGrok(env({ hookEventName: 'stop_cancelled', sessionId: 's1', reason: 'user_interrupt' }))
+    expect(parent?.sessionId).toBe('s1')
+    for (const subagentType of ['explore', '']) {
+      const child = normalizeGrok(
+        env({ hookEventName: 'stop_cancelled', sessionId: 'c1', reason: 'user_interrupt', subagentType })
+      )
+      expect(child).toMatchObject({ cancelReason: 'user_interrupt', subagentType })
+      expect(child && 'sessionId' in child).toBe(false)
+    }
   })
 
   it('rejects an unrecognized StopCancelled reason', () => {

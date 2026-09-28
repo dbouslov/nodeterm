@@ -117,8 +117,8 @@ describe('removeNodes (the off-screen close frees a frame\'s children like delet
 
   it('drops the context bridges that touched a removed node, as the on-screen close does', () => {
     // On screen, Canvas prunes a link whose endpoint is gone. Off screen, the stored bridge stayed
-    // in project.json and was pushed to the context-link map by contextLinkSync, which reads every
-    // project's stored bridges.
+    // in project.json forever. It never reached a live link (buildBackgroundLinkMaps filters
+    // dangling bridges); the gain is project.json hygiene.
     load([at('a', 0, 0), at('b', 0, 0), at('c', 0, 0)])
     useProjects.setState((s) => ({
       projects: s.projects.map((p) => ({

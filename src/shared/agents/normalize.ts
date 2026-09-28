@@ -764,11 +764,16 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
     if (!cancelReason) return null
     // Transport the classified reason state-less: the mirror owns the session-aware transition
     // and can ignore a subagent cancellation without losing session identity.
+    const subagentType = p.subagentType ?? p.subagent_type
+    // A SUBAGENT's cancellation carries the child's sessionId (as session_end and subagent_stop
+    // do), and identity is recorded off any event's sessionId, so it is dropped here. The test is
+    // `!== undefined` because that is how the mirror decides "subagent" (resolveGrokStopCancelled).
+    const { sessionId, ...rest } = base
     return {
-      ...base,
+      ...(subagentType !== undefined ? rest : { ...rest, sessionId }),
       kind: 'state',
       cancelReason,
-      subagentType: p.subagentType ?? p.subagent_type,
+      subagentType,
       lastMessage
     }
   }
