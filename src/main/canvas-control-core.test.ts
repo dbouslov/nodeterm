@@ -1287,6 +1287,13 @@ describe('minimize verb', () => {
     ]) {
       expect(body).toContain('`minimize --node <id,id> [--set on|off]`')
       expect(body).toContain('(minimized)')
+      // Answered off screen from the saved canvas (candidates item 8), never refused.
+      const answered = body.split('\n').find((l) => l.includes('Answered whether or not that project is on screen'))
+      expect(answered, 'off-screen answered list').toMatch(/\bminimize\b/)
+      const refused = body.split('\n').find((l) => l.includes('REFUSED while that project is off screen'))
+      expect(refused, 'off-screen refused list').not.toMatch(/\bminimize\b/)
+      const at = body.indexOf('`minimize --node <id,id> [--set on|off]`')
+      expect(body.slice(at, body.indexOf('\n- ', at))).toMatch(/off screen too/i)
     }
   })
 })

@@ -652,7 +652,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  bar (`--set off` restores the height each had). Use it on idle or finished stations so they stop',
     '  taking space: nothing closes and the session keeps running. A group frame, an unknown id or any',
     '  other kind refuses the whole list and names it. A node already in the asked state is left alone',
-    '  and the reply says so. No confirm dialog. `list` rows print `(minimized)`.',
+    '  and the reply says so. No confirm dialog. `list` rows print `(minimized)`. Answered off screen too,',
+    '  from the saved canvas.',
     '- `write --node <id> --text "..."` / `close --node <id,id>` — type into / close nodes.',
     '  `close` takes a COMMA LIST and asks about the whole list in ONE dialog, so close a finished',
     '  wave in a single call rather than one call per node. Every id must exist on the canvas: an',
@@ -1252,6 +1253,8 @@ Verbs:
   WHOLE list and names it. A node already in the asked state is left alone, and the reply says
   \`already minimized\` (or \`not minimized\`). No confirm dialog. \`list\` rows print \`(minimized)\`.
   The user does the same from the node menu (Minimize / Restore) or the title-bar chevron.
+  Answered off screen too: the flag lives in the saved canvas, so your project need not be the one
+  on screen.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id,id>\` — close one node or several. \`--node\` takes a COMMA LIST, and the whole
   list is confirmed in ONE dialog — so when a wave of stations is finished, close them in a single

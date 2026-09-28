@@ -565,6 +565,7 @@ import type {
 import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/KanbanView'
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
+import { planStoredMinimize } from '../lib/storedMinimize'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
 import { nodeRect, reflow, resizesEnded, settle } from '../lib/reflow'
@@ -12316,6 +12317,25 @@ export function Canvas() {
             // and finished stations. Non-destructive like `rename`, so no dialog. The whole list is
             // resolved before anything changes (@shared/minimize): one bad id refuses all of it.
             const on = args.set !== 'off'
+            if (offCanvas) {
+              // Off canvas: the collapsed flag lives in the saved node, so the same plan runs over
+              // the project's serialized nodes and only the changed ones are written back through
+              // the store (the live setters address the ACTIVE canvas, somebody else's here).
+              const stored = planStoredMinimize(offCanvas.project.nodes, minimizeIds(args.node), on)
+              if (!stored.ok) {
+                reply({ ok: false, error: stored.error })
+                return
+              }
+              const store = useProjects.getState()
+              for (const node of stored.upserts) store.applyNodeMutation(offCanvas.project.id, { op: 'upsert', node })
+              if (stored.upserts.length) void writeDisk()
+              reply({
+                ok: true,
+                message: minimizeReply(on, stored.change, stored.already),
+                result: { minimized: on, changed: stored.change, unchanged: stored.already }
+              })
+              return
+            }
             const plan = planMinimize(
               minimizeIds(args.node),
               on,

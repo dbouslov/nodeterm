@@ -86,7 +86,7 @@ describe('offScreenNotice — the human half of an off-screen refusal', () => {
   const offScreen = { kind: 'switch', projectId: 'p-code' } as const
 
   it('names the agent, the project and the verb for every verb refused off screen', () => {
-    for (const verb of ['group', 'move', 'arrange', 'align', 'browser', 'spawn-team', 'open-worktree', 'minimize', 'restructure', 'pin', 'snapshot']) {
+    for (const verb of ['group', 'move', 'arrange', 'align', 'browser', 'spawn-team', 'open-worktree', 'restructure', 'pin', 'snapshot']) {
       const n = offScreenNotice(projects, offScreen, verb, 'term-lead')
       expect(n, verb).not.toBeNull()
       expect(n!.projectId).toBe('p-code')
@@ -97,7 +97,7 @@ describe('offScreenNotice — the human half of an off-screen refusal', () => {
   })
 
   it('stays quiet for every verb answered off screen', () => {
-    for (const verb of ['list', 'geometry', 'sticky', 'annotate', 'open-claude', 'open-terminal', 'show-web', 'open-browser', 'close', 'write', 'assign', 'rename', 'board', 'retire']) {
+    for (const verb of ['list', 'geometry', 'sticky', 'annotate', 'open-claude', 'open-terminal', 'show-web', 'open-browser', 'close', 'write', 'assign', 'rename', 'board', 'retire', 'minimize']) {
       expect(offScreenNotice(projects, offScreen, verb, 'term-lead'), verb).toBeNull()
     }
   })

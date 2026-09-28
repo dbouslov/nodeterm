@@ -46,7 +46,6 @@ const REFUSERS = new Set([
   'browser',
   // Fork verbs: measured sizes / live nodes / the rendered picture (fork Fix #16).
   'restructure',
-  'minimize',
   'pin',
   'snapshot'
 ])

@@ -2327,7 +2327,8 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   resize), and it resizes only the listed nodes, never frames or neighbours. Requests resolve in
   `shared/minimize.ts`: an unknown id, a group frame or another kind refuses the WHOLE list, naming
   it; no-ops are said in the reply. No dialog (non-destructive, like `rename`); not store-answered,
-  so an off-screen caller is refused as for `pin` (`OFF_SCREEN_REFUSALS`, Fix #16). `list` rows print `(minimized)` — both
+  but answered OFF SCREEN from the saved canvas (`STORED_NODE_VERBS`, `lib/storedMinimize.ts`: the
+  flag and the expanded height both live in the saved node, and like the live verb it refits no frame). `list` rows print `(minimized)` — both
   `list` answers print through `listRowText`. Server Edition: `HeadlessNodeFactory.minimize`,
   creator-owned, flips the persisted `collapsed` only (`size.height` already is the height to
   restore).
@@ -2459,11 +2460,11 @@ still sees a station that finished before a relaunch; see Dependency edges, item
     because `cwdForNewNodeIn` subtracts `staleGroupIds`, which is epoch-scoped to the ACTIVE
     project.
   Since upstream v0.3.9 the whole table lives in `@shared/control-off-screen` (see above), and a
-  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`/`retire`), is
+  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`/`retire`/`minimize`), is
   answered against the owning project's serialized nodes. Everything else is **REFUSED while its
   project is not on screen** (`OFF_SCREEN_REFUSALS`; fork Fix #16, 2026-09-13):
   `group`/`ungroup`/`move`/`arrange`/`align`/`verify`/`spawn-team`/`branch`/`open-worktree`/
-  `close-worktree`/`browser`, plus the fork verbs `restructure`/`minimize`/`pin`/`snapshot`
+  `close-worktree`/`browser`, plus the fork verbs `restructure`/`pin`/`snapshot`
   — they read live canvas state the serialized copy does not carry (measured node sizes, worktree
   staleness, a mounted guest, the rendered picture). They used to TRAVEL there — the G5 hijack, and
   the whole of Fix #16's first symptom: an orchestrator in one project closing its stations or
