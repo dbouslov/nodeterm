@@ -12913,7 +12913,8 @@ export function Canvas() {
    * nodes: it used to be skipped, which lost an off-screen chat's transcript pointer. The ⇧⌘T
    * history is recorded only for a USER close (`userClose`, the sidebar): the stack is app-wide,
    * and an agent's close pushed there would be reopened by the user's ⇧⌘T in another project.
-   * The control ropes (`project.ropes`) that touched a removed node go with it, inside
+   * The control ropes (`project.ropes`) and context bridges (`project.bridges`) that touched a
+   * removed node go with it, inside
    * `removeNodes`: on screen the close verbs drop them from the live edges, and off screen nothing
    * else would — a load restores every persisted rope and the next save writes it back.
    */

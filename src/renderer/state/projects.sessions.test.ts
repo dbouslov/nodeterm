@@ -115,6 +115,25 @@ describe('removeNodes (the off-screen close frees a frame\'s children like delet
     expect(useProjects.getState().getProject('p1')!.ropes).toEqual([{ id: 'ctrl-a-c', source: 'a', target: 'c' }])
   })
 
+  it('drops the context bridges that touched a removed node, as the on-screen close does', () => {
+    // On screen, Canvas prunes a link whose endpoint is gone. Off screen, the stored bridge stayed
+    // in project.json and was pushed to the context-link map by contextLinkSync, which reads every
+    // project's stored bridges.
+    load([at('a', 0, 0), at('b', 0, 0), at('c', 0, 0)])
+    useProjects.setState((s) => ({
+      projects: s.projects.map((p) => ({
+        ...p,
+        bridges: [
+          { id: 'l-a-b', source: 'a', target: 'b' },
+          { id: 'l-b-c', source: 'b', target: 'c' },
+          { id: 'l-a-c', source: 'a', target: 'c' }
+        ]
+      }))
+    }))
+    useProjects.getState().removeNodes('p1', ['b'])
+    expect(useProjects.getState().getProject('p1')!.bridges).toEqual([{ id: 'l-a-c', source: 'a', target: 'c' }])
+  })
+
   it('a parentId cycle does not hang', () => {
     load([group('x', 0, 0, 'y'), group('y', 0, 0, 'x'), at('a', 3, 4, 'x')])
     useProjects.getState().removeNodes('p1', ['x', 'y'])
