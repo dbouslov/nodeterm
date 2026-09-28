@@ -99,20 +99,23 @@ describe('the Dock shift respects pins and bystanders (review round 2)', () => {
   })
 
   it('align left a,b beside a bystander x: the block never lands on x', () => {
-    // Align left puts a and b at x=0 (on the Dock). Straight down is blocked by x.
-    const nodes = [...scene(), n('x', 0, 1180, { width: 1500, height: 900 })]
-    const plan = planArrange(nodes, 'align', { nodes: 'a,c', edge: 'left' }, 0)
-    if (!plan.ok) {
-      expect(plan.error).toMatch(/Dock/)
-      return
-    }
+    // Review round 2 probe: align-left puts a at x=1300, over the Dock's right edge. The old shift
+    // (right by 140) landed a at 1480,40, on top of the bystander x at 1950,40.
+    const nodes = [
+      ...scene().filter((q) => !['a', 'b', 'c'].includes(q.id)),
+      n('a', 1300, 40),
+      n('b', 1600, 1300),
+      n('x', 1950, 40)
+    ]
+    const plan = planArrange(nodes, 'align', { nodes: 'a,b', edge: 'left' }, 0)
+    if (!plan.ok) throw new Error(plan.error)
     const x = plan.nodes.find((q) => q.id === 'x')!
-    for (const id of ['a', 'c']) {
+    for (const id of ['a', 'b']) {
       const m = plan.nodes.find((q) => q.id === id)!
       expect(hits(rect(m), rect(x))).toBe(false)
       expect(onDock(m)).toBe(false)
     }
-    expect(x.position).toEqual({ x: 0, y: 1180 })
+    expect(x.position).toEqual({ x: 1950, y: 40 })
     unmoved(plan.nodes)
   })
 
