@@ -97,6 +97,30 @@ describe('removeNodes (the off-screen close frees a frame\'s children like delet
     expect(get('a')!.position).toEqual({ x: 60, y: 72 })
   })
 
+  it('takes a verify panel frame with it when the removal closes its last member', () => {
+    load([
+      group('go', 0, 0),
+      { ...group('vp', 20, 60, 'go'), title: 'Verify: GO', verifyPanel: true },
+      at('r1', 10, 60, 'vp'),
+      at('r2', 10, 400, 'vp'),
+      { ...group('legacy', 20, 800, 'go'), title: 'Verify: old' },
+      at('r3', 10, 60, 'legacy')
+    ])
+    useProjects.getState().removeNodes('p1', ['r1'])
+    expect(get('vp')).toBeDefined() // r2 still in it
+    useProjects.getState().removeNodes('p1', ['r2', 'r3'])
+    expect(get('vp')).toBeUndefined()
+    expect(get('legacy')).toBeUndefined()
+    // The frame it sat in is the user's, and survives empty-handed or not.
+    expect(get('go')).toBeDefined()
+  })
+
+  it('never takes a user frame the removal empties', () => {
+    load([group('g', 0, 0), at('a', 10, 60, 'g')])
+    useProjects.getState().removeNodes('p1', ['a'])
+    expect(get('g')).toBeDefined()
+  })
+
   it('drops the control ropes that touched a removed node, as the on-screen close does', () => {
     // Nothing downstream prunes them: a load restores every persisted rope into the live edge
     // state and the next save writes it back, so a dangling rope stayed in project.json forever.

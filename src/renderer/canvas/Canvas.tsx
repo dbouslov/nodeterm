@@ -565,6 +565,7 @@ import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/Kan
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { planStoredMinimize } from '../lib/storedMinimize'
+import { emptiedVerifyPanels } from '../lib/verifyPanelCleanup'
 import { layoutTeamFrame, layoutVerifyPanel } from '../lib/verifyPanelLayout'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
@@ -5533,9 +5534,12 @@ export function Canvas() {
         // A node id revived later faces a fresh dialog, exactly as it faces a fresh grant.
         clearAttachConsent(n.id)
       })
+      // A `verify` panel frame this close empties goes with its last member (lib/verifyPanelCleanup).
+      // Only the removal sees it: it is not a session, so nothing above is owed for it.
+      const gone = new Set([...set, ...emptiedVerifyPanels(nodesRef.current, set)])
       // Free children of any deleted group, keeping their root-space position: they join the
       // nearest surviving frame, so closing a frame nested inside another does not move its chats.
-      setNodes((ns) => removeNodesFreeingChildren(ns, set))
+      setNodes((ns) => removeNodesFreeingChildren(ns, gone))
       markDirty()
       // A deleted group takes its worktree BINDING with it — and the frame is the only thing that
       // goes: its children SURVIVE (freed to absolute positions above), dead `data.cwd` and all. So
@@ -12949,6 +12953,7 @@ export function Canvas() {
       // A deleted frame's children SURVIVE it. `removeNodes` is the serialized twin of deleteNodes'
       // conversion (the same helper): each child joins the frame's nearest surviving ancestor at the
       // same canvas position, instead of keeping a `parentId` that names a node no longer there.
+      // It also takes a `verify` panel frame the close empties, as `deleteNodes` does on screen.
       store.removeNodes(projectId, ids)
       void writeDisk()
     },
