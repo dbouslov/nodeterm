@@ -121,6 +121,8 @@ export function computeGeometry(
     ...(typeof nd.data.ownerNodeId === 'string' ? { owner: nd.data.ownerNodeId } : {}),
     ...(bandOf(nd) > 0 ? { band: bandOf(nd) } : {})
   }))
+  // Held covers all three holds (drag, typing, pointer): a hold is short, and an agent reading
+  // geometry must never "fix" a chat mid-hold by moving what David is using.
   const exempt = new Set(
     scope
       .filter((nd) => typeof nd.data.ownerNodeId === 'string')

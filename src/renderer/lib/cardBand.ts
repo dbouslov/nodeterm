@@ -14,7 +14,8 @@
 // 3. A change waits while anything is dragged or resized, while any chat it would move had a
 //    keydown in the last TYPING_HOLD_MS (no cap), and while the pointer is over one of them
 //    (capped at POINTER_HOLD_CAP_MS). The busy chat itself never moves.
-// 4. A pinned chat never grows a band; one it already has is released at once.
+// 4. A pinned chat never grows a band; one it already has is released at once (after the holds).
+//    A hideFanout chat draws no cards, so its band goes to 0 at once too (rule 1).
 // 5. `setCardBand` writes the band onto the chat FIRST and then reflows from the old applied rect,
 //    and is a no-op when the band is already there, so a second application cannot shift twice.
 import { GROUP_GAP } from '@shared/placement'
@@ -223,8 +224,10 @@ export class CardBands {
       const row = rows.get(chat.id) ?? 0
       const track = this.observe(chat.id, row, have, now)
       let want: number | null = null
-      if (isPinned(chat, nodes)) {
-        // Rule 4: never grows; a band it was pinned with goes at once.
+      if (isPinned(chat, nodes) || chat.data.hideFanout) {
+        // Rule 4: a pinned chat never grows; a band it was pinned with goes at once. A hideFanout
+        // chat draws no cards, so its band is 0 at once too. The release still waits on the holds
+        // below: a hold is short, and nothing should move under David's hands to free space.
         if (have > 0) want = 0
       } else {
         const target = trailingMax(track, now)

@@ -18,6 +18,7 @@ import { buildSubagentCards } from './subagentCards'
 import { geometryReply } from './geometry'
 import { absolutePosition } from './nodeFocus'
 import { resizesEnded, settle, reflow } from './reflow'
+import { planArrange } from './layoutVerbs'
 
 // THE FIXTURE (design 5.1 T4): a chat in a frame, a sibling chat 40px below it, a sibling to the right.
 const chat = (id: string, x: number, y: number, w = 600, h = 400, parentId?: string): CanvasNode => ({
@@ -227,6 +228,21 @@ describe('T4: helper cards count in layout', () => {
     expect(at(withBand, 'C')).toEqual(at(plain, 'C'))
     expect(at(withBand, 'S').y - at(plain, 'S').y).toBe(TWO_ROWS)
     expect(withBand.find((n) => n.id === 'C')!.height).toBe(400)
+
+    // Through the arrange verb inside the frame, which sizes chats by commonChatSize first: the
+    // common size is the chats' own (600x400), never grown by the band.
+    const verb = (ns: CanvasNode[]) => {
+      const p = planArrange(ns, 'arrange', { nodes: 'C,S', layout: 'column' }, 0)
+      if (!p.ok) throw new Error(p.error)
+      return p
+    }
+    const vBand = verb(s.nodes)
+    const vPlain = verb(s.nodes.map((n) => (n.id === 'C' ? { ...n, data: { ...n.data, cardBand: undefined } } : n)))
+    expect(vBand.result.chatSize).toEqual({ width: 600, height: 400 })
+    expect(vPlain.result.chatSize).toEqual({ width: 600, height: 400 })
+    const c2 = vBand.nodes.find((n) => n.id === 'C')!
+    expect([c2.width, c2.height, c2.data.cardBand]).toEqual([600, 400, TWO_ROWS])
+    expect(at(vBand.nodes, 'S').y - at(vPlain.nodes, 'S').y).toBe(TWO_ROWS)
   })
 
   it('(d) a pinned chat: no band, no reflow, its card findings counted apart; a leftover band is cleared', () => {
@@ -256,6 +272,16 @@ describe('T4: helper cards count in layout', () => {
     vi.advanceTimersByTime(BAND_WINDOW_MS - 1)
     expect(s.get('C').data.cardBand).toBe(TWO_ROWS)
     vi.advanceTimersByTime(1)
+    expect(s.get('C').data.cardBand).toBeUndefined()
+    expect(s.get('S').position).toEqual(base.find((n) => n.id === 'S')!.position)
+  })
+
+  it('(f) hiding the fan-out of a chat with a band releases it at once', () => {
+    const base = fixture()
+    const hidden = setCardBand(base, 'C', TWO_ROWS).map((n) =>
+      n.id === 'C' ? { ...n, data: { ...n.data, hideFanout: true } } : n
+    )
+    const s = sim(hidden)
     expect(s.get('C').data.cardBand).toBeUndefined()
     expect(s.get('S').position).toEqual(base.find((n) => n.id === 'S')!.position)
   })
@@ -333,6 +359,17 @@ describe('T4: helper cards count in layout', () => {
   it('(j) a drag end and a resize end of a chat with cards move no band sibling beyond the push; the band is unchanged', () => {
     const banded = setCardBand(fixture(), 'C', TWO_ROWS)
     expect(settle(banded, 'C')).toEqual(banded)
+    // Dropped 60px lower, the chat's band (not its own rect) reaches the sibling: the drag end
+    // pushes it off the band by the gap, once, and never by a second band.
+    const c0 = banded.find((n) => n.id === 'C')!
+    const dropped = banded.map((n) => (n.id === 'C' ? { ...n, position: { ...n.position, y: n.position.y + 60 } } : n))
+    const settled = settle(dropped, 'C')
+    expect(settled.find((n) => n.id === 'S')!.position.y).toBe(c0.position.y + 60 + 400 + TWO_ROWS + 40)
+    expect(settled.find((n) => n.id === 'C')!.data.cardBand).toBe(TWO_ROWS)
+    const raw = dropped.map((n) => (n.id === 'C' ? { ...n, data: { ...n.data, cardBand: undefined } } : n))
+    expect(settle(raw, 'C').find((n) => n.id === 'S')!.position).toEqual(
+      raw.find((n) => n.id === 'S')!.position
+    )
 
     const started = new Map()
     const c = banded.find((n) => n.id === 'C')!

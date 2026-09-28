@@ -3643,6 +3643,9 @@ export function Canvas() {
   // only feeds it the canvas, the per-chat keydown/pointer facts, and applies what it returns.
   const bandKeysRef = useRef(new Map<string, number>())
   const bandPointerRef = useRef<string | null>(null)
+  // Per element, the timer that takes its slide class off: a second commit inside the slide
+  // restarts it, so the first commit's timer cannot strip the class the second one added.
+  const bandSlideTimers = useRef(new Map<HTMLElement, ReturnType<typeof setTimeout>>())
   const cardBandRef = useRef<CardBandDriver>(null as unknown as CardBandDriver)
   if (!cardBandRef.current) {
     cardBandRef.current = new CardBandDriver({
@@ -3671,13 +3674,31 @@ export function Canvas() {
         const els = ids.flatMap((id) => [
           ...document.querySelectorAll<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
         ])
-        for (const el of els) el.classList.add('nt-band-slide')
-        setTimeout(() => els.forEach((el) => el.classList.remove('nt-band-slide')), SLIDE_MS + 50)
+        const timers = bandSlideTimers.current
+        for (const el of els) {
+          el.classList.add('nt-band-slide')
+          clearTimeout(timers.get(el))
+          timers.set(
+            el,
+            setTimeout(() => {
+              el.classList.remove('nt-band-slide')
+              timers.delete(el)
+            }, SLIDE_MS + 50)
+          )
+        }
         markDirty()
       }
     })
   }
-  useEffect(() => cardBandRef.current.run(), [nodes, agentById, loopSig, ephSizes])
+  useEffect(() => {
+    // Keydowns of closed nodes are forgotten, so the map stays the size of the canvas.
+    const keys = bandKeysRef.current
+    if (keys.size) {
+      const live = new Set(nodes.map((n) => n.id))
+      for (const id of keys.keys()) if (!live.has(id)) keys.delete(id)
+    }
+    cardBandRef.current.run()
+  }, [nodes, agentById, loopSig, ephSizes])
   useEffect(() => {
     const driver = cardBandRef.current
     const nodeIdOf = (t: EventTarget | null): string | null =>
@@ -3692,16 +3713,25 @@ export function Canvas() {
       bandPointerRef.current = id
       if (driver.held.size) driver.run()
     }
+    // The pointer left the window: nothing is under it, so a pointer hold ends now, not at the cap.
+    const onOut = (e: PointerEvent): void => {
+      if (e.relatedTarget !== null || bandPointerRef.current === null) return
+      bandPointerRef.current = null
+      if (driver.held.size) driver.run()
+    }
     // Opening a card is a peek: a click anywhere else collapses it.
     const onDown = (e: PointerEvent): void => useAgentNodes.getState().collapseExpanded(nodeIdOf(e.target) ?? undefined)
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('pointerover', onOver, true)
+    window.addEventListener('pointerout', onOut, true)
     window.addEventListener('pointerdown', onDown, true)
     return () => {
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('pointerover', onOver, true)
+      window.removeEventListener('pointerout', onOut, true)
       window.removeEventListener('pointerdown', onDown, true)
       driver.dispose()
+      for (const t of bandSlideTimers.current.values()) clearTimeout(t)
     }
   }, [])
 

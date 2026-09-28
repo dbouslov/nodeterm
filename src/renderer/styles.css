@@ -6271,6 +6271,10 @@ body,
 .react-flow__node.nt-band-slide {
   transition: transform 180ms ease-out;
 }
+/* A drag that starts inside a slide must track the pointer, not lag behind a transition. */
+.react-flow__node.dragging.nt-band-slide {
+  transition: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .react-flow__node.nt-band-slide {
     transition: none;
@@ -6952,8 +6956,8 @@ button.group-node__setup:disabled {
   line-height: 14px;
 }
 
-/* Minimap-scale status glow: same language as the node glows (amber working / red
-   needs-you / accent unread). A static drop-shadow provides the halo; only
+/* Minimap-scale status glow: same language as the node glows (teal working / red
+   needs-you / blue unread). A static drop-shadow provides the halo; only
    stroke-opacity animates (cheap on tiny svg rects), cadence matching each canvas glow. */
 .minimap .mm-working,
 .minimap .mm-attention,
