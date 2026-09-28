@@ -400,8 +400,9 @@ iframes' console too, the PDF viewer among them (`traceConsoleSourceAllowed`, th
 (`shared/persist-trace.ts`); bounded at 1 MiB plus one `.1` rotation (`core/persist-trace.ts`), and
 a rotation whose rename fails EMPTIES the live file rather than leaving it over the cap, which used
 to make every later line retry the rename and be dropped. The SSH leg of a save is named in the
-`save` line like the folder and inline legs. Quit waits for queued lines: the desktop's first
-before-quit pass and both Server Edition `close()` branches (SIGTERM/SIGINT) await `flushed()`.
+`save` line like the folder and inline legs. Quit waits for queued lines, up to 1500 ms: the desktop's
+first before-quit pass joins `flushed()` to its quit-flush race, and both Server Edition `close()`
+branches (SIGTERM/SIGINT) race it against the same cap, so a stalled disk never hangs a quit.
 Nothing reads it back: every hook is optional and a throwing one is ignored. Server Edition: the
 store and gate lines go under its data dir; a browser tab's `[persist]` lines stay in that tab's
 console.
