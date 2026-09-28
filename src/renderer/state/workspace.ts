@@ -2029,13 +2029,13 @@ export function reorderNodeBefore(
   return groupsFirst(result)
 }
 
-/** Converts persisted node states into live React Flow nodes (parents first). */
 /** `cardBand` comes from a git-shared, hand-editable file: only a finite number 0..2000 survives,
  *  so a stray value can never push a column off the canvas. */
 export function normalizeCardBand(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2000 ? v : undefined
 }
 
+/** Converts persisted node states into live React Flow nodes (parents first). */
 export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
   // React Flow requires a parent node to appear before its children. With nested frames a flat
   // "groups first" sort is not enough (two frames compare equal), so `groupsFirst` re-emits the
