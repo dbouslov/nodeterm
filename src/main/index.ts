@@ -55,7 +55,12 @@ import { registerFsHandlers } from '../core/fs-handlers'
 import { TrackpadGestureLedger } from './trackpad-gesture'
 import { LogBuffer } from '../core/log-buffer'
 import { installLogSink, splitTag } from '../core/log-sink'
-import { createPersistTrace, traceFromConsole, PERSIST_TRACE_FILE } from '../core/persist-trace'
+import {
+  createPersistTrace,
+  traceFromConsole,
+  traceConsoleSourceAllowed,
+  PERSIST_TRACE_FILE
+} from '../core/persist-trace'
 import { registerLogHandlers } from '../core/log-handlers'
 import {
   registerBrowserGuest,
@@ -1296,8 +1301,11 @@ app.whenReady().then(async () => {
         // is for, and they triage by tag. Untagged lines fall back to 'renderer'.
         const { tag, rest } = splitTag(String(event.message ?? ''))
         logBuffer.push({ level, tag: tag || 'renderer', msg: rest })
-        // Only the app's own windows may write the persist trace — never a web page in a guest.
-        if (contents.getType() === 'window') traceFromConsole(String(event.message ?? ''), persistTrace)
+        // Only the app's own windows may write the persist trace — never a web page in a guest,
+        // and never an iframe inside the window (the PDF viewer): its top frame only.
+        if (traceConsoleSourceAllowed(contents.getType(), event.frame)) {
+          traceFromConsole(String(event.message ?? ''), persistTrace)
+        }
       } catch {
         /* logging must never break a page */
       }
@@ -4474,7 +4482,13 @@ app.on('before-quit', (e) => {
   // Pending throttled .nodeterm mirror writes must land BEFORE the ControlMasters die — killing
   // a master mid-write used to leave a truncated project.json on the server. The masters are
   // therefore kept up through the raced flush and dropped on the second before-quit pass.
-  const flush = Promise.allSettled([remoteWorkspaceIO.flush(), ptyManager.killAll()])
+  // The persist trace too: its lines append asynchronously, and the last decisions before a quit
+  // are the ones a relaunch report needs.
+  const flush = Promise.allSettled([
+    remoteWorkspaceIO.flush(),
+    ptyManager.killAll(),
+    persistTrace.flushed()
+  ])
   void Promise.race([flush, new Promise((r) => setTimeout(r, 1500))])
     // Then let whisper go. A dictation still transcribing when Electron tears down the main
     // process's node env aborts the WHOLE app from inside the native addon (SIGABRT in

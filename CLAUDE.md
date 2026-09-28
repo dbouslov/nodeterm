@@ -394,11 +394,18 @@ messaging-gate refusal (`AgentMessagingDeps.trace`, with the persisted canvas th
 and its age). The renderer prints `[persist] {…}` console lines (`lib/persistTrace.ts`: load and
 load-bail with the loading flag, commit-skip named by `commitSkipReason`, every save with the active
 vs on-screen project and the nodes sent vs on screen, autosave held); main's `console-message`
-listener routes them from the app's own windows only (`traceFromConsole`). Ids, flags and sizes
-only, sanitized on both sides (`shared/persist-trace.ts`); bounded at 1 MiB plus one `.1` rotation
-(`core/persist-trace.ts`). Nothing reads it back: every hook is optional and a throwing one is
-ignored. Server Edition: the store and gate lines go under its data dir; a browser tab's `[persist]`
-lines stay in that tab's console.
+listener routes them from the app's own windows only, top frame only — a webContents reports its
+iframes' console too, the PDF viewer among them (`traceConsoleSourceAllowed`, then
+`traceFromConsole`). Ids, flags and sizes only, at most 24 fields a line, sanitized on both sides
+(`shared/persist-trace.ts`); bounded at 1 MiB plus one `.1` rotation (`core/persist-trace.ts`), and
+a rotation whose rename fails EMPTIES the live file rather than leaving it over the cap, which used
+to make every later line retry the rename and be dropped. The SSH leg of a save is named in the
+`save` line like the folder and inline legs. Quit waits for queued lines, up to 1500 ms: the desktop's
+first before-quit pass joins `flushed()` to its quit-flush race, and both Server Edition `close()`
+branches (SIGTERM/SIGINT) race it against the same cap, so a stalled disk never hangs a quit.
+Nothing reads it back: every hook is optional and a throwing one is ignored. Server Edition: the
+store and gate lines go under its data dir; a browser tab's `[persist]` lines stay in that tab's
+console.
 
 ## Projects (tabs)
 

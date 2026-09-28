@@ -826,6 +826,10 @@ export async function startServer(
         // Same native hazard as the desktop app: a whisper transcribe still running when the
         // node env is torn down aborts the process. See SpeechService.shutdown.
         await speechService.shutdown()
+        // The persist trace appends asynchronously: let the last queued lines land before the
+        // process exits (SIGTERM reaches here through main.ts's shutdown). Capped like the desktop's
+        // quit flush, so a stalled data dir cannot hang the shutdown.
+        await Promise.race([persistTrace.flushed(), new Promise((r) => setTimeout(r, 1500))])
         hookServer.stop()
         // No WS teardown counterpart to the serving branch's below, and none is owed: this branch
         // returns BEFORE `http.createServer`/`attachWsServer`, so there is no listener and no
@@ -883,6 +887,10 @@ export async function startServer(
       // Same native hazard as the desktop app: a whisper transcribe still running when the node
       // env is torn down aborts the process. See SpeechService.shutdown.
       await speechService.shutdown()
+      // The persist trace appends asynchronously: let the last queued lines land before the
+      // process exits (SIGTERM reaches here through main.ts's shutdown). Capped like the desktop's
+      // quit flush, so a stalled data dir cannot hang the shutdown.
+      await Promise.race([persistTrace.flushed(), new Promise((r) => setTimeout(r, 1500))])
       // Close the loopback hook-server listener (it would otherwise die with the process anyway).
       hookServer.stop()
       // Upgraded WebSockets are not ordinary HTTP connections: server.close() waits for them but

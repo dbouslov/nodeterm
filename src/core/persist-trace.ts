@@ -40,7 +40,11 @@ export function createPersistTrace(opts: {
     let size = sizes.get(file)
     if (size === undefined) size = (await fs.stat(file).catch(() => null))?.size ?? 0
     if (size > 0 && size + bytes > maxBytes) {
-      await renameAtomic(file, `${file}.1`)
+      // A rotation that cannot rename (the `.1` slot is unwritable, a Windows lock outlasting
+      // renameAtomic's retries) empties the live file instead. Losing the older lines keeps the
+      // bound; throwing here would leave the file over the cap, so every later line would retry
+      // the same rename and be dropped — the trace dark for the rest of the run.
+      await renameAtomic(file, `${file}.1`).catch(() => fs.truncate(file, 0))
       size = 0
     }
     await fs.appendFile(file, line, { encoding: 'utf8', mode: 0o600 })
@@ -80,4 +84,17 @@ export function traceFromConsole(message: string, trace: PersistTrace): boolean 
   if (!rec) return false
   trace.record(rec)
   return true
+}
+
+/**
+ * Whether a console message may write the persist trace: only from the app's own window
+ * (`getType() === 'window'`, never a `<webview>` guest) AND from that window's TOP frame — a
+ * webContents reports its sub-frames' console too, and an iframe (the PDF viewer in an editor node)
+ * is not the app. A message whose frame is unknown is refused.
+ */
+export function traceConsoleSourceAllowed(
+  contentsType: string,
+  frame: { parent: unknown } | null | undefined
+): boolean {
+  return contentsType === 'window' && frame != null && frame.parent === null
 }

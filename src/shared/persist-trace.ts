@@ -17,6 +17,8 @@ export const PERSIST_TRACE_TAG = 'persist'
 export const PERSIST_TRACE_STRING_MAX = 120
 /** Most list entries kept (e.g. the project ids one save wrote). */
 export const PERSIST_TRACE_LIST_MAX = 20
+/** Most fields kept per line — the widest real line carries 8; a renderer line cannot carry 5,000. */
+export const PERSIST_TRACE_KEYS_MAX = 24
 
 export type PersistTraceValue = string | number | boolean | null
 /** What a caller may hand the trace. `undefined` fields are simply left out. */
@@ -48,15 +50,23 @@ function cleanValue(v: unknown): PersistTraceValue | string[] | undefined {
   return undefined
 }
 
-/** Keeps only plain-identifier keys with primitive values (and lists of strings), each capped. */
+/**
+ * Keeps only plain-identifier keys with primitive values (and lists of strings), each capped, and at
+ * most `PERSIST_TRACE_KEYS_MAX` of them (the first kept, in order).
+ */
 export function sanitizeTraceFields(
   fields: Record<string, unknown>
 ): Record<string, PersistTraceValue | string[]> {
   const out: Record<string, PersistTraceValue | string[]> = {}
+  let kept = 0
   for (const [key, value] of Object.entries(fields)) {
+    if (kept >= PERSIST_TRACE_KEYS_MAX) break
     if (!KEY.test(key) || RESERVED.has(key)) continue
     const clean = cleanValue(value)
-    if (clean !== undefined) out[key] = clean
+    if (clean !== undefined) {
+      out[key] = clean
+      kept++
+    }
   }
   return out
 }
