@@ -36,3 +36,23 @@ export function inDock(id: string, nodes: readonly DockShape[]): boolean {
   }
   return false
 }
+
+interface MarkShape extends DockShape {
+  type?: string
+  kind?: string
+}
+
+/**
+ * Why `pin --node <frameId> --set dock` from `callerId` must be refused, or null when it may go
+ * to the human confirm. The app has no seat registry, so the gate is the geometry it can check:
+ * the caller sits DIRECTLY in the frame (the seat marks its own box). One Dock per canvas.
+ */
+export function dockMarkRefusal(nodes: readonly MarkShape[], callerId: string, frameId: string): string | null {
+  const frame = nodes.find((n) => n.id === frameId)
+  if (!frame || (frame.type ?? frame.kind) !== 'group') return `pin --set dock: --node names no frame (${frameId})`
+  if (isDock(frame)) return `pin --set dock: ${frameId} is already the Dock`
+  if (dockOf(nodes)) return 'pin --set dock: this canvas already has a Dock'
+  const caller = nodes.find((n) => n.id === callerId)
+  if (caller?.parentId !== frameId) return 'pin --set dock: only a direct child of the frame may mark it'
+  return null
+}

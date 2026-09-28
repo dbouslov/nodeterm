@@ -35,3 +35,56 @@ describe('dock helpers', () => {
     expect(inDock('seat', stored)).toBe(true)
   })
 })
+
+import { dockMarkRefusal } from './dock'
+import { alwaysConfirms, decideControlConfirm } from './control-confirm'
+
+describe('dockMarkRefusal: the one-time mark (pin --set dock)', () => {
+  const scene = [
+    { id: 'F', type: 'group', data: {} },
+    { id: 'seat', parentId: 'F', type: 'terminal', data: {} },
+    { id: 'G', type: 'group', data: {} },
+    { id: 'inner', parentId: 'G', type: 'terminal', data: {} },
+    { id: 'deep', parentId: 'inner2', type: 'terminal', data: {} },
+    { id: 'inner2', parentId: 'F', type: 'group', data: {} },
+    { id: 'loose', type: 'terminal', data: {} }
+  ]
+  it('allows a direct child marking its own frame', () => {
+    expect(dockMarkRefusal(scene, 'seat', 'F')).toBeNull()
+  })
+  it('refuses a caller outside the frame, or nested deeper than a direct child', () => {
+    expect(dockMarkRefusal(scene, 'inner', 'F')).toMatch(/direct child/)
+    expect(dockMarkRefusal(scene, 'deep', 'F')).toMatch(/direct child/)
+    expect(dockMarkRefusal(scene, 'loose', 'F')).toMatch(/direct child/)
+  })
+  it('refuses a target that is not a frame', () => {
+    expect(dockMarkRefusal(scene, 'seat', 'loose')).toMatch(/frame/)
+    expect(dockMarkRefusal(scene, 'seat', 'nope')).toMatch(/frame/)
+  })
+  it('refuses a second Dock, and re-marking the Dock', () => {
+    const withDock = scene.map((n) => (n.id === 'G' ? { ...n, data: { fixture: 'dock' } } : n))
+    expect(dockMarkRefusal(withDock, 'seat', 'F')).toMatch(/already has a Dock/)
+    expect(dockMarkRefusal(withDock, 'inner', 'G')).toMatch(/already the Dock/)
+  })
+})
+
+describe('confirm routing is argument-aware: only pin --set dock confirms', () => {
+  const waivedEverywhere = {
+    sessionWaived: new Set(['pin', 'write', 'close']),
+    persisted: { always: ['pin', 'write', 'close'], bypassMode: true },
+    permissionMode: 'bypassPermissions' as const,
+    permissionModeSource: 'global' as const
+  }
+  it('pin --set on|off raises no confirm, with or without a waiver', () => {
+    expect(alwaysConfirms('pin', { set: 'on' })).toBe(false)
+    expect(alwaysConfirms('pin', { set: 'off' })).toBe(false)
+  })
+  it('pin --set dock always confirms, and no waiver can skip it', () => {
+    expect(alwaysConfirms('pin', { set: 'dock' })).toBe(true)
+    expect(decideControlConfirm({ verb: 'pin', ...waivedEverywhere })).toEqual({ skip: false, via: null })
+  })
+  it('nothing else is swept in', () => {
+    expect(alwaysConfirms('minimize', { set: 'dock' })).toBe(false)
+    expect(alwaysConfirms('close', {})).toBe(false)
+  })
+})

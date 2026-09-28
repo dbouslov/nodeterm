@@ -1236,6 +1236,20 @@ describe('pin verb', () => {
     expect(parseControlRequest('pin', { node: 'n1', set: 'yes' })).toEqual({ error: 'pin requires --set on|off' })
   })
 
+  it('accepts --set dock, the one-time Dock mark (T8)', () => {
+    expect(parseControlRequest('pin', { node: 'f1', set: 'dock' })).toEqual({
+      verb: 'pin',
+      args: { node: 'f1', set: 'dock' }
+    })
+    expect(parseControlRequest('pin', { node: 'f1', set: 'Dock' })).toEqual({ error: 'pin requires --set on|off' })
+    for (const body of [
+      buildCanvasSkillBody('/tmp/nodeterm.sh'),
+      buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    ]) {
+      expect(body).toContain('`pin --node <frame> --set dock`')
+    }
+  })
+
   it('both agent-facing bodies describe it', () => {
     for (const body of [
       buildCanvasSkillBody('/tmp/nodeterm.sh'),

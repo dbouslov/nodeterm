@@ -621,7 +621,9 @@ import {
 } from '@shared/settings-verb'
 import { applySettingsChange } from '../lib/settingsVerb'
 import { useExpiringDialog } from '../lib/useExpiringDialog'
+import { dockMarkRefusal } from '@shared/dock'
 import {
+  alwaysConfirms,
   confirmExpiresAt,
   isWaivableVerb,
   waivedNotice,
@@ -12357,6 +12359,48 @@ export function Canvas() {
             // and everything inside it is left in place by Restructure, arrange / align and frame
             // fitting (`isPinned`). Subagent/loop cards are not persisted, so a pin would vanish.
             const id = (args.node ?? '').trim()
+            // `--set dock`: the one-time Dock mark (@shared/dock). The routing is argument-aware
+            // (`alwaysConfirms`): this leg ALWAYS asks the human and no waiver skips it, while plain
+            // on|off below keeps its old unconfirmed behavior.
+            if (alwaysConfirms(verb, args)) {
+              const refusal = dockMarkRefusal(nodesRef.current as CanvasNode[], sourceNodeId, id)
+              if (refusal) {
+                reply({ ok: false, error: refusal })
+                return
+              }
+              if (confirmBusy()) {
+                reply({ ok: false, error: 'a confirmation is already pending, try again' })
+                return
+              }
+              const frameTitle = (nodesRef.current.find((n) => n.id === id)?.data.title as string) || id
+              setConfirm({
+                message: `Agent "${srcTitle}" wants to make the frame "${frameTitle}" the Dock: pinned in its slot, and agents can no longer close, ungroup, unpin or empty it. Make it the Dock?`,
+                confirmLabel: 'Make Dock',
+                requestedBy: srcTitle,
+                expiresAt: confirmExpiresAt(Date.now()),
+                onExpire: () => reply({ ok: false, error: 'expired before the user answered' }),
+                onConfirm: () => {
+                  setConfirm(null)
+                  // Re-checked: the canvas may have changed while the dialog was open.
+                  const late = dockMarkRefusal(nodesRef.current as CanvasNode[], sourceNodeId, id)
+                  if (late) {
+                    reply({ ok: false, error: late })
+                    return
+                  }
+                  setNodes((nodes) =>
+                    nodes.map((node) =>
+                      node.id === id
+                        ? { ...node, draggable: false, data: { ...node.data, pinned: true, fixture: 'dock' as const } }
+                        : node
+                    )
+                  )
+                  markDirty()
+                  reply({ ok: true, message: `marked ${id} as the Dock`, result: { id, fixture: 'dock' } })
+                },
+                onCancel: () => reply({ ok: false, error: 'denied by user' })
+              })
+              return
+            } // end dock mark
             const target = nodesRef.current.find((node) => node.id === id)
             if (!target || target.type === 'subagent' || target.type === 'loop') {
               reply({ ok: false, error: `pin: --node names no pinnable node (${id})` })

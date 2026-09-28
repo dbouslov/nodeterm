@@ -374,7 +374,7 @@ export function parseControlRequest(
     return { error: 'geometry --frame requires a group id' }
   }
   if (v === 'pin' && !args.node) return { error: 'pin requires --node <id>' }
-  if (v === 'pin' && args.set !== 'on' && args.set !== 'off') return { error: 'pin requires --set on|off' }
+  if (v === 'pin' && args.set !== 'on' && args.set !== 'off' && args.set !== 'dock') return { error: 'pin requires --set on|off' }
   if (v === 'minimize' && !args.node) return { error: 'minimize requires --node <id,id>' }
   if (v === 'minimize' && args.set !== undefined && args.set !== 'on' && args.set !== 'off') {
     return { error: 'minimize --set must be on or off' }
@@ -655,6 +655,9 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  `align` and `--group` placement never move it or anything inside it (a pinned frame is a fixed',
     '  obstacle the rest is laid out around, and it grows in place to take a new child). The user',
     '  pins from the node menu; dragging by hand still works.',
+    '- `pin --node <frame> --set dock`: the orchestrator marks ITS OWN frame (the caller must sit',
+    '  directly in it) as the Dock, once: pinned, fixed slot, walled off from placement, and it',
+    '  cannot be closed, ungrouped, unpinned or emptied by an agent. The user always confirms it.',
     '- `minimize --node <id,id> [--set on|off]` — shrink terminal, sticky and files nodes to their title',
     '  bar (`--set off` restores the height each had). Use it on idle or finished stations so they stop',
     '  taking space: nothing closes and the session keeps running. A group frame, an unknown id or any',
@@ -1264,6 +1267,9 @@ Verbs:
   \`align\` and \`--group\` placement never move it or anything inside it (a pinned frame is a
   fixed obstacle the rest is laid out around, and it grows in place to take a new child). The user
   pins from the node menu; dragging by hand still works.
+- \`pin --node <frame> --set dock\`: the orchestrator marks ITS OWN frame (the caller must sit
+  directly in it) as the Dock, once: pinned, fixed slot, walled off from placement, and it
+  cannot be closed, ungrouped, unpinned or emptied by an agent. The user always confirms it.
 - \`minimize --node <id,id> [--set on|off]\` — shrink terminal, sticky and files nodes to their
   title bar; \`--set off\` restores each to the height it had. As a lead, minimize a station once it
   is idle or finished so it stops taking space: nothing closes, the session keeps running, and a
