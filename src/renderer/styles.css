@@ -49,6 +49,7 @@
   --text: rgba(var(--tint-rgb), 0.85); /* label */
   --muted: rgba(var(--tint-rgb), 0.55); /* secondaryLabel */
   --muted-2: rgba(var(--tint-rgb), 0.25); /* tertiaryLabel */
+  --dock-border: rgba(var(--tint-rgb), 0.22); /* the Dock's 1 px neutral edge */
   --accent: #0a84ff; /* systemBlue */
   --accent-hover: #3a9bff;
   /* Accent as TEXT on a surface — lighter than the fill accent so it reads on a dark panel, and
@@ -203,6 +204,7 @@
   --border: rgba(var(--tint-rgb), 0.14);
   --muted: rgba(var(--tint-rgb), 0.7);
   --muted-2: rgba(var(--tint-rgb), 0.4);
+  --dock-border: rgba(var(--tint-rgb), 0.26);
 
   --bg: #fbf8f3; /* content / canvas */
   --panel: #f3efe7; /* bars, panels, node chrome */
@@ -6532,6 +6534,47 @@ button.group-node__setup:disabled {
 .group-node__ungroup:hover {
   background: var(--panel-header);
   color: var(--text);
+}
+
+/* THE DOCK (@shared/dock, design 4.3): the orchestrator's fixed frame reads as furniture, not as
+   selected or working. Deep neutral fill, a 1 px neutral edge, and a 34 px header strip (the
+   layout's GROUP_HEADER, so every hug agrees) holding a lock glyph and the name. No color paint,
+   no selection ring, no resize handle, no hover Ungroup (GroupNode leaves them out). */
+.group-node--dock {
+  background: var(--surface-deep);
+  border: 1px solid var(--dock-border);
+  border-radius: 12px;
+}
+.group-node--dock .group-node__label {
+  top: 0;
+  left: 0;
+  right: 0;
+  transform: none;
+  box-sizing: border-box;
+  height: 34px;
+  max-width: none;
+  padding: 0 12px;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  cursor: default;
+}
+.group-node--dock .group-node__name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.group-node__lock {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+.group-node__lock svg {
+  width: 13px;
+  height: 13px;
 }
 
 /* Selected outline for ephemeral subagent/loop nodes. */
