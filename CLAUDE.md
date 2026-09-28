@@ -2467,10 +2467,12 @@ still sees a station that finished before a relaunch; see Dependency edges, item
     because `cwdForNewNodeIn` subtracts `staleGroupIds`, which is epoch-scoped to the ACTIVE
     project.
   Since upstream v0.3.9 the whole table lives in `@shared/control-off-screen` (see above), and a
-  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`/`retire`/`minimize`), is
-  answered against the owning project's serialized nodes. Everything else is **REFUSED while its
-  project is not on screen** (`OFF_SCREEN_REFUSALS`; fork Fix #16, 2026-09-13):
-  `group`/`ungroup`/`move`/`arrange`/`align`/`verify`/`spawn-team`/`branch`/`open-worktree`/
+  fourth set, `STORED_NODE_VERBS` (`write`/`close`/`rename`/`color`/`link`/`board`/`assign`/`retire`/`minimize`/
+  `group`/`arrange`/`align`), is answered against the owning project's serialized nodes — the three
+  layout verbs run the on-screen plan (`renderer/lib/layoutVerbs.ts`) over the hydrated saved nodes,
+  so nodes and frames are sized from their SAVED sizes, and the reply says so. Everything else is
+  **REFUSED while its project is not on screen** (`OFF_SCREEN_REFUSALS`; fork Fix #16, 2026-09-13):
+  `ungroup`/`move`/`verify`/`spawn-team`/`branch`/`open-worktree`/
   `close-worktree`/`browser`, plus the fork verbs `restructure`/`pin`/`snapshot`
   — they read live canvas state the serialized copy does not carry (measured node sizes, worktree
   staleness, a mounted guest, the rendered picture). They used to TRAVEL there — the G5 hijack, and

@@ -923,6 +923,27 @@ describe('retire verb', () => {
   })
 })
 
+describe('group / arrange / align off screen (fix/tidy-offscreen)', () => {
+  it('both agent-facing bodies list them as answered off screen, from saved sizes, never as refused', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      const answered = body.split('\n').find((l) => l.includes('Answered whether or not that project is on screen'))
+      const refused = body.split('\n').find((l) => l.includes('REFUSED while that project is off screen'))
+      for (const v of ['group', 'arrange', 'align']) {
+        expect(answered, `${v} answered`).toMatch(new RegExp(`\\b${v}\\b`))
+        expect(refused, `${v} not refused`).not.toMatch(new RegExp(`\\b${v}\\b`))
+      }
+      for (const entry of ['`group --nodes <id,id>', '`arrange --nodes <id,id>']) {
+        const at = body.indexOf(entry)
+        expect(at, entry).toBeGreaterThan(-1)
+        expect(body.slice(at, body.indexOf('\n- ', at)), entry).toMatch(/off screen too[\s\S]*saved[\s\S]*sizes/i)
+      }
+      // The hand-written "needs your project ON SCREEN" list must not name them either.
+      const needs = body.slice(body.indexOf('Verbs that need the rendered canvas'), body.indexOf('ON SCREEN'))
+      expect(needs).not.toMatch(/`(group|arrange|align)`/)
+    }
+  })
+})
+
 /**
  * The messaging verbs are LIVE as of PR 5. The tripwire that used to sit here ("refused by the
  * parser, so nothing routes them today") did its one job — it failed on the day the verbs landed —
@@ -1130,7 +1151,7 @@ describe('the --project clause tells the truth about travel (review #363 I-1 + M
       }
       // Every refused verb is named AND carries its own reason — a bare list would tell an agent
       // that `branch` and `arrange` fail for the same cause, and they do not.
-      for (const v of ['group', 'ungroup', 'move', 'arrange', 'align', 'verify', 'spawn-team', 'branch', 'open-worktree', 'close-worktree', 'browser']) {
+      for (const v of ['ungroup', 'move', 'verify', 'spawn-team', 'branch', 'open-worktree', 'close-worktree', 'browser']) {
         const d = offScreenDisposition(v)
         expect(d.kind, v).toBe('refuse')
         if (d.kind !== 'refuse') continue
