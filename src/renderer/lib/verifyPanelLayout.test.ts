@@ -127,6 +127,15 @@ describe('layoutVerifyPanel — a review panel never lands on anything', () => {
     expect(nodes.filter((n) => n.parentId === 'mine')).toEqual([])
   })
 
+  it('never reuses a marked frame with no member: the reviewer check has nothing to judge', () => {
+    // An empty marked frame (e.g. a team frame restored empty) proves nothing about who made it.
+    const empty = frame('empty', 28, 500, 600, 300, 'Verify: Build', 'go')
+    const start = [...canvas(), { ...empty, data: { ...empty.data, verifyPanel: true } }, reviewer('r1')]
+    const { groupId, reused } = layoutVerifyPanel(start, { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
+    expect(reused).toBe(false)
+    expect(groupId).not.toBe('empty')
+  })
+
   it('marks the panel frame, and the mark survives a save and reload, so the next round still reuses it', () => {
     const first = layoutVerifyPanel([...canvas(), reviewer('r1')], { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
     expect(first.nodes.find((n) => n.id === first.groupId)!.data.verifyPanel).toBe(true)

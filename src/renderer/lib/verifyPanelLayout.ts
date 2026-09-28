@@ -13,10 +13,10 @@
 // 2. A re-verify with the SAME label, from the same container, reuses that panel frame: the new
 //    round goes below the earlier one inside it. Nothing of the earlier round is closed (those are
 //    sessions); the caller closes a finished round itself (`close --node … --compact`).
-//    Only a frame `verify` made is reused (`data.verifyPanel`, persisted, and every member a
-//    `Verify: ` reviewer): a user's own frame, a team or a worktree frame that happens to carry the
-//    title is never taken over. And a reuse whose growth would run over a PINNED node (which
-//    `settle` cannot move) falls through to rule 1.
+//    Only a frame `verify` made is reused (`data.verifyPanel`, persisted, at least one member, and
+//    every member a `Verify: ` reviewer): a user's own frame, a team or a worktree frame that
+//    happens to carry the title is never taken over. And a reuse whose growth would run over a
+//    PINNED node (which `settle` cannot move) falls through to rule 1.
 //    A team (`layoutTeamFrame`) is never reused. Its frame is marked `verifyPanel` too, so it
 //    dissolves when its last member closes (lib/verifyPanelCleanup).
 
@@ -71,6 +71,7 @@ export function layoutVerifyPanel(nodes: CanvasNode[], opts: LayoutOpts): Layout
       !panel.has(n.id) &&
       (n.parentId ?? undefined) === container &&
       (n.data.title as string | undefined) === opts.label &&
+      nodes.some((k) => k.parentId === n.id) &&
       nodes.every((k) => k.parentId !== n.id || String(k.data.title ?? '').startsWith(REVIEWER_PREFIX))
   )
   if (earlier) {
