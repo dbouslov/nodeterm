@@ -114,7 +114,8 @@ describe('every CSS variable resolves', () => {
     '--cmascot-h',
     '--cmascot-sheet-w',
     '--cmascot-sheet-h', // notch HUD sprite sheets
-    '--swimlane-color' // GlobalKanbanView swimlane left border, per project
+    '--swimlane-color', // GlobalKanbanView swimlane left border, per project
+    '--nt-zoom' // Canvas, the viewport zoom on the flow wrapper (status ring width)
   ])
 
   it('references no variable that is never defined', () => {
@@ -266,4 +267,106 @@ describe('light palette contrast', () => {
   it('the canvas sits below the panels, so nodes keep their edges', () => {
     expect(luminance(hex(token('--canvas-bg')))).toBeLessThan(luminance(hex(token('--bg'))))
   })
+})
+
+/**
+ * The status rings, as painted. Each state's static rule opens its box-shadow with a solid ring
+ * (`0 0 0 <width> <colour>`); that ring is what says "working / needs you / finished / errored" from
+ * across the room, so it is held to the 3:1 graphical floor on BOTH surfaces a node sits over, and
+ * the four rings must stay apart from each other (dE76 30) or two states read as one. Composited
+ * at the alpha the rule actually uses, so a faint ring cannot pass on the strength of its hue.
+ * Light theme used the dark reds and blues: needs-you measured 2.97:1 and finished 3.18:1.
+ */
+describe('status rings are visible in both themes', () => {
+  type RGB = [number, number, number]
+  const STATES = ['working', 'unread', 'attention', 'errored'] as const
+
+  function tokenIn(block: string, name: string): string {
+    const m = new RegExp(`^\\s*${name}\\s*:\\s*([^;]+);`, 'm').exec(block)
+    if (!m) throw new Error(`this block does not define ${name}`)
+    return m[1].trim()
+  }
+  const hexRgb = (h: string): RGB =>
+    [0, 2, 4].map((i) => parseInt(h.replace('#', '').slice(i, i + 2), 16)) as RGB
+  const triple = (v: string): RGB => v.split(',').map((n) => +n.trim()) as RGB
+
+  /** The first box-shadow layer of `.term-node.<state> { ... }`, resolved against one theme block. */
+  function ring(state: string, block: string): { rgb: RGB; alpha: number } {
+    const start = RULES.search(new RegExp(`^\\.term-node\\.${state}\\s*\\{`, 'm'))
+    if (start < 0) throw new Error(`no static rule .term-node.${state}`)
+    const body = RULES.slice(start, RULES.indexOf('\n}', start))
+    const shadow = /box-shadow:\s*([^;]+);/.exec(body)?.[1] ?? ''
+    // The first layer, up to the first comma outside parentheses (the width is a clamp()).
+    let depth = 0
+    let end = shadow.length
+    for (let i = 0; i < shadow.length; i++) {
+      if (shadow[i] === '(') depth++
+      else if (shadow[i] === ')') depth--
+      else if (shadow[i] === ',' && depth === 0) {
+        end = i
+        break
+      }
+    }
+    const layer = /^0 0 0 .*\s(var\(--[a-z0-9-]+\)|rgba?\(.*\))$/.exec(shadow.slice(0, end).trim())
+    if (!layer) throw new Error(`.term-node.${state} has no solid ring layer`)
+    const c = layer[1].trim()
+    const tokenOnly = /^var\((--[a-z0-9-]+)\)$/.exec(c)
+    if (tokenOnly) return { rgb: hexRgb(tokenIn(block, tokenOnly[1])), alpha: 1 }
+    const viaTriple = /^rgba?\(var\((--[a-z0-9-]+)\)(?:,\s*([\d.]+))?\)$/.exec(c)
+    if (viaTriple) return { rgb: triple(tokenIn(block, viaTriple[1])), alpha: viaTriple[2] ? +viaTriple[2] : 1 }
+    const lit = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(c)
+    if (lit) return { rgb: [+lit[1], +lit[2], +lit[3]], alpha: lit[4] ? +lit[4] : 1 }
+    throw new Error(`.term-node.${state}: cannot read ring colour ${c}`)
+  }
+
+  const over = (fg: RGB, a: number, bg: RGB): RGB => fg.map((c, i) => c * a + bg[i] * (1 - a)) as RGB
+  function lum([r, g, b]: RGB): number {
+    const f = (c: number): number => {
+      const v = c / 255
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    }
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+  }
+  function contrast(a: RGB, b: RGB): number {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+  function lab(c: RGB): RGB {
+    const [r, g, b] = c.map((x) => {
+      const v = x / 255
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    })
+    const f = (t: number): number => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116)
+    const X = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    const Y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    const Z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))]
+  }
+  const dE76 = (a: RGB, b: RGB): number => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]))
+
+  const THEMES: [string, string][] = [
+    ['dark', DARK],
+    ['light', LIGHT]
+  ]
+  for (const [theme, block] of THEMES) {
+    for (const surface of ['--canvas-bg', '--bg']) {
+      const bg = hexRgb(tokenIn(block, surface))
+      it.each(STATES)(`${theme}: the %s ring clears 3:1 on ${surface}`, (state) => {
+        const r = ring(state, block)
+        expect(contrast(over(r.rgb, r.alpha, bg), bg)).toBeGreaterThanOrEqual(3)
+      })
+      it(`${theme}: every pair of rings is at least dE76 30 apart on ${surface}`, () => {
+        const painted = STATES.map((s) => {
+          const r = ring(s, block)
+          return [s, over(r.rgb, r.alpha, bg)] as const
+        })
+        for (let i = 0; i < painted.length; i++) {
+          for (let j = i + 1; j < painted.length; j++) {
+            const d = dE76(painted[i][1], painted[j][1])
+            expect(d, `${painted[i][0]} vs ${painted[j][0]}`).toBeGreaterThanOrEqual(30)
+          }
+        }
+      })
+    }
+  }
 })

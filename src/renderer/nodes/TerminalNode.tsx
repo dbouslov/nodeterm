@@ -5230,7 +5230,7 @@ export function TerminalNode({
         isUnread ? ' unread' : ''
       }${status?.state === 'working' ? ' working' : ''}${
         status?.state === 'waiting' || status?.state === 'blocked' ? ' attention' : ''
-      }${glyphMounted ? ' term-node--glyphgrid' : ''}${focused ? ' term-node--focused' : ''}`}
+      }${status?.lastTurnError && status?.state !== 'working' ? ' errored' : ''}${glyphMounted ? ' term-node--glyphgrid' : ''}${focused ? ' term-node--focused' : ''}`}
       ref={rootRef}
       style={{ borderTopColor: data.color }}
       onMouseEnter={() => (hoveredRef.current = true)}

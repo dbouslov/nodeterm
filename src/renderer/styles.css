@@ -17,9 +17,21 @@
      (A white that sits on a saturated ACCENT fill is a different thing and stays `#fff`.) */
   --text-strong: #fff;
 
-  /* Working (agent mid-turn) accent: the clay spinner/glow color, shared by every "working"
-     indicator (node glow, sidebar dot, project-header badge) so it only has to be edited once. */
-  --agent-working: #d97757;
+  /* Working (agent mid-turn) accent: teal, shared by every "working" indicator (sidebar dot,
+     project-header badge) so it only has to be edited once. The node ring is `--glow-working`. */
+  --agent-working: #40c8e0;
+
+  /* Node status rings and halos (.term-node.working/.unread/.attention/.errored). The hex paints
+     the solid ring; the `-rgb` twin feeds the translucent halos. Each ring clears 3:1 on the
+     canvas and the pairs stay dE76 30 apart (styles.theme.test.ts). */
+  --glow-working: #40c8e0;
+  --glow-working-rgb: 64, 200, 224;
+  --glow-attention: #ff453a;
+  --glow-attention-rgb: 255, 69, 58;
+  --glow-unread: #0a84ff;
+  --glow-unread-rgb: 10, 132, 255;
+  --glow-error: #bf5af2;
+  --glow-error-rgb: 191, 90, 242;
 
   --bg: #1e1e1e; /* content / canvas / terminal (controlBackground) */
   --panel: #282828; /* bars, panels, node chrome (underPage) */
@@ -238,11 +250,21 @@
   --warn: #a85c00;
   --caution: #806100;
   --success: #1f7a38;
-  /* Same story for the working clay: #d97757 is tuned for a dark field and measures 2.7:1 against
-     these surfaces — under this palette's 4.3 floor, and it is rendered as TEXT (the badge count),
-     not just a dot. Darkened at the same hue (15°) into the band the other status hues occupy,
-     so "working" still reads as the same colour in both themes. */
-  --agent-working: #b04a28;
+  /* Same story for the working teal: #40c8e0 is tuned for a dark field and is rendered as TEXT
+     (the badge count), not just a dot, so it owes this palette's 4.3 floor. Darkened at the same
+     hue to 4.78 / 4.41 / 4.42:1 on --bg / --panel / --canvas-bg. */
+  --agent-working: #007a8a;
+
+  /* Status rings on a pale field: the dark block's red (2.97:1) and blue (3.18:1) were too faint.
+     The working ring clears 3:1 on the canvas by 0.36, so its value is frozen. */
+  --glow-working: #008fa3;
+  --glow-working-rgb: 0, 143, 163;
+  --glow-attention: #c62a1f;
+  --glow-attention-rgb: 198, 42, 31;
+  --glow-unread: #007aff;
+  --glow-unread-rgb: 0, 122, 255;
+  --glow-error: #8e3fb8;
+  --glow-error-rgb: 142, 63, 184;
 
   /* Dots must read as a grid, not as noise: the dark-mode grey is far too heavy on a pale field,
      and a neutral one would be the only cold thing on screen. */
@@ -1488,8 +1510,8 @@ body,
 .term-node.unread {
   border-color: var(--accent);
   box-shadow:
-    0 0 0 1px rgba(10, 132, 255, 0.5),
-    0 0 16px 1px rgba(10, 132, 255, 0.35),
+    0 0 0 clamp(1px, calc(3px / var(--nt-zoom, 1)), 12px) var(--glow-unread),
+    0 0 16px 1px rgba(var(--glow-unread-rgb), 0.35),
     0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
 }
 
@@ -1501,8 +1523,8 @@ body,
   pointer-events: none;
   z-index: -1;
   box-shadow:
-    0 0 0 1px rgba(10, 132, 255, 0.8),
-    0 0 26px 4px rgba(10, 132, 255, 0.6);
+    0 0 0 1px rgba(var(--glow-unread-rgb), 0.8),
+    0 0 26px 4px rgba(var(--glow-unread-rgb), 0.6);
   opacity: 0;
   animation: nt-unread-glow 2s ease-in-out infinite;
   will-change: opacity;
@@ -1518,15 +1540,15 @@ body,
   }
 }
 
-/* Working (agent mid-turn): a soft clay glow — the spinner's #d97757 — behind the node.
+/* Working (agent mid-turn): a soft teal glow (`--glow-working`) behind the node.
    Same opacity-pulse-on-wrapper-pseudo technique as the unread glow above (never animate
    box-shadow), but calmer: lower intensity, slower cycle, and it never fully disappears so
    the node reads "alive" rather than "blinking". Mutually exclusive with .unread (isUnread
    is false while working). Shadows only — the top border keeps the node's own color. */
 .term-node.working {
   box-shadow:
-    0 0 0 1px rgba(217, 119, 87, 0.35),
-    0 0 14px 1px rgba(217, 119, 87, 0.22),
+    0 0 0 clamp(1px, calc(3px / var(--nt-zoom, 1)), 12px) var(--glow-working),
+    0 0 14px 1px rgba(var(--glow-working-rgb), 0.22),
     0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
 }
 
@@ -1538,8 +1560,8 @@ body,
   pointer-events: none;
   z-index: -1;
   box-shadow:
-    0 0 0 1px rgba(217, 119, 87, 0.45),
-    0 0 22px 3px rgba(217, 119, 87, 0.35);
+    0 0 0 1px rgba(var(--glow-working-rgb), 0.45),
+    0 0 22px 3px rgba(var(--glow-working-rgb), 0.35);
   opacity: 0.25;
   animation: nt-working-glow 2.6s ease-in-out infinite;
   will-change: opacity;
@@ -1555,12 +1577,23 @@ body,
   }
 }
 
+/* Errored (the last turn ended on an error or a spend limit, and nothing has started since): a
+   purple ring, static. Declared before .attention so a station that is also asking for you shows
+   the red. The ring width in every status rule follows the zoom (`--nt-zoom`, set by Canvas on the
+   flow wrapper): about 3 screen pixels at any zoom, and 3px when the variable is absent. */
+.term-node.errored {
+  box-shadow:
+    0 0 0 clamp(1px, calc(3px / var(--nt-zoom, 1)), 12px) var(--glow-error),
+    0 0 14px 1px rgba(var(--glow-error-rgb), 0.25),
+    0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
+}
+
 /* Needs-you (waiting/blocked): the red twin of the glows above — same badge/bell red,
    a touch more insistent than working (deeper pulse, faster cycle): it's asking for you. */
 .term-node.attention {
   box-shadow:
-    0 0 0 1px rgba(255, 69, 58, 0.4),
-    0 0 14px 1px rgba(255, 69, 58, 0.25),
+    0 0 0 clamp(1px, calc(3px / var(--nt-zoom, 1)), 12px) var(--glow-attention),
+    0 0 14px 1px rgba(var(--glow-attention-rgb), 0.25),
     0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
 }
 
@@ -1572,8 +1605,8 @@ body,
   pointer-events: none;
   z-index: -1;
   box-shadow:
-    0 0 0 1px rgba(255, 69, 58, 0.55),
-    0 0 22px 3px rgba(255, 69, 58, 0.4);
+    0 0 0 1px rgba(var(--glow-attention-rgb), 0.55),
+    0 0 22px 3px rgba(var(--glow-attention-rgb), 0.4);
   opacity: 0.15;
   animation: nt-attention-glow 1.8s ease-in-out infinite;
   will-change: opacity;

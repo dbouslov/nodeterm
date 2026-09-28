@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { playSfx, primeSfx } from '@renderer/lib/sfx'
 import { fanoutStillWorking } from '@renderer/lib/completionAlert'
@@ -15128,7 +15128,8 @@ export function Canvas() {
         </button>
       </div>
 
-      <div className="flow-wrap" ref={flowWrapRef}>
+      {/* `--nt-zoom` sizes the node status rings (styles.css), about 3 screen pixels at any zoom. */}
+      <div className="flow-wrap" ref={flowWrapRef} style={{ '--nt-zoom': zoomPct / 100 } as CSSProperties}>
         {/* First-contact guidance: an empty canvas used to be a black void (field report:
             "didn't know what to do first"). Pointer-events-none so it can never eat a
             right-click or box-select; keyed off the LIVE nodes array, so it reappears on
