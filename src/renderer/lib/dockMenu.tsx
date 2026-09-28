@@ -1,5 +1,6 @@
 import type { MenuItem } from '../components/ContextMenu'
 import { IconLock, IconPin, IconTrash, IconUngroup } from '../components/icons'
+import { isDock, type DockShape } from '@shared/dock'
 
 const WHY = 'The Dock stays put. Use Release Dock first.'
 const inert = (): void => {}
@@ -24,4 +25,15 @@ export function dockFrameMenu(release: () => void): MenuItem[] {
       onClick: release
     }
   ]
+}
+
+/** The frame-menu choice, pure: the Dock's own menu for the Dock (whatever it holds, including
+ *  nothing), the ordinary frame menu (`normal`, built only when needed) for anything else. */
+export function frameMenuFor(
+  groupId: string,
+  nodes: readonly DockShape[],
+  release: (groupId: string) => void,
+  normal: () => MenuItem[]
+): MenuItem[] {
+  return isDock(nodes.find((n) => n.id === groupId)) ? dockFrameMenu(() => release(groupId)) : normal()
 }

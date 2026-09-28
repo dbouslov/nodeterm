@@ -69,3 +69,11 @@ describe('Dock explicit routes', () => {
     expect(next.find((n) => n.id === 'succ')!.parentId).toBe('D')
   })
 })
+
+describe('retire cannot pull a node out of the Dock (review fix 4)', () => {
+  it('a caller outside the Dock naming a Dock member as successor is refused', () => {
+    const live = [...scene(), node('outer', 1700, 100, {}, { agentId: 'claude' })]
+    const plan = planRetire({ callerId: 'outer', successorId: 'seat', live, successorElsewhere: false, kanban: undefined, grid: 0 })
+    expect('error' in plan && plan.error).toMatch(/Dock/)
+  })
+})

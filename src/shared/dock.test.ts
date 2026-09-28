@@ -175,3 +175,21 @@ describe('dockOpenRefusal: a Dock member names where a new node goes (review fix
     expect(dockRefusal(nodes, 'move', ['w1'], 'D', 'seat')).toBeNull()
   })
 })
+
+import { leavingDock } from './dock'
+
+describe('leavingDock: which ids a move takes out of the Dock (review fix 4)', () => {
+  const nodes = [
+    { id: 'D', type: 'group', data: { fixture: 'dock' } },
+    { id: 'seat', parentId: 'D', type: 'terminal', data: {} },
+    { id: 'inner', parentId: 'D', type: 'group', data: {} },
+    { id: 'W', type: 'group', data: {} },
+    { id: 'w1', parentId: 'W', type: 'terminal', data: {} }
+  ]
+  it('names Dock members going outside it, and nothing else', () => {
+    expect(leavingDock(nodes, ['seat', 'w1'], null)).toEqual(['seat'])
+    expect(leavingDock(nodes, ['seat'], 'W')).toEqual(['seat'])
+    expect(leavingDock(nodes, ['seat'], 'inner')).toEqual([])
+    expect(leavingDock(nodes, ['w1'], null)).toEqual([])
+  })
+})

@@ -77,11 +77,10 @@ describe('Dock guards: every path (T8 step 4)', () => {
     expect(callbackBody('setPinned')).toContain('withoutDock(')
   })
   it('the frame menu of a Dock is the Dock menu, chosen by the frame alone', () => {
+    // The choice is the pure frameMenuFor (lib/dockMenu), which reads the frame alone.
     const body = callbackBody('groupItems')
-    const at = body.indexOf('dockFrameMenu(')
-    expect(at).toBeGreaterThan(-1)
-    // Chosen before anything reads selection or children.
-    expect(at).toBeLessThan(body.indexOf('selectedIds'))
+    expect(body).toContain('frameMenuFor(groupId, nodesRef.current as CanvasNode[], releaseDock, ')
+    expect(body).not.toContain('selectedIds')
   })
   it('Release Dock is human UI only: it never closes, ungroups, confirms or goes through a control verb', () => {
     const body = callbackBody('releaseDock')
@@ -106,5 +105,22 @@ describe('Dock placement rules on the live and cold open paths (review fix 3)', 
   })
   it('move passes the caller, so only a Dock member moves nodes in', () => {
     expect(caseBody('move')).toContain("dockRefusal(live, 'move', ids, targetGroup, sourceNodeId)")
+  })
+})
+
+describe('human move-out of the Dock asks first, in-app (review fix 4)', () => {
+  for (const name of ['removeFromGroup', 'moveSessionToGroup', 'reorderSession']) {
+    it(`${name} confirms through the in-app dialog before a Dock member leaves`, () => {
+      const body = callbackBody(name)
+      expect(body).toContain('confirmLeaveDock(')
+      expect(body).not.toMatch(/window\.confirm|\bconfirm\(/)
+    })
+  }
+  it('confirmLeaveDock names the Dock and uses setConfirm', () => {
+    const body = callbackBody('confirmLeaveDock')
+    expect(body).toContain('leavingDock(')
+    expect(body).toContain('setConfirm({')
+    expect(body).toMatch(/Dock/)
+    expect(body).not.toContain('window.confirm')
   })
 })

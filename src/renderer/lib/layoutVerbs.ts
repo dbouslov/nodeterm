@@ -26,6 +26,7 @@ import type { CanvasNodeState } from '@shared/types'
 import { commonChatSize, parseChatSize, resizeChats } from './chatSize'
 import { nodeRect, reflow } from './reflow'
 import { dockOf } from '@shared/dock'
+import { PLACEMENT_GAP } from '@shared/placement'
 
 export type LayoutPlan =
   | { ok: false; error: string }
@@ -120,22 +121,9 @@ export function planArrange(
     ? arrangeNodes(sizedLive, ids, { layout, cols, order: 'given' }) // --nodes order, not array order
     : alignNodes(live, ids, edge!)
   // The Dock (@shared/dock) is pinned, so it never moves; a top-level set must not be laid OVER it
-  // either. Refused rather than nudged: the caller picks a layout that clears it.
-  if (!container) {
-    const dock = dockOf(live)
-    if (dock) {
-      const d = nodeRect(dock)
-      const over = ids.filter((id) => {
-        const m = next.find((x) => x.id === id)
-        if (!m || m.id === dock.id || m.parentId) return false
-        const r = nodeRect(m)
-        return r.x < d.x + d.width && d.x < r.x + r.width && r.y < d.y + d.height && d.y < r.y + r.height
-      })
-      if (over.length) {
-        return { ok: false, error: `${verb}: that would lay ${over.join(', ')} over the Dock; leave the Dock out or pick a layout that clears it` }
-      }
-    }
-  }
+  // either. The laid-out block moves as ONE piece, right of the Dock or below it (whichever is the
+  // shorter move), so the layout the caller asked for keeps its shape.
+  if (!container) next = shiftClearOfDock(live, next, ids)
   // Tidying a frame's children usually leaves the frame oversized (it was sized to their
   // old scattered spots) — shrink it to hug the new layout, then let its neighbours and
   // the frames above it follow (lib/reflow). Top-level sets have no frame.
@@ -212,4 +200,25 @@ export function planStoredLayout(
     message: out.message + OFF_SCREEN_LAYOUT_NOTE,
     result: { ...out.result, offCanvas: true }
   }
+}
+
+/** `next` with the top-level members of `ids` translated as one block clear of the Dock, when any
+ *  of them would overlap it (PLACEMENT_GAP of air). Unchanged otherwise. */
+function shiftClearOfDock(live: CanvasNode[], next: CanvasNode[], ids: readonly string[]): CanvasNode[] {
+  const dock = dockOf(live)
+  if (!dock) return next
+  const d = nodeRect(dock)
+  const members = next.filter((m) => ids.includes(m.id) && m.id !== dock.id && !m.parentId)
+  const rects = members.map(nodeRect)
+  const hit = rects.some(
+    (r) => r.x < d.x + d.width + PLACEMENT_GAP && d.x - PLACEMENT_GAP < r.x + r.width && r.y < d.y + d.height + PLACEMENT_GAP && d.y - PLACEMENT_GAP < r.y + r.height
+  )
+  if (!hit) return next
+  const left = Math.min(...rects.map((r) => r.x))
+  const top = Math.min(...rects.map((r) => r.y))
+  const dx = d.x + d.width + PLACEMENT_GAP - left
+  const dy = d.y + d.height + PLACEMENT_GAP - top
+  const shift = dx <= dy ? { x: dx, y: 0 } : { x: 0, y: dy }
+  const moving = new Set(members.map((m) => m.id))
+  return next.map((n) => (moving.has(n.id) ? { ...n, position: { x: n.position.x + shift.x, y: n.position.y + shift.y } } : n))
 }

@@ -621,8 +621,17 @@ import {
 } from '@shared/settings-verb'
 import { applySettingsChange } from '../lib/settingsVerb'
 import { useExpiringDialog } from '../lib/useExpiringDialog'
-import { dockMarkRefusal, dockOpenRefusal, dockRefusal, idList, isDock, withoutDock } from '@shared/dock'
-import { dockFrameMenu } from '../lib/dockMenu'
+import {
+  dockMarkRefusal,
+  dockOpenRefusal,
+  dockRefusal,
+  idList,
+  isDock,
+  leavingDock,
+  withoutDock,
+  type DockShape
+} from '@shared/dock'
+import { frameMenuFor } from '../lib/dockMenu'
 import {
   alwaysConfirms,
   confirmExpiresAt,
@@ -5887,16 +5896,45 @@ export function Canvas() {
 
   // Detach single nodes from their group frame (the frame and its other children stay).
   // Counterpart of drag-into-group / `ungroup` (which dissolves the whole frame).
+  // A human may take a node out of the Dock, but only after a small in-app confirm naming it
+  // (@shared/dock). `run` goes ahead at once when nothing leaves the Dock.
+  const confirmLeaveDock = useCallback(
+    (nodes: readonly DockShape[], ids: readonly string[], target: string | null, run: () => void) => {
+      const leaving = leavingDock(nodes, ids, target)
+      if (!leaving.length) {
+        run()
+        return
+      }
+      const names = leaving.map((id) => {
+        const t = nodes.find((n) => n.id === id)
+        const title = (t?.data?.title ?? t?.title) as string | undefined
+        return title ? `"${title}"` : id
+      })
+      setConfirm({
+        message: `Take ${names.join(', ')} out of the Dock? The Dock keeps GO and its pages together.`,
+        confirmLabel: 'Take out',
+        onConfirm: () => {
+          setConfirm(null)
+          run()
+        },
+        onCancel: () => setConfirm(null)
+      })
+    },
+    [setConfirm]
+  )
+
   const removeFromGroup = useCallback(
     (ids: string[]) => {
-      setNodes((ns) => {
-        let next = ns as CanvasNode[]
-        for (const nid of ids) next = reparentNode(next, nid, null)
-        return next
+      confirmLeaveDock(nodesRef.current as CanvasNode[], ids, null, () => {
+        setNodes((ns) => {
+          let next = ns as CanvasNode[]
+          for (const nid of ids) next = reparentNode(next, nid, null)
+          return next
+        })
+        markDirty()
       })
-      markDirty()
     },
-    [setNodes, markDirty]
+    [setNodes, markDirty, confirmLeaveDock]
   )
 
   const ungroup = useCallback(
@@ -9038,11 +9076,8 @@ export function Canvas() {
     [setNodes, markDirty]
   )
 
-  const groupItems = useCallback(
+  const plainGroupItems = useCallback(
     (groupId: string, at?: { x: number; y: number }): MenuItem[] => {
-      // The Dock gets its own menu, chosen by the frame alone (not its children, not the
-      // selection), so an empty Dock can always be released (lib/dockMenu).
-      if (isDock(nodesRef.current.find((n) => n.id === groupId))) return dockFrameMenu(() => releaseDock(groupId))
       // Right-clicking a frame while other objects are selected is the natural way to say "put
       // these in here" (or "wrap all of us in a new frame"). Both are offered only when the pure
       // transform would actually do something.
@@ -9136,7 +9171,6 @@ export function Canvas() {
       ])
     },
     [
-      releaseDock,
       setNodesColor,
       setPinned,
       ungroup,
@@ -9149,6 +9183,14 @@ export function Canvas() {
       addToExistingGroup,
       groupSelection
     ]
+  )
+
+  // The frame menu. The Dock gets its own, chosen by the frame alone (not its children, not the
+  // selection), so an empty Dock can always be released (lib/dockMenu `frameMenuFor`).
+  const groupItems = useCallback(
+    (groupId: string, at?: { x: number; y: number }): MenuItem[] =>
+      frameMenuFor(groupId, nodesRef.current as CanvasNode[], releaseDock, () => plainGroupItems(groupId, at)),
+    [releaseDock, plainGroupItems]
   )
 
   /** Right-click menu for an ephemeral card. The generic node menu is wrong for one: every
@@ -13565,15 +13607,19 @@ export function Canvas() {
   // Sidebar drag-to-group: reparent a session into a canvas group (groupId) or out (null).
   const moveSessionToGroup = useCallback(
     (projectId: string, nodeId: string, groupId: string | null) => {
-      if (projectId === activeProjectId) {
-        setNodes((ns) => reparentNode(ns, nodeId, groupId))
-        markDirty()
-      } else {
-        useProjects.getState().moveNodeToGroup(projectId, nodeId, groupId)
-        void writeDisk()
-      }
+      const live = projectId === activeProjectId
+      const nodes = live ? (nodesRef.current as CanvasNode[]) : useProjects.getState().getProject(projectId)?.nodes ?? []
+      confirmLeaveDock(nodes, [nodeId], groupId, () => {
+        if (live) {
+          setNodes((ns) => reparentNode(ns, nodeId, groupId))
+          markDirty()
+        } else {
+          useProjects.getState().moveNodeToGroup(projectId, nodeId, groupId)
+          void writeDisk()
+        }
+      })
     },
-    [activeProjectId, setNodes, markDirty, writeDisk]
+    [activeProjectId, setNodes, markDirty, writeDisk, confirmLeaveDock]
   )
 
   // Sidebar reorder: place draggedId immediately before beforeId (sidebar order = node order),
@@ -13590,15 +13636,23 @@ export function Canvas() {
 
   const reorderSession = useCallback(
     (projectId: string, draggedId: string, beforeId: string) => {
-      if (projectId === activeProjectId) {
-        setNodes((ns) => reorderNodeBefore(ns, draggedId, beforeId))
-        markDirty()
-      } else {
-        useProjects.getState().reorderNode(projectId, draggedId, beforeId)
-        void writeDisk()
-      }
+      // A reorder joins the target's container: leaving the Dock that way asks first too.
+      const live = projectId === activeProjectId
+      const nodes: readonly DockShape[] = live
+        ? (nodesRef.current as CanvasNode[])
+        : useProjects.getState().getProject(projectId)?.nodes ?? []
+      const target = nodes.find((n) => n.id === beforeId)?.parentId ?? null
+      confirmLeaveDock(nodes, [draggedId], target, () => {
+        if (live) {
+          setNodes((ns) => reorderNodeBefore(ns, draggedId, beforeId))
+          markDirty()
+        } else {
+          useProjects.getState().reorderNode(projectId, draggedId, beforeId)
+          void writeDisk()
+        }
+      })
     },
-    [activeProjectId, setNodes, markDirty, writeDisk]
+    [activeProjectId, setNodes, markDirty, writeDisk, confirmLeaveDock]
   )
 
   // Sibling reorder for a FRAME row in the sessions sidebar. Distinct from reorderSession:

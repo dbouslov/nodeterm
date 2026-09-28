@@ -25,3 +25,25 @@ describe('dockFrameMenu', () => {
     }
   })
 })
+
+import { frameMenuFor } from './dockMenu'
+
+describe('frameMenuFor: the frame-menu choice (review fix 4, GO condition 2)', () => {
+  const dockOnly = [{ id: 'D', type: 'group', data: { fixture: 'dock' } }]
+  it('an EMPTY Dock (its GO chat gone) still offers Release Dock', () => {
+    const release = vi.fn()
+    const normal = vi.fn(() => [])
+    const rows = frameMenuFor('D', dockOnly, release, normal) as Row[]
+    const row = rows.find((r) => r.label === 'Release Dock')!
+    expect(row.disabled).toBeFalsy()
+    row.onClick!()
+    expect(release).toHaveBeenCalledWith('D')
+    expect(normal).not.toHaveBeenCalled()
+  })
+  it('an ordinary frame gets the ordinary menu', () => {
+    const normal = vi.fn(() => [{ type: 'separator' as const }])
+    const rows = frameMenuFor('G', [{ id: 'G', type: 'group', data: {} }], () => {}, normal)
+    expect(normal).toHaveBeenCalledTimes(1)
+    expect(rows).toEqual([{ type: 'separator' }])
+  })
+})

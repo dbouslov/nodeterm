@@ -143,3 +143,11 @@ export function dockOpenRefusal(
 export function idList(raw: string | undefined): string[] {
   return (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 }
+
+/** The ids of `ids` that a move to `target` (null = top level) takes OUT of the Dock. */
+export function leavingDock(nodes: readonly DockShape[], ids: readonly string[], target: string | null): string[] {
+  const dock = dockOf(nodes)
+  if (!dock) return []
+  const targetInDock = !!target && (target === dock.id || inDock(target, nodes))
+  return targetInDock ? [] : ids.filter((id) => inDock(id, nodes))
+}

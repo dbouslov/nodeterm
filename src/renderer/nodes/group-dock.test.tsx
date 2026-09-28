@@ -81,3 +81,11 @@ describe('the Dock frame', () => {
     expect(header).toContain(`height: ${GROUP_HEADER}px`)
   })
 })
+
+describe('GroupNode ungroup() refuses the Dock itself (review fix 4)', () => {
+  it('the local ungroup returns early for a Dock, not only by hiding its button', () => {
+    const src = readFileSync(resolve(process.cwd(), 'src/renderer/nodes/GroupNode.tsx'), 'utf8')
+    const at = src.indexOf('const ungroup = (): void => {')
+    expect(src.slice(at, at + 200)).toMatch(/if \(dock\) return/)
+  })
+})

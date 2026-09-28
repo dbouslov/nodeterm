@@ -20,7 +20,7 @@
 //    and is a no-op when the band is already there, so a second application cannot shift twice.
 import { GROUP_GAP } from '@shared/placement'
 import { isPinned, type CanvasNode } from '../state/workspace'
-import { inDock } from '@shared/dock'
+import { dockOf, inDock } from '@shared/dock'
 import { absolutePosition, type FocusableNode } from './nodeFocus'
 import type { Rect } from './nodeSizing'
 import { reflow } from './reflow'
@@ -46,6 +46,20 @@ const nodeH = (n: CanvasNode): number => n.measured?.height ?? (n.height as numb
 export function bandOf(n: { data?: Record<string, unknown> }): number {
   const b = n.data?.cardBand
   return typeof b === 'number' && Number.isFinite(b) && b > 0 ? b : 0
+}
+
+/** The most band `chat` may keep without its applied rect entering the Dock: the gap down to the
+ *  Dock's top when the chat sits above it and shares columns with it; unlimited otherwise. */
+export function dockRoom(chat: CanvasNode, nodes: readonly CanvasNode[]): number {
+  const dock = dockOf(nodes)
+  if (!dock || inDock(chat.id, nodes)) return Infinity
+  const all = nodes as unknown as FocusableNode[]
+  const c = absolutePosition(chat as unknown as FocusableNode, all)
+  const d = absolutePosition(dock as unknown as FocusableNode, all)
+  const cBottom = c.y + nodeH(chat)
+  const columns = c.x < d.x + nodeW(dock) && d.x < c.x + nodeW(chat)
+  if (!columns || cBottom > d.y) return Infinity
+  return Math.max(0, d.y - cBottom)
 }
 
 /** Whether `chat` draws no helper cards: its eye is closed (`hideFanout`), or it sits in the Dock
@@ -250,6 +264,12 @@ export class CardBands {
         }
         const expiry = nextExpiry(track, now)
         if (expiry !== null) wake(expiry)
+      }
+      // The Dock (@shared/dock) is pinned, so reflow can never push it away: a band on a chat
+      // above it stops at its top edge. Cards that still reach it are a geometry finding.
+      if (want !== null && want > 0) {
+        want = Math.min(want, dockRoom(chat, cur))
+        if (want === have) want = null
       }
       if (want === null) {
         track.pointerSince = null

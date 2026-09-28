@@ -49,10 +49,8 @@ describe('layout verbs and the Dock', () => {
     ['arrange the Dock children', 'arrange', { nodes: 'seat,page', layout: 'row' }]
   ] as const)('%s: the Dock never moves and nothing lands on it', (_name, verb, args) => {
     const plan = planArrange(scene(), verb, args, 0)
-    if (!plan.ok) {
-      expect(plan.error).toMatch(/Dock/)
-      return
-    }
+    // Review fix 4: never refused; the laid-out block is shifted clear of the Dock instead.
+    if (!plan.ok) throw new Error(plan.error)
     unmoved(plan.nodes)
     expect(plan.nodes.filter(onDock).map((x) => x.id)).toEqual([])
   })
@@ -61,5 +59,27 @@ describe('layout verbs and the Dock', () => {
     const out = restructureNodes(scene(), [])
     unmoved(out)
     expect(out.filter(onDock).map((x) => x.id)).toEqual([])
+  })
+})
+
+describe('a top-level arrange shifts the whole block clear of the Dock (review fix 4)', () => {
+  it('nodes below and to the right of the Dock: one block, same shape, clear of the Dock', () => {
+    const plain = planArrange(
+      scene().filter((x) => x.id !== 'D' && x.parentId !== 'D'),
+      'arrange',
+      { nodes: 'a,b,c' },
+      0
+    )
+    const plan = planArrange(scene(), 'arrange', { nodes: 'a,b,c' }, 0)
+    if (!plan.ok || !plain.ok) throw new Error('refused')
+    const at = (ns: CanvasNode[], id: string) => ns.find((x) => x.id === id)!.position
+    // Same relative layout as without a Dock.
+    const d0 = { x: at(plan.nodes, 'a').x - at(plain.nodes, 'a').x, y: at(plan.nodes, 'a').y - at(plain.nodes, 'a').y }
+    for (const id of ['b', 'c']) {
+      expect(at(plan.nodes, id)).toEqual({ x: at(plain.nodes, id).x + d0.x, y: at(plain.nodes, id).y + d0.y })
+    }
+    expect(d0).not.toEqual({ x: 0, y: 0 })
+    expect(plan.nodes.filter(onDock).map((x) => x.id)).toEqual([])
+    unmoved(plan.nodes)
   })
 })

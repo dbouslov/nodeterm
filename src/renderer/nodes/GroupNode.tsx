@@ -37,6 +37,9 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
   // The frame element, observed for viewport visibility by the worktree-status tick below.
   const frameRef = useRef<HTMLDivElement | null>(null)
 
+  // The Dock (@shared/dock) is furniture: its own neutral chrome, no color paint, no selection
+  // ring, no resize handle and no hover Ungroup (its frame menu offers Release Dock instead).
+  const dock = isDock({ id, type: 'group', data })
   const wt = data.worktree
   // The store is the ONLY caller of the worktree/status git IPC; it throttles
   // (WORKTREE_STATUS_THROTTLE_MS) and is epoch-guarded, so asking often is free.
@@ -132,6 +135,8 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
   // re-reconciles (the worktree is offered as an orphan again, and a stale registration is
   // pruned) instead of the binding silently vanishing until the next project switch.
   const ungroup = (): void => {
+    // The Dock is never dissolved here, whatever renders this (@shared/dock).
+    if (dock) return
     if (wt) worktreeActionHandler?.(id, 'unbind')
     setNodes((ns) => ungroupNodes(ns as CanvasNode[], id))
   }
@@ -139,9 +144,6 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
   // A bound frame must read as a checkout at a glance: solid border + a stronger tint of the
   // group's OWN color (no new palette). Stale drops the hue entirely and goes muted/warning.
   const bound = !!wt
-  // The Dock (@shared/dock) is furniture: its own neutral chrome, no color paint, no selection
-  // ring, no resize handle and no hover Ungroup (its frame menu offers Release Dock instead).
-  const dock = isDock({ id, type: 'group', data })
   const frameClass = [
     'group-node',
     dock ? 'group-node--dock' : '',

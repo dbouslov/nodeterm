@@ -23,6 +23,10 @@ import {
   type CanvasNode
 } from '../state/workspace'
 import { assignNode } from './kanban'
+import { dockRefusal } from '@shared/dock'
+
+const caller0ParentId = (live: readonly CanvasNode[], id: string): string | null =>
+  live.find((n) => n.id === id)?.parentId ?? null
 
 export type RetirePlan =
   | { error: string }
@@ -60,6 +64,9 @@ export function planRetire(input: RetireInput): RetirePlan {
   // The caller's LOGICAL rect, not its display rect. A maximized caller or successor is first put
   // back where its restore toggle would put it (every frame the maximize grew refits back down); a
   // collapsed caller hands over the height it expands to. The successor ends expanded and un-maximized.
+  // The successor moves into the caller's frame: out of the Dock only if the caller is a Dock seat.
+  const dockNo = dockRefusal(live, 'move', [successorId], caller0ParentId(live, callerId), callerId)
+  if (dockNo) return { error: `retire: ${dockNo}` }
   const base = restoreMaximizedNode(restoreMaximizedNode(live, callerId), successorId)
   const caller = base.find((n) => n.id === callerId)
   if (!caller) return { error: 'retire: your node is not on this canvas — nothing changed' }
