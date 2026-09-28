@@ -89,3 +89,22 @@ describe('GroupNode ungroup() refuses the Dock itself (review fix 4)', () => {
     expect(src.slice(at, at + 200)).toMatch(/if \(dock\) return/)
   })
 })
+
+describe('Dock label scales like other frame labels at fit-all zoom (review fix 5)', () => {
+  it('lock and name sit in one tag that scales with --group-label-boost, inside the 34 px strip', () => {
+    const host = render({ fixture: 'dock', pinned: true })
+    const tag = host.querySelector('.group-node__label > .group-node__docktag')!
+    expect(tag).not.toBeNull()
+    expect(tag.querySelector('.group-node__lock svg')).not.toBeNull()
+    expect(tag.querySelector('.group-node__name')).not.toBeNull()
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8')
+    const at = css.indexOf('.group-node__docktag {')
+    expect(at).toBeGreaterThan(-1)
+    const rule = css.slice(at, css.indexOf('}', at))
+    expect(rule).toContain('transform: scale(var(--group-label-boost, 1))')
+    expect(rule).toContain('transform-origin: 0 50%')
+    // The strip itself does not scale: it stays the layout's 34 px.
+    const strip = css.slice(css.indexOf('.group-node--dock .group-node__label {'))
+    expect(strip.slice(0, strip.indexOf('}'))).toContain('transform: none')
+  })
+})

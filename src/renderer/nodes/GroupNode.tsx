@@ -179,8 +179,18 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
 
       <div className="group-node__label">
         {dock ? (
-          <span className="group-node__lock" title="The Dock: fixed in place. Release it from its frame menu.">
-            <IconLock />
+          // Lock and name in one tag that scales with --group-label-boost at fit-all zoom, like
+          // every other frame label, while the 34 px strip around it keeps the layout's height.
+          <span className="group-node__docktag">
+            <span className="group-node__lock" title="The Dock: fixed in place. Release it from its frame menu.">
+              <IconLock />
+            </span>
+            <input
+              className="group-node__name nodrag"
+              value={data.title}
+              spellCheck={false}
+              onChange={(e) => updateNodeData(id, { title: e.target.value })}
+            />
           </span>
         ) : (
           <Tooltip label="Color">
@@ -202,12 +212,14 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
             }}
           />
         )}
-        <input
-          className="group-node__name nodrag"
-          value={data.title}
-          spellCheck={false}
-          onChange={(e) => updateNodeData(id, { title: e.target.value })}
-        />
+        {!dock && (
+          <input
+            className="group-node__name nodrag"
+            value={data.title}
+            spellCheck={false}
+            onChange={(e) => updateNodeData(id, { title: e.target.value })}
+          />
+        )}
         {wt && (
           <div className="group-node__wt nodrag">
             {stale ? (
