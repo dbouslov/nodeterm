@@ -749,6 +749,13 @@ describe('SessionHostClient attach rollback', () => {
       )
     ).rejects.toThrow('initial attach refused')
     await firstClosed
+    // The server hung up, but the CLIENT may not have read the FIN yet. On macOS a write into that
+    // gap fails with EPIPE in the write callback, which the send contract (session-host-client.ts
+    // :784-790) deliberately reports as uncertainty, not as resendable — so a hasSession issued
+    // here would reject instead of reconnecting. Wait until the client has dropped the socket; the
+    // assertion that matters is the command list on connection 2 (no ghost attach replayed).
+    const internals = client as unknown as { socket: net.Socket | null }
+    await vi.waitFor(() => expect(internals.socket).toBeNull())
 
     await expect(within(client.hasSession('nt-no-ghost'))).resolves.toBe(true)
     await new Promise((resolve) => setTimeout(resolve, 20))

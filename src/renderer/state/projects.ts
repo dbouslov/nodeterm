@@ -635,6 +635,12 @@ export const useProjects = create<ProjectsState>((set, get) => ({
               // the next save writes it back, so a dangling rope lived in project.json forever.
               ...(p.ropes
                 ? { ropes: p.ropes.filter((r) => !deleted.has(r.source) && !deleted.has(r.target)) }
+                : {}),
+              // Context bridges likewise: on screen Canvas prunes a link whose endpoint is gone. Off
+              // screen the stored one stayed in project.json (the link map already skipped it,
+              // buildBackgroundLinkMaps filters dangling bridges), so this is file hygiene.
+              ...(p.bridges
+                ? { bridges: p.bridges.filter((b) => !deleted.has(b.source) && !deleted.has(b.target)) }
                 : {})
             }
       )

@@ -700,12 +700,13 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
     // A SUBAGENT's own teardown carries `subagentType` (see `grokRawFields`); it rides along so a
     // renderer consumer can tell the child's end from the parent's (lib/agentHookSeen).
     const subagentType = p.subagentType ?? p.subagent_type
-    return {
-      ...base,
-      kind: 'session',
-      sessionPhase: 'end',
-      ...(typeof subagentType === 'string' && subagentType ? { subagentType } : {})
+    if (typeof subagentType === 'string' && subagentType) {
+      // Its `sessionId` is the CHILD's own (as on subagent_stop below). Both the mirror and Canvas
+      // record identity off any event's sessionId, so carrying it would re-point the node's
+      // session at the child and a cold/phone resume would target it.
+      return { nodeId: env.nodeId, agentId: env.agentId, kind: 'session', sessionPhase: 'end', subagentType }
     }
+    return { ...base, kind: 'session', sessionPhase: 'end' }
   }
 
   // grok's turn start. Flagged newTurn so per-turn fan-out clears once per turn, not per tool event.
@@ -763,11 +764,16 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
     if (!cancelReason) return null
     // Transport the classified reason state-less: the mirror owns the session-aware transition
     // and can ignore a subagent cancellation without losing session identity.
+    const subagentType = p.subagentType ?? p.subagent_type
+    // A SUBAGENT's cancellation carries the child's sessionId (as session_end and subagent_stop
+    // do), and identity is recorded off any event's sessionId, so it is dropped here. The test is
+    // `!== undefined` because that is how the mirror decides "subagent" (resolveGrokStopCancelled).
+    const { sessionId, ...rest } = base
     return {
-      ...base,
+      ...(subagentType !== undefined ? rest : { ...rest, sessionId }),
       kind: 'state',
       cancelReason,
-      subagentType: p.subagentType ?? p.subagent_type,
+      subagentType,
       lastMessage
     }
   }
