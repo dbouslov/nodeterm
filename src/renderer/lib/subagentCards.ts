@@ -5,6 +5,7 @@ import type { SubagentViz } from '../state/agentNodes'
 import type { EdgeData } from './edgeKinds'
 import { containerOrigin } from './gridSnap'
 import { ephemeralDims, loopCardTitle, offsetFrom, type LoopCardUi } from './loopCards'
+import { cardOffset, cardRowOf, clampToChat } from './cardBand'
 
 /**
  * The subagent cards drawn under an agent node: ONE builder for the canvas render and for the
@@ -17,16 +18,13 @@ import { ephemeralDims, loopCardTitle, offsetFrom, type LoopCardUi } from './loo
  * (lib/closeTargets) rather than recognising them by shape.
  */
 
-/** Cards per row under the agent, and the cell they are laid out on. */
-const COLS = 4
-const COL_W = 240
-const ROW_H = 140
-
-/** One card (plus its fan-out edge) per subagent whose agent is on `nodes`. Pure. */
+/** One card (plus its fan-out edge) per subagent whose agent is on `nodes`, in its agent's card row
+ *  (lib/cardBand) after the loop card of an agent in `loopParents`. Pure. */
 export function buildSubagentCards(
   nodes: readonly CanvasNode[],
   byId: Readonly<Record<string, SubagentViz>>,
-  ui: LoopCardUi
+  ui: LoopCardUi,
+  loopParents: ReadonlySet<string> = new Set()
 ): { nodes: CanvasNode[]; edges: Edge[] } {
   const eNodes: CanvasNode[] = []
   const eEdges: Edge[] = []
@@ -37,29 +35,26 @@ export function buildSubagentCards(
   for (const [pid, childIds] of Object.entries(byParent)) {
     const parent = nodes.find((n) => n.id === pid)
     if (!parent || parent.data.hideFanout) continue
-    const ph = parent.measured?.height ?? (parent.height as number) ?? 400
+    const row = cardRowOf(parent, loopParents.has(pid), childIds, ui.sizes)
     const accent = agentConfig((parent.data.agentId as string) ?? 'claude')?.color ?? '#d97757'
     const snap = ui.snap ? { grid: ui.snap, origin: containerOrigin(parent.parentId, nodes as CanvasNode[]) } : undefined
-    childIds.forEach((cid, i) => {
+    childIds.forEach((cid) => {
       const v = byId[cid]
+      const dims = ephemeralDims(ui, cid, 230, 480, 96, 340)
+      const width = clampToChat(parent, dims.width)
       eNodes.push({
         id: cid,
         type: 'subagent',
         // Same coordinate-space rule as the loop card: inherit the agent's group.
         ...(parent.parentId ? { parentId: parent.parentId } : {}),
-        position: offsetFrom(
-          parent,
-          ui.positions[cid],
-          {
-            x: (i % COLS) * COL_W,
-            y: ph + 60 + Math.floor(i / COLS) * ROW_H
-          },
-          snap
-        ),
+        position: offsetFrom(parent, ui.positions[cid], cardOffset(parent, row, cid), snap),
         draggable: true,
         selectable: false, // see the loop card (lib/loopCards)
         selected: ui.selectedId === cid,
-        ...ephemeralDims(ui, cid, 230, 480, 96, 340),
+        // No wider than its agent, so the row never hangs past the agent's right edge.
+        ...dims,
+        width,
+        style: { ...dims.style, width },
         data: {
           // The card's NAME for `list` / `geometry` (the card itself draws `subagentTask`): one
           // line, capped, or a task holding "\nterm-x [claude] …" forges a row in every listing.

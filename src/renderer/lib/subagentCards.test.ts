@@ -40,7 +40,7 @@ const geo = (nodes: CanvasNode[]): GeometryReport => {
 }
 
 describe('buildSubagentCards — the subagent cards drawn under an agent', () => {
-  it('lays the cards out in rows of four under their agent, owned by it', () => {
+  it('lays the cards out in a row under their agent, wrapping at its right edge, owned by it', () => {
     const byId = Object.fromEntries(
       ['t0', 't1', 't2', 't3', 't4'].map((id) => [id, sub('a', `task ${id}`)])
     )
@@ -48,13 +48,16 @@ describe('buildSubagentCards — the subagent cards drawn under an agent', () =>
     expect(cards.map((c) => c.id)).toEqual(['t0', 't1', 't2', 't3', 't4'])
     expect(cards[0]).toMatchObject({
       type: 'subagent',
-      position: { x: 100, y: 660 },
+      // GROUP_GAP (24) under the 400px agent (lib/cardBand).
+      position: { x: 100, y: 624 },
       width: 230,
       height: 96,
       data: { title: 'task t0', ownerNodeId: 'a', subagentType: 'general-purpose', subagentState: 'working' }
     })
-    expect(cards[3].position).toEqual({ x: 820, y: 660 })
-    expect(cards[4].position).toEqual({ x: 100, y: 800 })
+    // Two 230px cards fit a 600px agent; the third wraps to a row 96 + 10 below.
+    expect(cards[1].position).toEqual({ x: 340, y: 624 })
+    expect(cards[2].position).toEqual({ x: 100, y: 730 })
+    expect(cards[4].position).toEqual({ x: 100, y: 836 })
     expect(edges[0]).toMatchObject({ source: 'a', target: 't0', type: 'circuit' })
   })
 
@@ -89,8 +92,8 @@ describe('subagent cards reach list and geometry', () => {
     expect(long.data.title).toHaveLength(LOOP_CARD_TITLE_MAX)
   })
 
-  it('geometry reports the card with its owner and counts it as a card', () => {
-    // The card hangs 60px under a 400px agent (y 660..756) and lies on `b`, past the 700px frame.
+  it('geometry reports the card with its owner and counts its problems as node problems', () => {
+    // The card hangs 24px under a 400px agent (y 624..720) and lies on `b`, past the 700px frame.
     const nodes = [frame('f', 0, 0, 900, 700), agent('a', 200, 200, 'f'), agent('b', 0, 650, 'f')]
     const { nodes: cards } = buildSubagentCards(nodes, { t: sub('a', 'x') }, base)
     expect(geo([...nodes, ...cards]).nodes.find((g) => g.id === 't')).toMatchObject({
@@ -98,12 +101,11 @@ describe('subagent cards reach list and geometry', () => {
       owner: 'a',
       parentId: 'f',
       x: 200,
-      y: 660
+      y: 624
     })
     const reply = geometryReply([...nodes, ...cards])
     if (!reply.ok) throw new Error(reply.error)
-    expect(reply.message.split('\n')[0]).toBe(
-      '2 nodes, 1 frame, 0 overlaps, 1 outside its frame; 1 card: 1 overlap, 1 outside its frame'
-    )
+    // A card on another node, or out of its chat's frame, is a normal finding (lib/cardBand).
+    expect(reply.message.split('\n')[0]).toBe('2 nodes, 1 frame, 1 overlap, 2 outside their frames; 1 card: 0 overlaps')
   })
 })

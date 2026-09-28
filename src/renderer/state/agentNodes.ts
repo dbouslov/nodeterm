@@ -83,6 +83,12 @@ interface AgentNodesState {
   setPosition(id: string, offset: { x: number; y: number }): void
   setSize(id: string, size: { width: number; height: number }): void
   toggleExpanded(id: string): void
+  /**
+   * Collapse every expanded card except `keep`. Opening a card is a peek (lib/cardBand): the layout
+   * keeps room only for the collapsed row, so Canvas collapses it when the user clicks anywhere
+   * else, and `finish` collapses a subagent's card, so a forgotten peek never covers a chat.
+   */
+  collapseExpanded(keep?: string): void
   /** Drop a card's dragged position + resized size, returning it to its laid-out spot. */
   resetPlacement(id: string): void
   start(toolUseId: string, viz: Omit<SubagentViz, 'state' | 'startedAt'>): void
@@ -245,6 +251,16 @@ export const useAgentNodes = create<AgentNodesState>((set) => ({
       return next
     }),
 
+  collapseExpanded: (keep) =>
+    set((s) => {
+      const open = Object.keys(s.expanded).filter((id) => s.expanded[id] && id !== keep)
+      if (!open.length) return s
+      const expanded = { ...s.expanded }
+      for (const id of open) delete expanded[id]
+      if (open.some((id) => id.startsWith('loop-'))) saveLoopOverrides({ ...s, expanded })
+      return { expanded }
+    }),
+
   resetPlacement: (id) =>
     set((s) => {
       if (!(id in s.positions) && !(id in s.sizes)) return s
@@ -269,7 +285,9 @@ export const useAgentNodes = create<AgentNodesState>((set) => ({
       // Async subagents end via a <task-notification> that carries no timing stats — fall
       // back to the card's own elapsed time so the duration doesn't vanish on completion.
       const durationMs = result.durationMs ?? Date.now() - prev.startedAt
-      return { byId: { ...s.byId, [toolUseId]: { ...prev, state: 'done', ...result, durationMs } } }
+      // A finished subagent's peek closes (lib/cardBand): its card must not stay over a chat.
+      const expanded = s.expanded[toolUseId] ? { ...s.expanded, [toolUseId]: false } : s.expanded
+      return { byId: { ...s.byId, [toolUseId]: { ...prev, state: 'done', ...result, durationMs } }, expanded }
     }),
 
   appendActivity: (toolUseId, chunk) =>

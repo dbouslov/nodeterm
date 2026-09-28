@@ -7,6 +7,7 @@
 
 import { absolutePosition, type FocusableNode } from './nodeFocus'
 import { coldPlaceBelow, type ColdNode } from './coldOpen'
+import { bandOf } from './cardBand'
 import { addSelectionToGroup, type CanvasNode } from '../state/workspace'
 import {
   centerOf,
@@ -23,7 +24,8 @@ import {
 export const liveBox = (n: CanvasNode, all: readonly CanvasNode[], dflt: Size): Box => ({
   ...absolutePosition(n as FocusableNode, all as readonly FocusableNode[]),
   w: (n.measured?.width as number | undefined) ?? (n.width as number | undefined) ?? dflt.w,
-  h: (n.measured?.height as number | undefined) ?? (n.height as number | undefined) ?? dflt.h
+  // Its applied height (lib/cardBand): a chat's card band is room nothing may land in.
+  h: ((n.measured?.height as number | undefined) ?? (n.height as number | undefined) ?? dflt.h) + bandOf(n)
 })
 
 /** Every live node except `skip` as a ROOT-space box — what a new node must not land on. */
