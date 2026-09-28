@@ -2846,7 +2846,10 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   lineage rule; the frame grows and its neighbours move, lib/reflow) and the WHOLE panel box is
   placed clear, not just its first member; a re-verify with the same label in the same container
   reuses the earlier panel frame, the new round below the old (nothing of the old round is closed).
-  It used to be a top-level frame on top of the caller's own frame, one more per re-verify.
+  Only a frame `verify` made is reused (persisted `verifyPanel: true`, literal-true on both
+  serializer seams like `pinned`), and a reuse whose growth would run over a pinned node falls back
+  to a new frame. It used to be a top-level frame on top of the caller's own frame, one more per
+  re-verify. `spawn-team` places its team frame the same way (`layoutTeamFrame`), never reusing one.
   It is **composition, not new machinery** — the two primitives above are the whole implementation.
   Prompt/lens logic is the pure, unit-tested `renderer/lib/verifyPanel.ts`; two wordings there are
   load-bearing and must not be "tightened away": reviewers are told **not to edit** (a panel is N

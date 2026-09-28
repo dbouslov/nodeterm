@@ -628,7 +628,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  with the same label (default `Verify: <target title>`) reuses that frame, the new round below the',
     '  old. Close a finished round yourself: `close --node <ids> --compact`.',
     '- `spawn-team --label L --team \'[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]\'` — one agent per',
-    '  role (max 8), arranged in a grid, wrapped in a labeled group, each connected + context-linked to you.',
+    '  role (max 8), arranged in a grid, wrapped in a labeled group placed inside your own frame (which',
+    '  grows to hold it), clear of other nodes, each connected + context-linked to you.',
     '  `model` is per role, so one team can mix tiers — give an expensive model to the role that needs it',
     '  and a cheap one to the rest. Same rule as `--model` below. A role may carry `promptFile`',
     '  (absolute path) instead of `prompt` — same multi-line-brief semantics as `--prompt-file`.',
@@ -1219,7 +1220,8 @@ Verbs:
   (\`close --node <ids> --compact\`).
 - \`spawn-team --label "Frontend Team" --team '[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]'\` —
   open one agent per role (each prompt starts that member working), arrange them in a grid,
-  wrap them in a labeled group, and connect + context-link each to you. Max 8 roles per call.
+  wrap them in a labeled group placed inside your own frame (which grows to hold it), clear of
+  other nodes, and connect + context-link each to you. Max 8 roles per call.
   \`model\` is optional and per role — the same selector \`--model\` applies, so a single team can
   run its heavy role on a large model and the rest on a cheap one. A role may carry
   \`promptFile\` (absolute path) instead of \`prompt\` — the \`--prompt-file\` semantics per role,

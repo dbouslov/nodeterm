@@ -1,9 +1,9 @@
-// WHERE A `verify` REVIEW PANEL GOES (candidates item 3). The panel is a lineage child of the caller,
-// so it follows the rule every agent-opened node follows (livePlacement.ts): it joins the CALLER's
-// innermost frame, which grows to hold it and moves its own neighbours out of the way (lib/reflow).
-// It used to be wrapped as a TOP-LEVEL frame placed below the caller — and since the caller's own
-// frames are not obstacles for a node that joins them, that put the panel on top of the caller's
-// frame. Five re-verifies left five overlapping "Verify:"
+// WHERE A `verify` REVIEW PANEL (or a `spawn-team` frame) GOES (candidates item 3). Both are lineage
+// children of the caller, so they follow the rule every agent-opened node follows
+// (livePlacement.ts): they join the CALLER's innermost frame, which grows to hold them and moves its
+// own neighbours out of the way (lib/reflow). Each used to be wrapped as a TOP-LEVEL frame placed
+// below the caller — and since the caller's own frames are not obstacles for a node that joins them,
+// that put the frame on top of the caller's frame. Five re-verifies left five overlapping "Verify:"
 // frames over an orchestrator's frame.
 //
 // The rules, all pure and pinned in verifyPanelLayout.test.ts:
@@ -16,6 +16,7 @@
 //    Only a frame `verify` made is reused (`data.verifyPanel`, persisted): a user's own frame, a
 //    team or a worktree frame that happens to carry the title is never taken over. And a reuse whose
 //    growth would run over a PINNED node (which `settle` cannot move) falls through to rule 1.
+//    A team (`layoutTeamFrame`) is never reused.
 
 import { ancestorFrameIds, placeChild, type Box } from '@shared/placement'
 import {
@@ -72,6 +73,13 @@ export function layoutVerifyPanel(nodes: CanvasNode[], opts: LayoutOpts): Layout
     if (reused) return { nodes: reused, groupId: earlier.id, reused: true }
   }
   return newFrame(nodes, src, container, opts, grid, true)
+}
+
+/** `spawn-team`: the same placement as a review panel (rule 1), never a reuse. */
+export function layoutTeamFrame(nodes: CanvasNode[], opts: LayoutOpts): LayoutResult {
+  const src = nodes.find((n) => n.id === opts.srcId)
+  if (!src) throw new Error(`spawn-team: no caller node ${opts.srcId}`)
+  return newFrame(nodes, src, openedFrameId(nodes, src, []), opts, opts.grid ?? 0, false)
 }
 
 /** Rule 2: the new round below the earlier one, inside its frame — or null when the frame's growth

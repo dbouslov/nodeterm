@@ -503,7 +503,6 @@ import {
   ancestorFrameIds,
   centerOf,
   placeByHand,
-  placeChild,
   placeDependent,
   placeInFrame,
   type Box,
@@ -566,7 +565,7 @@ import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/Kan
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { planStoredMinimize } from '../lib/storedMinimize'
-import { layoutVerifyPanel } from '../lib/verifyPanelLayout'
+import { layoutTeamFrame, layoutVerifyPanel } from '../lib/verifyPanelLayout'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid, type Rect } from '../lib/nodeSizing'
 import { nodeRect, reflow, resizesEnded, settle } from '../lib/reflow'
@@ -10828,10 +10827,7 @@ export function Canvas() {
       // (`withOpenedNode`) — the SOURCE's frame for a lineage child, its DEPS' for a dependent.
       // `reserved` holds the siblings this same call has placed — `setNodes` is async, so nodesRef
       // does not show them yet.
-      const srcBox = liveBox(src, nodesRef.current, { w: 600, h: 400 })
-      const srcFrames = ancestorFrameIds(nodesRef.current, src.id)
       const reserved: Box[] = []
-      const obstacles = (): Box[] => [...liveBoxes(srcFrames), ...reserved]
       /** CENTER for the i-th node of an `open-*` call, reserved so its siblings clear it. */
       const placeNext = (i: number, after?: string[]): { x: number; y: number } => {
         const size = newNodeSize()
@@ -11955,25 +11951,18 @@ export function Canvas() {
               return r.title ? { ...node, data: { ...node.data, title: r.title, titleAuto: false } } : node
             })
             const memberIds = members.map((m) => m.id)
-            // One computed array: append → arrange in a grid below the conductor → wrap in a group.
-            let next: CanvasNode[] = [...live, ...members]
-            // `origin` is a TOP-LEFT: the first clear child slot below the conductor.
-            next = arrangeNodes(next, memberIds, {
-              layout: 'grid',
-              origin: placeChild(obstacles(), srcBox, newNodeSize(), 0)
+            // One computed array: append → arrange in a grid → wrap in a group, placed as one box
+            // below the conductor INSIDE its frame (which grows and moves its neighbours), clear of
+            // everything — the same placement as a review panel (lib/verifyPanelLayout). A team
+            // frame is never reused.
+            const team = layoutTeamFrame([...live, ...members], {
+              srcId: sourceNodeId,
+              panelIds: memberIds,
+              label: args.label || 'Team',
+              grid: snapGridNow(),
+              skip: new Set(Object.keys(useAgentNodes.getState().byId))
             })
-            const groupCount = next.filter((nd) => nd.type === 'group').length
-            const existingGroupIds = new Set(
-              next.filter((node) => node.type === 'group').map((node) => node.id)
-            )
-            next = groupSelectedNodes(next, memberIds, groupCount, snapGridNow())
-            const teamGroup = next.find(
-              (node) => node.type === 'group' && !existingGroupIds.has(node.id)
-            )!
-            next = next.map((nd) =>
-              nd.id === teamGroup.id ? { ...nd, data: { ...nd.data, title: args.label || 'Team' } } : nd
-            )
-            setNodes(next)
+            setNodes(team.nodes)
             memberIds.forEach((mid) => connect(mid))
             // …and CONTEXT-link each member back to the conductor, so the fan-out has a fan-in:
             // once a member is done, the conductor reads what it produced via get-linked-context
@@ -11991,9 +11980,9 @@ export function Canvas() {
             reply({
               ok: true,
               message:
-                `spawned ${memberIds.length} member(s) in group ${teamGroup.id}: ${memberIds.join(', ')}` +
+                `spawned ${memberIds.length} member(s) in group ${team.groupId}: ${memberIds.join(', ')}` +
                 (bridged.length ? `\ncontext-linked to you: ${bridged.join(', ')}` : ''),
-              result: { groupId: teamGroup.id, memberIds, linked: bridged }
+              result: { groupId: team.groupId, memberIds, linked: bridged }
             })
             return
           }

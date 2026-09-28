@@ -151,6 +151,8 @@ describe('parseControlRequest', () => {
       const entry = body.slice(at, body.indexOf('\n- ', at))
       expect(entry).toMatch(/your\s+(own\s+)?frame/i)
       expect(entry).toMatch(/same\s+label[\s\S]*reuses/i)
+      const t = body.indexOf('`spawn-team --label')
+      expect(body.slice(t, body.indexOf('\n- ', t))).toMatch(/inside\s+your\s+own\s+frame/i)
     }
   })
 

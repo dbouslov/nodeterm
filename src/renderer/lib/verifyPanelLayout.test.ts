@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { ROW_GAP } from '@shared/placement'
 import { flowToNodeStates, nodeStatesToFlow, rootPosition, type CanvasNode } from '../state/workspace'
-import { layoutVerifyPanel } from './verifyPanelLayout'
+import { layoutTeamFrame, layoutVerifyPanel } from './verifyPanelLayout'
 
 const node = (id: string, x: number, y: number, w: number, h: number, extra: Partial<CanvasNode> = {}): CanvasNode =>
   ({
@@ -180,5 +180,35 @@ describe('layoutVerifyPanel — a review panel never lands on anything', () => {
     const start = [node('caller', 0, 0, 600, 400), node('right', 700, 480, 600, 400), member('r1'), member('r2'), member('r3')]
     const { nodes } = layoutVerifyPanel(start, { srcId: 'caller', panelIds: ['r1', 'r2', 'r3'], label: 'Verify: X' })
     expect(overlaps(nodes)).toEqual([])
+  })
+})
+
+describe('layoutTeamFrame — spawn-team uses the same placement, never reuse', () => {
+  const canvas = (): CanvasNode[] => [
+    frame('go', 0, 0, 700, 560, 'General Orchestrator'),
+    child('caller', 'go', 28, 62, 600, 400),
+    node('below', 0, 700, 600, 400)
+  ]
+
+  it('nests the team frame in the caller\'s frame, overlapping nothing', () => {
+    const { nodes, groupId } = layoutTeamFrame([...canvas(), member('m1'), member('m2')], {
+      srcId: 'caller',
+      panelIds: ['m1', 'm2'],
+      label: 'Team'
+    })
+    const g = nodes.find((n) => n.id === groupId)!
+    expect(g.parentId).toBe('go')
+    expect(g.data.title).toBe('Team')
+    expect(g.data.verifyPanel).toBeUndefined()
+    expect(overlaps(nodes)).toEqual([])
+    expect(strays(nodes)).toEqual([])
+  })
+
+  it('a second team with the same label gets its own frame', () => {
+    const first = layoutTeamFrame([...canvas(), member('m1')], { srcId: 'caller', panelIds: ['m1'], label: 'Team' })
+    const second = layoutTeamFrame([...first.nodes, member('m2')], { srcId: 'caller', panelIds: ['m2'], label: 'Team' })
+    expect(second.groupId).not.toBe(first.groupId)
+    expect(overlaps(second.nodes)).toEqual([])
+    expect(strays(second.nodes)).toEqual([])
   })
 })
