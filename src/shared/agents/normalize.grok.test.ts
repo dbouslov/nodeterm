@@ -36,6 +36,15 @@ describe('normalizeGrok — lifecycle', () => {
     expect(junk && 'subagentType' in junk).toBe(false)
   })
 
+  it("does not carry a SUBAGENT's own sessionId on its session_end (it is the child's, not the node's)", () => {
+    // The mirror and Canvas record identity off ANY event's sessionId, so the child's id would
+    // replace the parent's and a cold/phone resume would target the child.
+    const child = normalizeGrok(env({ hookEventName: 'session_end', sessionId: 'c1', subagentType: 'explore' }))
+    expect(child && 'sessionId' in child).toBe(false)
+    const parent = normalizeGrok(env({ hookEventName: 'session_end', sessionId: 's1' }))
+    expect(parent?.sessionId).toBe('s1')
+  })
+
   it('treats user_prompt_submit as the turn start (newTurn)', () => {
     const e = normalizeGrok(env({ hookEventName: 'user_prompt_submit', sessionId: 's1', prompt: 'ship it' }))
     expect(e).toMatchObject({ kind: 'state', state: 'working', newTurn: true, task: 'ship it' })
