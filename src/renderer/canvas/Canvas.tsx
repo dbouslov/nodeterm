@@ -622,6 +622,18 @@ import {
 import { applySettingsChange } from '../lib/settingsVerb'
 import { useExpiringDialog } from '../lib/useExpiringDialog'
 import {
+  dockMarkRefusal,
+  dockOpenRefusal,
+  dockRefusal,
+  idList,
+  isDock,
+  leavingDock,
+  withoutDock,
+  type DockShape
+} from '@shared/dock'
+import { frameMenuFor } from '../lib/dockMenu'
+import {
+  alwaysConfirms,
   confirmExpiresAt,
   isWaivableVerb,
   waivedNotice,
@@ -5620,7 +5632,13 @@ export function Canvas() {
 
   // ---- multi-node actions (context menu) ----
   const deleteNodes = useCallback(
-    (ids: string[], opts?: { record?: boolean }) => {
+    (requested: string[], opts?: { record?: boolean }) => {
+      // The Dock frame is never deleted from here, whoever asks (@shared/dock): Cmd+W, the menus,
+      // the kanban, the close verb and retire all funnel through this. Release Dock comes first.
+      const ids = withoutDock(requested, nodesRef.current as CanvasNode[])
+      if (ids.length < requested.length) {
+        setNotice({ kind: 'info', text: 'The Dock stays. To remove it, use Release Dock in its frame menu first.' })
+      }
       const set = new Set(ids)
       // Issue #531: the agent-status entry is dropped a few lines below, and the live session id
       // lives nowhere else — so the record runs BEFORE the teardown. One funnel with the off-screen
@@ -5878,20 +5896,51 @@ export function Canvas() {
 
   // Detach single nodes from their group frame (the frame and its other children stay).
   // Counterpart of drag-into-group / `ungroup` (which dissolves the whole frame).
+  // A human may take a node out of the Dock, but only after a small in-app confirm naming it
+  // (@shared/dock). `run` goes ahead at once when nothing leaves the Dock.
+  const confirmLeaveDock = useCallback(
+    (nodes: readonly DockShape[], ids: readonly string[], target: string | null, run: () => void) => {
+      const leaving = leavingDock(nodes, ids, target)
+      if (!leaving.length) {
+        run()
+        return
+      }
+      const names = leaving.map((id) => {
+        const t = nodes.find((n) => n.id === id)
+        const title = (t?.data?.title ?? t?.title) as string | undefined
+        return title ? `"${title}"` : id
+      })
+      setConfirm({
+        message: `Take ${names.join(', ')} out of the Dock? The Dock keeps GO and its pages together.`,
+        confirmLabel: 'Take out',
+        onConfirm: () => {
+          setConfirm(null)
+          run()
+        },
+        onCancel: () => setConfirm(null)
+      })
+    },
+    [setConfirm]
+  )
+
   const removeFromGroup = useCallback(
     (ids: string[]) => {
-      setNodes((ns) => {
-        let next = ns as CanvasNode[]
-        for (const nid of ids) next = reparentNode(next, nid, null)
-        return next
+      confirmLeaveDock(nodesRef.current as CanvasNode[], ids, null, () => {
+        setNodes((ns) => {
+          let next = ns as CanvasNode[]
+          for (const nid of ids) next = reparentNode(next, nid, null)
+          return next
+        })
+        markDirty()
       })
-      markDirty()
     },
-    [setNodes, markDirty]
+    [setNodes, markDirty, confirmLeaveDock]
   )
 
   const ungroup = useCallback(
     (groupId: string) => {
+      // The Dock is never dissolved by hand either: Release Dock first (@shared/dock).
+      if (isDock(nodesRef.current.find((n) => n.id === groupId))) return
       // Dissolving the frame destroys its worktree binding (the frame IS the binding) while the
       // children — and their `data.cwd` — stay. That makes Ungroup (and the group menu's "Delete
       // (keeps nodes)", which is the same call) a binding-dropping path, so it goes through
@@ -7409,7 +7458,8 @@ export function Canvas() {
    *  `pinned: true`; dragging by hand still works. */
   const setPinned = useCallback(
     (ids: string[], on: boolean) => {
-      const set = new Set(ids)
+      // The Dock stays pinned: unpinning skips it (@shared/dock).
+      const set = new Set(on ? ids : withoutDock(ids, nodesRef.current as CanvasNode[]))
       setNodes((ns) =>
         ns.map((n) => (set.has(n.id) ? { ...n, data: { ...n.data, pinned: on ? true : undefined } } : n))
       )
@@ -9012,7 +9062,21 @@ export function Canvas() {
     [addAgentNode, connectedProjectIdForHost]
   )
 
-  const groupItems = useCallback(
+  // Release Dock (the Dock frame's own menu): human UI only. It clears the mark and nothing else,
+  // so the frame stays where it is, pinned, with everything inside it. No control verb, no close.
+  const releaseDock = useCallback(
+    (groupId: string) => {
+      setNodes((ns) =>
+        ns.map((n) =>
+          n.id === groupId ? { ...n, draggable: undefined, data: { ...n.data, fixture: undefined } } : n
+        )
+      )
+      markDirty()
+    },
+    [setNodes, markDirty]
+  )
+
+  const plainGroupItems = useCallback(
     (groupId: string, at?: { x: number; y: number }): MenuItem[] => {
       // Right-clicking a frame while other objects are selected is the natural way to say "put
       // these in here" (or "wrap all of us in a new frame"). Both are offered only when the pure
@@ -9119,6 +9183,14 @@ export function Canvas() {
       addToExistingGroup,
       groupSelection
     ]
+  )
+
+  // The frame menu. The Dock gets its own, chosen by the frame alone (not its children, not the
+  // selection), so an empty Dock can always be released (lib/dockMenu `frameMenuFor`).
+  const groupItems = useCallback(
+    (groupId: string, at?: { x: number; y: number }): MenuItem[] =>
+      frameMenuFor(groupId, nodesRef.current as CanvasNode[], releaseDock, () => plainGroupItems(groupId, at)),
+    [releaseDock, plainGroupItems]
   )
 
   /** Right-click menu for an ephemeral card. The generic node menu is wrong for one: every
@@ -10543,6 +10615,11 @@ export function Canvas() {
             // `--group` / `--after` name ids INSIDE this project, which is the caller's own — the
             // reason `--project` refuses both (spec §2.2) does not apply here, so both are resolved
             // against the serialized nodes rather than declined.
+            const coldDockNo = dockOpenRefusal(coldNodes, verb, coldSrc.id, idList(args.after), args.group || undefined)
+            if (coldDockNo) {
+              reply({ ok: false, error: coldDockNo })
+              return
+            }
             const coldGroup = coldResolveGroup(coldNodes, args.group, verb)
             if (!coldGroup.ok) {
               reply({ ok: false, error: coldGroup.error })
@@ -11123,6 +11200,13 @@ export function Canvas() {
       // Validate `--group` (open-terminal / open-claude / open-agent): must name an existing
       // group frame. Returns its id, or null with the error already replied.
       const resolveIntoGroup = (): string | null | undefined => {
+        // The Dock (@shared/dock): a Dock member names where its node goes (an implicit open would
+        // join the Dock or land loose beside it), and only a Dock member opens into the Dock.
+        const dockNo = dockOpenRefusal(ctlNodes(), verb, sourceNodeId, idList(args.after), args.group || undefined)
+        if (dockNo) {
+          reply({ ok: false, error: dockNo })
+          return null
+        }
         if (!args.group) return undefined
         const g = nodesRef.current.find((nd) => nd.id === args.group)
         if (!g || g.type !== 'group') {
@@ -11640,6 +11724,11 @@ export function Canvas() {
               reply({ ok: false, error: `ungroup: --group names no group frame (${gid || 'missing'})` })
               return
             }
+            const dockNo = dockRefusal(live, 'ungroup', [gid])
+            if (dockNo) {
+              reply({ ok: false, error: dockNo })
+              return
+            }
             const freed = live.filter((nd) => nd.parentId === gid).map((nd) => nd.id)
             setNodes(ungroupNodes(live, gid))
             markDirty()
@@ -11658,6 +11747,12 @@ export function Canvas() {
             const targetGroup = toTop ? null : args.group!.trim()
             if (targetGroup && !live.some((nd) => nd.id === targetGroup && nd.type === 'group')) {
               reply({ ok: false, error: `move: --group names no group frame (${targetGroup})` })
+              return
+            }
+            // Nothing moves out of the Dock and the Dock itself never moves (@shared/dock).
+            const dockNo = dockRefusal(live, 'move', ids, targetGroup, sourceNodeId)
+            if (dockNo) {
+              reply({ ok: false, error: dockNo })
               return
             }
             let next = live
@@ -12357,10 +12452,59 @@ export function Canvas() {
             // and everything inside it is left in place by Restructure, arrange / align and frame
             // fitting (`isPinned`). Subagent/loop cards are not persisted, so a pin would vanish.
             const id = (args.node ?? '').trim()
+            // `--set dock`: the one-time Dock mark (@shared/dock). The routing is argument-aware
+            // (`alwaysConfirms`): this leg ALWAYS asks the human and no waiver skips it, while plain
+            // on|off below keeps its old unconfirmed behavior.
+            if (alwaysConfirms(verb, args)) {
+              const refusal = dockMarkRefusal(nodesRef.current as CanvasNode[], sourceNodeId, id)
+              if (refusal) {
+                reply({ ok: false, error: refusal })
+                return
+              }
+              if (confirmBusy()) {
+                reply({ ok: false, error: 'a confirmation is already pending, try again' })
+                return
+              }
+              const frameTitle = (nodesRef.current.find((n) => n.id === id)?.data.title as string) || id
+              setConfirm({
+                message: `Agent "${srcTitle}" wants to make the frame "${frameTitle}" the Dock: pinned in its slot, and agents can no longer close, ungroup, unpin or empty it. Make it the Dock?`,
+                confirmLabel: 'Make Dock',
+                requestedBy: srcTitle,
+                expiresAt: confirmExpiresAt(Date.now()),
+                onExpire: () => reply({ ok: false, error: 'expired before the user answered' }),
+                onConfirm: () => {
+                  setConfirm(null)
+                  // Re-checked: the canvas may have changed while the dialog was open.
+                  const late = dockMarkRefusal(nodesRef.current as CanvasNode[], sourceNodeId, id)
+                  if (late) {
+                    reply({ ok: false, error: late })
+                    return
+                  }
+                  setNodes((nodes) =>
+                    nodes.map((node) =>
+                      node.id === id
+                        ? { ...node, draggable: false, data: { ...node.data, pinned: true, fixture: 'dock' as const } }
+                        : node
+                    )
+                  )
+                  markDirty()
+                  reply({ ok: true, message: `marked ${id} as the Dock`, result: { id, fixture: 'dock' } })
+                },
+                onCancel: () => reply({ ok: false, error: 'denied by user' })
+              })
+              return
+            } // end dock mark
             const target = nodesRef.current.find((node) => node.id === id)
             if (!target || target.type === 'subagent' || target.type === 'loop') {
               reply({ ok: false, error: `pin: --node names no pinnable node (${id})` })
               return
+            }
+            if (args.set === 'off') {
+              const dockNo = dockRefusal(nodesRef.current as CanvasNode[], 'unpin', [id])
+              if (dockNo) {
+                reply({ ok: false, error: dockNo })
+                return
+              }
             }
             const on = args.set === 'on'
             setNodes((nodes) =>
@@ -12663,6 +12807,12 @@ export function Canvas() {
               return
             }
             const closeIds = targets.kind === 'single' ? [targets.id] : targets.ids
+            // Before any confirm or waiver: the Dock and its pages are not an agent's to close.
+            const dockNo = dockRefusal(ctlNodes(), 'close', closeIds)
+            if (dockNo) {
+              reply({ ok: false, error: dockNo })
+              return
+            }
             const closeMessage =
               targets.kind === 'single'
                 ? `Agent "${srcTitle}" wants to close node ${targets.id}. Close it?`
@@ -13010,8 +13160,10 @@ export function Canvas() {
    * else would — a load restores every persisted rope and the next save writes it back.
    */
   const closeStoredNodes = useCallback(
-    (projectId: string, ids: readonly string[], opts?: { userClose?: boolean }) => {
+    (projectId: string, requested: readonly string[], opts?: { userClose?: boolean }) => {
       const store = useProjects.getState()
+      // The off-screen twin of deleteNodes' Dock rule: the Dock frame is never removed here.
+      const ids = withoutDock(requested, store.getProject(projectId)?.nodes ?? [])
       // Recorded against the STORED project, before the teardown drops the live session id — the
       // same funnel `deleteNodes` records through, over the saved nodes instead of the live ones.
       // Only a close the USER made reaches the global ⇧⌘T stack (see `recordNodeClose`); an
@@ -13455,15 +13607,19 @@ export function Canvas() {
   // Sidebar drag-to-group: reparent a session into a canvas group (groupId) or out (null).
   const moveSessionToGroup = useCallback(
     (projectId: string, nodeId: string, groupId: string | null) => {
-      if (projectId === activeProjectId) {
-        setNodes((ns) => reparentNode(ns, nodeId, groupId))
-        markDirty()
-      } else {
-        useProjects.getState().moveNodeToGroup(projectId, nodeId, groupId)
-        void writeDisk()
-      }
+      const live = projectId === activeProjectId
+      const nodes = live ? (nodesRef.current as CanvasNode[]) : useProjects.getState().getProject(projectId)?.nodes ?? []
+      confirmLeaveDock(nodes, [nodeId], groupId, () => {
+        if (live) {
+          setNodes((ns) => reparentNode(ns, nodeId, groupId))
+          markDirty()
+        } else {
+          useProjects.getState().moveNodeToGroup(projectId, nodeId, groupId)
+          void writeDisk()
+        }
+      })
     },
-    [activeProjectId, setNodes, markDirty, writeDisk]
+    [activeProjectId, setNodes, markDirty, writeDisk, confirmLeaveDock]
   )
 
   // Sidebar reorder: place draggedId immediately before beforeId (sidebar order = node order),
@@ -13480,15 +13636,23 @@ export function Canvas() {
 
   const reorderSession = useCallback(
     (projectId: string, draggedId: string, beforeId: string) => {
-      if (projectId === activeProjectId) {
-        setNodes((ns) => reorderNodeBefore(ns, draggedId, beforeId))
-        markDirty()
-      } else {
-        useProjects.getState().reorderNode(projectId, draggedId, beforeId)
-        void writeDisk()
-      }
+      // A reorder joins the target's container: leaving the Dock that way asks first too.
+      const live = projectId === activeProjectId
+      const nodes: readonly DockShape[] = live
+        ? (nodesRef.current as CanvasNode[])
+        : useProjects.getState().getProject(projectId)?.nodes ?? []
+      const target = nodes.find((n) => n.id === beforeId)?.parentId ?? null
+      confirmLeaveDock(nodes, [draggedId], target, () => {
+        if (live) {
+          setNodes((ns) => reorderNodeBefore(ns, draggedId, beforeId))
+          markDirty()
+        } else {
+          useProjects.getState().reorderNode(projectId, draggedId, beforeId)
+          void writeDisk()
+        }
+      })
     },
-    [activeProjectId, setNodes, markDirty, writeDisk]
+    [activeProjectId, setNodes, markDirty, writeDisk, confirmLeaveDock]
   )
 
   // Sibling reorder for a FRAME row in the sessions sidebar. Distinct from reorderSession:

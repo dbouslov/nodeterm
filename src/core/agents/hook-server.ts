@@ -27,6 +27,7 @@ import {
   type IdentityDecision
 } from './node-identity-policy'
 import { posixQuote } from '../../shared/ssh'
+import { alwaysConfirms } from '../../shared/control-confirm'
 
 // v2 advertises NODETERM_NODE_TOKEN_DIR so clients read their per-node capability from a file
 // rather than receiving it in argv. Nothing consumes the posted version server-side, so the bump
@@ -271,6 +272,9 @@ export const SNAPSHOT_CONTROL_REFUSAL = 'Snapshot refused.'
 export const SETTINGS_CONTROL_REFUSAL = 'Settings access refused.'
 /** One sentence, names what was refused, no diagnosis — house style for every refusal here. */
 export const REPORT_ISSUE_CONTROL_REFUSAL = 'Issue reporting refused.'
+
+/** Same posture for the Dock mark (`pin --set dock`, T8): only a verified caller may raise it. */
+export const DOCK_MARK_CONTROL_REFUSAL = 'Dock mark refused.'
 
 /** The verified-only refusal, worded for the verb that was refused. */
 export function verifiedRefusalFor(verb: string): string {
@@ -641,6 +645,19 @@ class HookServer {
             } else {
               res.writeHead(403, { 'content-type': 'application/json' })
               res.end(JSON.stringify({ ok: false, error: refusal }))
+            }
+            return
+          }
+          // ARGUMENT-AWARE VERIFIED-ONLY CALLS: `pin --set dock` (the Dock mark) needs a verified
+          // caller, on the verdict like the set above, while plain `pin --set on|off` keeps its old
+          // routing. Same refusal shape as the verified-only verbs.
+          if (alwaysConfirms(verb, args) && verdict !== 'verified') {
+            if (wantsText) {
+              res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+              res.end(`${DOCK_MARK_CONTROL_REFUSAL}\n`)
+            } else {
+              res.writeHead(403, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: DOCK_MARK_CONTROL_REFUSAL }))
             }
             return
           }

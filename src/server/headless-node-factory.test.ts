@@ -341,6 +341,74 @@ describe('HeadlessNodeFactory', () => {
     expect(projectFile.bridges?.some((edge) => edge.source === id || edge.target === id)).toBe(false)
   })
 
+  it('refuses to close the Dock frame or a Dock page, before ownership and before killing anything (T8)', async () => {
+    const workspace = await store.load({ sideline: false })
+    const project = workspace.projects[0]
+    project.nodes.push(
+      {
+        id: 'dock',
+        kind: 'group',
+        position: { x: 40, y: 40 },
+        size: { width: 1400, height: 1100 },
+        title: 'GO',
+        color: '#fff',
+        group: null,
+        pinned: true,
+        fixture: 'dock'
+      } as CanvasNodeState,
+      {
+        id: 'dock-page',
+        kind: 'sticky',
+        parentId: 'dock',
+        position: { x: 24, y: 536 },
+        size: { width: 640, height: 300 },
+        title: 'Needs David',
+        color: '#fff',
+        group: null
+      } as CanvasNodeState
+    )
+    await store.save(workspace)
+    for (const node of ['dock', 'dock-page']) {
+      await expect(factory.close('term-source', { node }, true)).resolves.toMatchObject({
+        ok: false,
+        error: expect.stringContaining('Dock')
+      })
+    }
+    expect(pty.destroys).toEqual([])
+    const after = (await store.load({ sideline: false })).projects[0].nodes
+    expect(after.some((n) => n.id === 'dock')).toBe(true)
+    expect(after.some((n) => n.id === 'dock-page')).toBe(true)
+  })
+
+  it('an implicit open from a Dock member lands top-level, clear of the Dock (T8)', async () => {
+    const workspace = await store.load({ sideline: false })
+    const project = workspace.projects[0]
+    project.nodes.push({
+      id: 'dock',
+      kind: 'group',
+      position: { x: 0, y: 0 },
+      size: { width: 1400, height: 1100 },
+      title: 'GO',
+      color: '#fff',
+      group: null,
+      pinned: true,
+      fixture: 'dock'
+    } as CanvasNodeState)
+    const src = project.nodes.find((n) => n.id === 'term-source')!
+    src.parentId = 'dock'
+    await store.save(workspace)
+    const res = await factory.openAgent('term-source', { agent: 'claude', prompt: 'x' }, true)
+    expect(res).toMatchObject({ ok: true })
+    // Allowed (kickoff's open-then-group), filed top-level and clear of the Dock.
+    const id = (res.result as { id: string }).id
+    const after = (await store.load({ sideline: false })).projects[0].nodes
+    const n = after.find((x) => x.id === id)!
+    expect(n.parentId).toBeUndefined()
+    const clear =
+      n.position.x >= 1400 || n.position.y >= 1100 || n.position.x + n.size.width <= 0 || n.position.y + n.size.height <= 0
+    expect(clear).toBe(true)
+  })
+
   it('refuses a different caller without killing or removing the owned spawn', async () => {
     const opened = await factory.openTerminal('term-source', {}, true)
     const id = (opened.result as { id: string }).id

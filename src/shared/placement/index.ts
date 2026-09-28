@@ -4,6 +4,8 @@
 // Every box is ROOT space (callers resolve frame children first). Nothing here ever moves an
 // existing node; the engine answers "where" and reserves nothing — callers append what they place.
 
+import { inDock, isDock, type DockShape } from '../dock'
+
 export interface Box { x: number; y: number; w: number; h: number }
 export interface Size { w: number; h: number }
 export type Point = { x: number; y: number }
@@ -132,14 +134,22 @@ export function ancestorFrameIds(
  * (test/acceptance/placement-parity.test.ts).
  */
 export function containerJoinedBy(
-  nodes: readonly { id: string; parentId?: string }[],
+  nodes: readonly DockShape[],
   sourceId: string,
   deps: readonly { id: string }[]
 ): string | undefined {
   const anchors = deps.filter((d) => d.id !== sourceId)
-  if (!anchors.length) return nodes.find((n) => n.id === sourceId)?.parentId
-  const containers = new Set(anchors.map((d) => nodes.find((n) => n.id === d.id)?.parentId))
-  return containers.size === 1 ? [...containers][0] : undefined
+  let container: string | undefined
+  if (!anchors.length) container = nodes.find((n) => n.id === sourceId)?.parentId
+  else {
+    const containers = new Set(anchors.map((d) => nodes.find((n) => n.id === d.id)?.parentId))
+    container = containers.size === 1 ? [...containers][0] : undefined
+  }
+  // The Dock (@shared/dock) is walled off: an IMPLICIT join never files into it or into a frame
+  // inside it. The node stays top-level, and the Dock is then an obstacle like any other frame.
+  // Explicit routes (retire, `--group <dock>`, `move`) do not come through here.
+  if (container && (isDock(nodes.find((n) => n.id === container)) || inDock(container, nodes))) return undefined
+  return container
 }
 
 /**
@@ -148,7 +158,7 @@ export function containerJoinedBy(
  * obstacles), or none at all for a node that stays top-level and so must clear every frame.
  */
 export function framesJoinedBy(
-  nodes: readonly { id: string; parentId?: string }[],
+  nodes: readonly DockShape[],
   sourceId: string,
   deps: readonly { id: string }[]
 ): Set<string> {

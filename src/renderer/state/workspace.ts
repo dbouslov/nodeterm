@@ -86,6 +86,8 @@ export interface NodeData {
   pinned?: boolean
   /** A `verify` review panel frame — see `CanvasNodeState.verifyPanel`. */
   verifyPanel?: boolean
+  /** The orchestrator's fixed frame, see `CanvasNodeState.fixture` and @shared/dock. */
+  fixture?: 'dock'
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /** Canvas px reserved under the node for its docked card row — see `CanvasNodeState.cardBand`. */
@@ -2043,6 +2045,8 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
   // React Flow requires a parent node to appear before its children. With nested frames a flat
   // "groups first" sort is not enough (two frames compare equal), so `groupsFirst` re-emits the
   // frames depth-first from the root at the end of this function.
+  // One Dock per canvas (@shared/dock): only the FIRST frame carrying the flag keeps it.
+  let dockSeen = false
   const mapped = states.map((raw) => {
     // The SDK chat node was removed (2026-07). A persisted chat node degrades into a sticky that
     // keeps its place and tells the user how to continue the conversation — chat sessions are
@@ -2069,6 +2073,9 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
     }
     const collapsed = !!n.collapsed
     const height = collapsed ? COLLAPSED_HEIGHT : n.size.height
+    // The Dock flag is frame-only, and the first Dock wins; a later one or a non-frame loses it.
+    const dock = n.fixture === 'dock' && n.kind === 'group' && !dockSeen
+    if (dock) dockSeen = true
     // Legacy migration: nodes saved before `agentId` existed marked Claude via the 'claude'
     // tag. Backfill agentId so saved workspaces keep working.
     let agentId = n.agentId
@@ -2078,6 +2085,8 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
       // Default to 'terminal' for nodes saved before the kind field existed.
       type: n.kind ?? 'terminal',
       ...((n.kind ?? 'terminal') === 'group' ? { dragHandle: '.group-node__label' } : {}),
+      // The Dock keeps its slot: not even a hand drag moves it (@shared/dock).
+      ...(dock ? { draggable: false } : {}),
       position: n.position,
       width: n.size.width,
       height,
@@ -2093,8 +2102,10 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         tags: n.tags,
         collapsed,
         // Hand-editable input: only a literal true pins — a stray "yes" must not freeze a layout.
-        pinned: n.pinned === true ? true : undefined,
+        // The Dock is always pinned (@shared/dock).
+        pinned: n.pinned === true || dock ? true : undefined,
         verifyPanel: n.verifyPanel === true ? true : undefined,
+        fixture: dock ? ('dock' as const) : undefined,
         hideFanout: n.hideFanout,
         cardBand: normalizeCardBand(n.cardBand),
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
@@ -2180,6 +2191,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         collapsed: n.data.collapsed,
         pinned: n.data.pinned === true ? true : undefined,
         verifyPanel: n.data.verifyPanel === true ? true : undefined,
+        fixture: n.data.fixture === 'dock' && n.type === 'group' ? ('dock' as const) : undefined,
         hideFanout: n.data.hideFanout,
         cardBand: normalizeCardBand(n.data.cardBand),
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out
@@ -2243,7 +2255,9 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
   // A peer's node never brings the exec-enabling fields with it (@shared/node-exec): they are
   // per-machine settings, and letting one into the live array is exactly how it ends up harvested
   // into this machine's "trusted" workspace.json on the next save.
-  const incoming = nodeStatesToFlow([sanitizeInboundNode(m.node)])[0]
+  // The Dock flag (@shared/dock) is local too: a peer can neither set, clear nor duplicate it, so
+  // it is stripped here and the local node's own flag is carried across below.
+  const incoming = nodeStatesToFlow([{ ...sanitizeInboundNode(m.node), fixture: undefined }])[0]
   const idx = nodes.findIndex((n) => n.id === m.node.id)
   if (idx === -1) {
     // Append, then re-sort: React Flow requires a parent to appear BEFORE its children, and a peer
@@ -2252,8 +2266,10 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
   }
   const prev = nodes[idx]
   const next = nodes.slice()
+  const keepDock = prev.data.fixture === 'dock'
   next[idx] = {
     ...incoming,
+    ...(keepDock ? { draggable: false } : {}),
     selected: prev.selected,
     // Local-only data (initialCommand / respawnNonce / remote) is not serialized, so it
     // is not in `incoming` — carry it. Every serialized key IS present on incoming.data (as a value
@@ -2267,6 +2283,8 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
       ...prev.data,
       ...incoming.data,
       shell: prev.data.shell,
+      fixture: prev.data.fixture,
+      ...(keepDock ? { pinned: true } : {}),
       ...(incoming.data.ssh && prev.data.ssh?.extraArgs
         ? {
             ssh: {

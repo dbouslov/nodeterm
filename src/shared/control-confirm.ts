@@ -68,6 +68,16 @@ export function isWaivableVerb(verb: string): boolean {
 }
 
 /**
+ * Argument-aware routing: the control CALLS that always raise a human confirm which no waiver
+ * (session, project, always, bypass) can skip, although their verb otherwise raises none.
+ * Today one: `pin --set dock`, the one-time Dock mark (@shared/dock). Plain `pin --set on|off`
+ * stays unconfirmed, and `pin` is in neither DESTRUCTIVE_VERBS nor CONFIRM_WAIVABLE_VERBS.
+ */
+export function alwaysConfirms(verb: string, args: { set?: string }): boolean {
+  return verb === 'pin' && args.set === 'dock'
+}
+
+/**
  * The persisted (machine-local) half of the waivers — `settings.controlConfirmWaivers`.
  *
  * NEVER `project.json`. A permission mode already travels through a git-shared project file, and

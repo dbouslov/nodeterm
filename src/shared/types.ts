@@ -395,6 +395,9 @@ export interface CanvasNodeState {
   /** group-only: this frame is a `verify` review panel, so a re-verify with the same label may add
    *  its round to it. Only a literal `true` counts; a frame without it is never taken over. */
   verifyPanel?: boolean
+  /** group-only: 'dock' marks the orchestrator's fixed frame (@shared/dock). Only the literal
+   *  'dock' survives a load; anything else is dropped. */
+  fixture?: 'dock'
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
   /** Agent nodes only: canvas px reserved under the node for its docked subagent/loop card row

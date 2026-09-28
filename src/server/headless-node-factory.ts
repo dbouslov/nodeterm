@@ -14,6 +14,7 @@ import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/s
 import { applyAnnotation, parseAnnotateArgs } from '../shared/node-annotation'
 import { minimizeIds, minimizeReply, planMinimize } from '../shared/minimize'
 import { containerJoinedBy, framesJoinedBy, placeOpened, type Box } from '../shared/placement'
+import { dockRefusal } from '../shared/dock'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
   AGENT_CONFIG,
@@ -783,6 +784,11 @@ export class HeadlessNodeFactory {
 
       const ids = [...new Set((args.node ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
       if (!ids.length) return { ok: false, error: 'close requires --node <id>' }
+      // The Dock (@shared/dock) and its pages are never closed by an agent, whoever spawned them.
+      for (const project of workspace.projects) {
+        const dockNo = dockRefusal(project.nodes, 'close', ids)
+        if (dockNo) return { ok: false, error: dockNo }
+      }
 
       // Validate the WHOLE list before killing anything. A mixed owned/unowned request is one
       // refusal, never a partial destructive success whose surviving ids the caller must guess.

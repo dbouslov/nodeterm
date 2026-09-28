@@ -5,7 +5,7 @@ import type { SubagentViz } from '../state/agentNodes'
 import type { EdgeData } from './edgeKinds'
 import { containerOrigin } from './gridSnap'
 import { ephemeralDims, loopCardTitle, offsetFrom, type LoopCardUi } from './loopCards'
-import { cardOffset, cardRowOf, clampToChat } from './cardBand'
+import { cardOffset, cardRowOf, clampToChat, fanoutHidden } from './cardBand'
 
 /**
  * The subagent cards drawn under an agent node: ONE builder for the canvas render and for the
@@ -34,7 +34,7 @@ export function buildSubagentCards(
   }
   for (const [pid, childIds] of Object.entries(byParent)) {
     const parent = nodes.find((n) => n.id === pid)
-    if (!parent || parent.data.hideFanout) continue
+    if (!parent || fanoutHidden(parent, nodes)) continue
     const row = cardRowOf(parent, loopParents.has(pid), childIds, ui.sizes)
     const accent = agentConfig((parent.data.agentId as string) ?? 'claude')?.color ?? '#d97757'
     const snap = ui.snap ? { grid: ui.snap, origin: containerOrigin(parent.parentId, nodes as CanvasNode[]) } : undefined

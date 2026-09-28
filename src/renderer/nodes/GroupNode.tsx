@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Tooltip } from '../components/Tooltip'
-import { IconClose, IconUngroup } from '../components/icons'
+import { IconClose, IconLock, IconUngroup } from '../components/icons'
+import { isDock } from '@shared/dock'
 import { NodeResizer, useReactFlow, type NodeProps } from '@xyflow/react'
 import { NODE_MIN_SIZES } from '../lib/nodeSizing'
 import { ungroupNodes, type CanvasNode } from '../state/workspace'
@@ -36,6 +37,9 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
   // The frame element, observed for viewport visibility by the worktree-status tick below.
   const frameRef = useRef<HTMLDivElement | null>(null)
 
+  // The Dock (@shared/dock) is furniture: its own neutral chrome, no color paint, no selection
+  // ring, no resize handle and no hover Ungroup (its frame menu offers Release Dock instead).
+  const dock = isDock({ id, type: 'group', data })
   const wt = data.worktree
   // The store is the ONLY caller of the worktree/status git IPC; it throttles
   // (WORKTREE_STATUS_THROTTLE_MS) and is epoch-guarded, so asking often is free.
@@ -131,6 +135,8 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
   // re-reconciles (the worktree is offered as an orphan again, and a stale registration is
   // pruned) instead of the binding silently vanishing until the next project switch.
   const ungroup = (): void => {
+    // The Dock is never dissolved here, whatever renders this (@shared/dock).
+    if (dock) return
     if (wt) worktreeActionHandler?.(id, 'unbind')
     setNodes((ns) => ungroupNodes(ns as CanvasNode[], id))
   }
@@ -140,7 +146,8 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const bound = !!wt
   const frameClass = [
     'group-node',
-    selected ? 'selected' : '',
+    dock ? 'group-node--dock' : '',
+    selected && !dock ? 'selected' : '',
     bound ? 'group-node--worktree' : '',
     bound && stale ? 'group-node--worktree-stale' : ''
   ]
@@ -151,31 +158,51 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
     <div
       ref={frameRef}
       className={frameClass}
-      style={{
-        borderColor: bound && stale ? undefined : data.color,
-        background: bound && stale ? undefined : `${data.color}${bound ? '1c' : '0f'}`,
-        // Rounded selection ring (box-shadow follows border-radius, unlike the resizer line).
-        boxShadow: selected ? `0 0 0 1.5px ${data.color}` : undefined
-      }}
+      style={
+        dock
+          ? undefined
+          : {
+              borderColor: bound && stale ? undefined : data.color,
+              background: bound && stale ? undefined : `${data.color}${bound ? '1c' : '0f'}`,
+              // Rounded selection ring (box-shadow follows border-radius, unlike the resizer line).
+              boxShadow: selected ? `0 0 0 1.5px ${data.color}` : undefined
+            }
+      }
     >
       <NodeResizer
         minWidth={NODE_MIN_SIZES.group.width}
         minHeight={NODE_MIN_SIZES.group.height}
-        isVisible={selected}
+        isVisible={selected && !dock}
         color={data.color}
         lineStyle={{ borderColor: 'transparent' }}
       />
 
       <div className="group-node__label">
-        <Tooltip label="Color">
-          <button
-            className="group-node__dot nodrag"
-            style={{ background: data.color }}
-            aria-label="Color"
-            onClick={() => setShowColors((v) => !v)}
-          />
-        </Tooltip>
-        {showColors && (
+        {dock ? (
+          // Lock and name in one tag that scales with --group-label-boost at fit-all zoom, like
+          // every other frame label, while the 34 px strip around it keeps the layout's height.
+          <span className="group-node__docktag">
+            <span className="group-node__lock" title="The Dock: fixed in place. Release it from its frame menu.">
+              <IconLock />
+            </span>
+            <input
+              className="group-node__name nodrag"
+              value={data.title}
+              spellCheck={false}
+              onChange={(e) => updateNodeData(id, { title: e.target.value })}
+            />
+          </span>
+        ) : (
+          <Tooltip label="Color">
+            <button
+              className="group-node__dot nodrag"
+              style={{ background: data.color }}
+              aria-label="Color"
+              onClick={() => setShowColors((v) => !v)}
+            />
+          </Tooltip>
+        )}
+        {showColors && !dock && (
           <NodeColorSwatches
             className="color-popover"
             selected={data.color as string | undefined}
@@ -185,12 +212,14 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
             }}
           />
         )}
-        <input
-          className="group-node__name nodrag"
-          value={data.title}
-          spellCheck={false}
-          onChange={(e) => updateNodeData(id, { title: e.target.value })}
-        />
+        {!dock && (
+          <input
+            className="group-node__name nodrag"
+            value={data.title}
+            spellCheck={false}
+            onChange={(e) => updateNodeData(id, { title: e.target.value })}
+          />
+        )}
         {wt && (
           <div className="group-node__wt nodrag">
             {stale ? (
@@ -309,17 +338,19 @@ export function GroupNode({ id, data, selected }: NodeProps<CanvasNode>) {
         )}
       </div>
 
-      <div className="group-node__actions nodrag">
-        <Tooltip label="Ungroup (keeps nodes)">
-          <button
-            className="group-node__ungroup"
-            aria-label="Ungroup (keeps nodes)"
-            onClick={ungroup}
-          >
-            <IconUngroup />
-          </button>
-        </Tooltip>
-      </div>
+      {!dock && (
+        <div className="group-node__actions nodrag">
+          <Tooltip label="Ungroup (keeps nodes)">
+            <button
+              className="group-node__ungroup"
+              aria-label="Ungroup (keeps nodes)"
+              onClick={ungroup}
+            >
+              <IconUngroup />
+            </button>
+          </Tooltip>
+        </div>
+      )}
     </div>
   )
 }
