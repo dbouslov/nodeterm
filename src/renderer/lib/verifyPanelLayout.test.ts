@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ROW_GAP } from '@shared/placement'
-import { rootPosition, type CanvasNode } from '../state/workspace'
+import { flowToNodeStates, nodeStatesToFlow, rootPosition, type CanvasNode } from '../state/workspace'
 import { layoutVerifyPanel } from './verifyPanelLayout'
 
 const node = (id: string, x: number, y: number, w: number, h: number, extra: Partial<CanvasNode> = {}): CanvasNode =>
@@ -114,6 +114,24 @@ describe('layoutVerifyPanel — a review panel never lands on anything', () => {
     for (const id of ['r1', 'r2', 'q1', 'q2']) expect(second.nodes.find((n) => n.id === id)!.parentId).toBe(first.groupId)
     expect(overlaps(second.nodes)).toEqual([])
     expect(strays(second.nodes)).toEqual([])
+  })
+
+  it('never takes over a frame it did not make, even one with the same title', () => {
+    // The user's own frame (or a team, or a worktree frame) that happens to carry the label.
+    const start = [...canvas(), frame('mine', 28, 500, 600, 300, 'Verify: Build', 'go'), member('r1')]
+    const { groupId, reused, nodes } = layoutVerifyPanel(start, { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
+    expect(reused).toBe(false)
+    expect(groupId).not.toBe('mine')
+    expect(nodes.filter((n) => n.parentId === 'mine')).toEqual([])
+  })
+
+  it('marks the panel frame, and the mark survives a save and reload, so the next round still reuses it', () => {
+    const first = layoutVerifyPanel([...canvas(), member('r1')], { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
+    expect(first.nodes.find((n) => n.id === first.groupId)!.data.verifyPanel).toBe(true)
+    const reloaded = nodeStatesToFlow(flowToNodeStates(first.nodes)) as CanvasNode[]
+    const second = layoutVerifyPanel([...reloaded, member('q1')], { srcId: 'caller', panelIds: ['q1'], label: 'Verify: Build' })
+    expect(second.reused).toBe(true)
+    expect(second.groupId).toBe(first.groupId)
   })
 
   it('a different label opens a second panel frame beside the first, overlapping nothing', () => {
