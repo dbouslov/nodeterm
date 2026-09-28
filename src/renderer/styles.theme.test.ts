@@ -370,3 +370,22 @@ describe('status rings are visible in both themes', () => {
     }
   }
 })
+
+/**
+ * Working is teal everywhere. When the node ring moved off clay, five other working-state
+ * surfaces (the RUNNING badges (`--busy`), the overview node and chip, the edge hover card) and the minimap
+ * halo kept the old clay and amber, so one state spoke in three colours. Any rule whose selector
+ * names `working` or `busy` must take its colour from `--agent-working` or `--glow-working`.
+ */
+describe('working is teal everywhere', () => {
+  const OLD = /#d97757|217,\s*119,\s*87|#ffd60a|255,\s*214,\s*10/i
+  it('no working-state rule paints the old clay or amber', () => {
+    const css = RULES.replace(/\/\*[\s\S]*?\*\//g, '')
+    const offenders: string[] = []
+    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = m[1].trim()
+      if (/working|busy/.test(selector) && OLD.test(m[2])) offenders.push(selector)
+    }
+    expect(offenders).toEqual([])
+  })
+})

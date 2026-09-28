@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { playSfx, primeSfx } from '@renderer/lib/sfx'
 import { fanoutStillWorking } from '@renderer/lib/completionAlert'
@@ -897,6 +897,14 @@ const setGroupLabelBoost = (zoom: number): void => {
   document.documentElement.classList.toggle('group-labels-compact', boost >= 2)
 }
 
+/** `--nt-zoom` on the flow wrapper sizes the node status rings (styles.css): about 3 screen pixels
+ *  at any zoom. Written on project load and RING_ZOOM_SETTLE_MS after the last viewport change,
+ *  never per frame (see onMove). */
+const RING_ZOOM_SETTLE_MS = 120
+const setRingZoom = (wrap: HTMLDivElement | null, zoom: number): void => {
+  wrap?.style.setProperty('--nt-zoom', String(zoom || 1))
+}
+
 /** Zoom a double-click on empty canvas pulls back to — far enough out to see the neighbours a
  *  focused node was hiding, still close enough to read a terminal's headers. */
 const PANE_OVERVIEW_ZOOM = 0.55
@@ -1039,19 +1047,16 @@ function StatusAwareMiniMap({ onNodeDoubleClick }: { onNodeDoubleClick: (node: N
     },
     [onNodeDoubleClick]
   )
-  // Status language matches the canvas glows/badges: amber = working, red = needs you,
-  // clay = unread. The classes below add the minimap-scale glow/pulse (styles.css).
-  //
-  // Unread is CLAY (#d97757) — the agent-hook colour the RUNNING badge and the node's working glow
-  // already use — and not the accent blue it used to be: blue is also the fallback stroke for a
-  // node that carries no colour of its own, so "finished while you were away" was painted the
-  // exact shade as "nothing to report" and vanished into the map.
+  // Status language matches the canvas rings (styles.css `--glow-*`): teal = working, red = needs
+  // you, blue = unread. The classes below add the minimap-scale glow/pulse (styles.css); the
+  // unread pulse also thickens the stroke, which is what sets it apart from the blue fallback
+  // stroke of a node that carries no colour of its own.
   const nodeStrokeColor = useCallback(
     (n: Node): string => {
       const st = statusById[n.id]
-      if (st?.state === 'working') return '#ffd60a'
+      if (st?.state === 'working') return 'var(--glow-working)'
       if (st?.state === 'waiting' || st?.state === 'blocked') return '#ff453a'
-      if (st?.unread) return '#d97757'
+      if (st?.unread) return 'var(--glow-unread)'
       return (n.data as { color?: string })?.color ?? '#0a84ff'
     },
     [statusById]
@@ -2666,6 +2671,7 @@ export function Canvas() {
       setViewport(project.viewport)
       setZoomPct(Math.round(project.viewport.zoom * 100))
       setGroupLabelBoost(project.viewport.zoom)
+      setRingZoom(flowWrapRef.current, project.viewport.zoom)
       // A project can load already zoomed IN past the crisp threshold (saved viewport) — seed the
       // gate before the mount-time IntersectionObserver reports make every node request a context
       // it would only have to give back.
@@ -9295,6 +9301,7 @@ export function Canvas() {
 
   const zoomRafRef = useRef<number | null>(null)
   const gestureSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ringZoomSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onMove = useCallback(
     (_e: unknown, vp: Viewport) => {
       viewportRef.current = vp
@@ -9322,6 +9329,13 @@ export function Canvas() {
         gestureSettleRef.current = null
         setWebglGesture(false)
       }, WEBGL_GESTURE_SETTLE_MS)
+      // The status ring width only once the zoom settles: `--nt-zoom` inherits, so a per-frame write
+      // would restyle every node subtree (xterm included) on every frame of the gesture.
+      if (ringZoomSettleRef.current) clearTimeout(ringZoomSettleRef.current)
+      ringZoomSettleRef.current = setTimeout(() => {
+        ringZoomSettleRef.current = null
+        setRingZoom(flowWrapRef.current, viewportRef.current.zoom)
+      }, RING_ZOOM_SETTLE_MS)
       // Coalesce the zoom-% readout to one update per frame so a zoom gesture doesn't
       // re-render the whole Canvas on every intermediate viewport event.
       if (zoomRafRef.current == null) {
@@ -15143,8 +15157,7 @@ export function Canvas() {
         </button>
       </div>
 
-      {/* `--nt-zoom` sizes the node status rings (styles.css), about 3 screen pixels at any zoom. */}
-      <div className="flow-wrap" ref={flowWrapRef} style={{ '--nt-zoom': zoomPct / 100 } as CSSProperties}>
+      <div className="flow-wrap" ref={flowWrapRef}>
         {/* First-contact guidance: an empty canvas used to be a black void (field report:
             "didn't know what to do first"). Pointer-events-none so it can never eat a
             right-click or box-select; keyed off the LIVE nodes array, so it reappears on

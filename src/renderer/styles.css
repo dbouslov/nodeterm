@@ -1515,7 +1515,8 @@ body,
     0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
 }
 
-.react-flow__node:has(.term-node.unread)::after {
+/* Not while errored: the purple ring wins there, and a blue pulse around it would mix two states. */
+.react-flow__node:has(.term-node.unread:not(.errored))::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -1892,9 +1893,9 @@ body,
   background: currentColor;
 }
 
-/* RUNNING matches the working spinner + node glow (clay #d97757), not the base green. */
+/* RUNNING matches the working node ring (teal `--agent-working`), not the base green. */
 .term-node__status--busy {
-  color: #d97757;
+  color: var(--agent-working);
 }
 
 .term-node__status--busy .term-node__status-dot {
@@ -6949,7 +6950,7 @@ button.group-node__setup:disabled {
   stroke-width: 4px;
 }
 .minimap .mm-working {
-  filter: drop-shadow(0 0 3px rgba(255, 214, 10, 0.8));
+  filter: drop-shadow(0 0 3px rgba(var(--glow-working-rgb), 0.8));
   animation: mm-pulse-soft 2.6s ease-in-out infinite;
   animation-play-state: var(--nt-anim-state);
 }
@@ -6958,11 +6959,11 @@ button.group-node__setup:disabled {
   animation: mm-pulse 1.8s ease-in-out infinite;
   animation-play-state: var(--nt-anim-state);
 }
-/* Unread = clay, the agent-hook colour (RUNNING badge, working glow). Its own keyframes: at
+/* Unread = blue (`--glow-unread`), as on the node ring. Its own keyframes: at
    minimap scale a node is a few pixels tall, so opacity alone reads as a faint flicker — the
    stroke THICKENS on the beat as well, which is what makes it findable on a busy map. */
 .minimap .mm-unread {
-  filter: drop-shadow(0 0 4px rgba(217, 119, 87, 0.95));
+  filter: drop-shadow(0 0 4px rgba(var(--glow-unread-rgb), 0.95));
   animation: mm-pulse-unread 1.6s ease-in-out infinite;
   animation-play-state: var(--nt-anim-state);
 }
@@ -8809,10 +8810,10 @@ button.group-node__setup:disabled {
   padding: 1px 6px;
   border-radius: 5px;
 }
-/* RUNNING matches the working spinner + node glow (clay #d97757). */
+/* RUNNING matches the working node ring (teal `--agent-working`). */
 .chat-node__badge--working {
-  color: #d97757;
-  background: rgba(217, 119, 87, 0.15);
+  color: var(--agent-working);
+  background: rgba(var(--glow-working-rgb), 0.15);
   animation: nt-pulse 1.1s ease-in-out infinite;
   animation-play-state: var(--nt-anim-state);
 }
@@ -9626,7 +9627,7 @@ button.group-node__setup:disabled {
 .overview-finding__text { font-size: 13px; }
 .overview-finding__meta { font-size: 11px; color: rgba(var(--tint-rgb), 0.55); }
 .ov-node { width: 100%; height: 100%; box-sizing: border-box; background: rgba(var(--card-rgb), 0.92); border: 1px solid rgba(var(--tint-rgb), 0.12); border-left: 4px solid var(--accent); border-radius: 8px; padding: 6px 8px; color: var(--text); display: flex; flex-direction: column; gap: 2px; overflow: hidden; cursor: pointer; }
-.ov-node--working { box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.55); }
+.ov-node--working { box-shadow: 0 0 0 2px rgba(var(--glow-working-rgb), 0.55); }
 .ov-node--attention { box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.6); }
 .ov-node__head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ov-node__title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -9638,7 +9639,7 @@ button.group-node__setup:disabled {
 .ov-node__text { margin: 0; font: 11px/1.3 ui-monospace, Menlo, monospace; color: rgba(var(--tint-rgb), 0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-node__chips { display: flex; flex-wrap: nowrap; gap: 4px; margin-top: auto; overflow: hidden; }
 .ov-chip { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: rgba(var(--tint-rgb), 0.08); }
-.ov-chip--working { color: #d97757; }
+.ov-chip--working { color: var(--agent-working); }
 .ov-chip--attention { color: #ff453a; }
 .ov-chip--verdict { color: #ff9f0a; }
 .ov-group { width: 100%; height: 100%; box-sizing: border-box; border: 1.5px dashed; border-radius: 12px; position: relative; }
@@ -13437,7 +13438,7 @@ body.focus-mode .dock:hover {
 .edge-hover-card__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .edge-hover-card__title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edge-hover-card__status { flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-.edge-hover-card__status--working { color: #d97757; }
+.edge-hover-card__status--working { color: var(--agent-working); }
 .edge-hover-card__status--waiting { color: var(--danger); }
 .edge-hover-card__status--finished { color: var(--accent); }
 .edge-hover-card__summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
