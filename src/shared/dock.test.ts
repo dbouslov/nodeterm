@@ -88,3 +88,46 @@ describe('confirm routing is argument-aware: only pin --set dock confirms', () =
     expect(alwaysConfirms('close', {})).toBe(false)
   })
 })
+
+import { dockRefusal, withoutDock } from './dock'
+
+describe('dockRefusal: what an agent may not do to the Dock', () => {
+  const nodes = [
+    { id: 'D', type: 'group', data: { fixture: 'dock', pinned: true } },
+    { id: 'seat', parentId: 'D', type: 'terminal', data: {} },
+    { id: 'page', parentId: 'D', type: 'browser', data: {} },
+    { id: 'inner', parentId: 'D', type: 'group', data: {} },
+    { id: 'W', type: 'group', data: {} },
+    { id: 'w1', parentId: 'W', type: 'terminal', data: {} }
+  ]
+  it('close: never the Dock frame, never a Dock page; the seat (a session) may close, for retire', () => {
+    expect(dockRefusal(nodes, 'close', ['D'])).toMatch(/is the Dock/)
+    expect(dockRefusal(nodes, 'close', ['w1', 'page'])).toMatch(/page in the Dock/)
+    expect(dockRefusal(nodes, 'close', ['seat'])).toBeNull()
+    expect(dockRefusal(nodes, 'close', ['w1'])).toBeNull()
+  })
+  it('ungroup and unpin: never the Dock', () => {
+    expect(dockRefusal(nodes, 'ungroup', ['D'])).toMatch(/is the Dock/)
+    expect(dockRefusal(nodes, 'unpin', ['D'])).toMatch(/is the Dock/)
+    expect(dockRefusal(nodes, 'ungroup', ['W'])).toBeNull()
+    expect(dockRefusal(nodes, 'unpin', ['seat'])).toBeNull()
+  })
+  it('move: nothing leaves the Dock and the Dock never moves; moving in or within is fine', () => {
+    expect(dockRefusal(nodes, 'move', ['seat'], null)).toMatch(/out of the Dock/)
+    expect(dockRefusal(nodes, 'move', ['page'], 'W')).toMatch(/out of the Dock/)
+    expect(dockRefusal(nodes, 'move', ['D'], 'W')).toMatch(/is the Dock/)
+    expect(dockRefusal(nodes, 'move', ['w1'], 'D')).toBeNull()
+    expect(dockRefusal(nodes, 'move', ['page'], 'inner')).toBeNull()
+  })
+  it('reads the stored shape too (off-canvas and Server Edition closes)', () => {
+    const stored = [
+      { id: 'D', kind: 'group', fixture: 'dock' },
+      { id: 'page', kind: 'sticky', parentId: 'D' }
+    ]
+    expect(dockRefusal(stored, 'close', ['page'])).toMatch(/page in the Dock/)
+    expect(dockRefusal(stored, 'close', ['D'])).toMatch(/is the Dock/)
+  })
+  it('withoutDock drops the Dock frame from a list, for the human close and unpin paths', () => {
+    expect(withoutDock(['seat', 'D', 'w1'], nodes)).toEqual(['seat', 'w1'])
+  })
+})

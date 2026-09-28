@@ -25,6 +25,7 @@ import {
 import type { CanvasNodeState } from '@shared/types'
 import { commonChatSize, parseChatSize, resizeChats } from './chatSize'
 import { nodeRect, reflow } from './reflow'
+import { dockOf } from '@shared/dock'
 
 export type LayoutPlan =
   | { ok: false; error: string }
@@ -118,6 +119,23 @@ export function planArrange(
   let next = verb === 'arrange'
     ? arrangeNodes(sizedLive, ids, { layout, cols, order: 'given' }) // --nodes order, not array order
     : alignNodes(live, ids, edge!)
+  // The Dock (@shared/dock) is pinned, so it never moves; a top-level set must not be laid OVER it
+  // either. Refused rather than nudged: the caller picks a layout that clears it.
+  if (!container) {
+    const dock = dockOf(live)
+    if (dock) {
+      const d = nodeRect(dock)
+      const over = ids.filter((id) => {
+        const m = next.find((x) => x.id === id)
+        if (!m || m.id === dock.id || m.parentId) return false
+        const r = nodeRect(m)
+        return r.x < d.x + d.width && d.x < r.x + r.width && r.y < d.y + d.height && d.y < r.y + r.height
+      })
+      if (over.length) {
+        return { ok: false, error: `${verb}: that would lay ${over.join(', ')} over the Dock; leave the Dock out or pick a layout that clears it` }
+      }
+    }
+  }
   // Tidying a frame's children usually leaves the frame oversized (it was sized to their
   // old scattered spots) — shrink it to hug the new layout, then let its neighbours and
   // the frames above it follow (lib/reflow). Top-level sets have no frame.

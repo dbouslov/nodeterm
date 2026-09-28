@@ -341,6 +341,45 @@ describe('HeadlessNodeFactory', () => {
     expect(projectFile.bridges?.some((edge) => edge.source === id || edge.target === id)).toBe(false)
   })
 
+  it('refuses to close the Dock frame or a Dock page, before ownership and before killing anything (T8)', async () => {
+    const workspace = await store.load({ sideline: false })
+    const project = workspace.projects[0]
+    project.nodes.push(
+      {
+        id: 'dock',
+        kind: 'group',
+        position: { x: 40, y: 40 },
+        size: { width: 1400, height: 1100 },
+        title: 'GO',
+        color: '#fff',
+        group: null,
+        pinned: true,
+        fixture: 'dock'
+      } as CanvasNodeState,
+      {
+        id: 'dock-page',
+        kind: 'sticky',
+        parentId: 'dock',
+        position: { x: 24, y: 536 },
+        size: { width: 640, height: 300 },
+        title: 'Needs David',
+        color: '#fff',
+        group: null
+      } as CanvasNodeState
+    )
+    await store.save(workspace)
+    for (const node of ['dock', 'dock-page']) {
+      await expect(factory.close('term-source', { node }, true)).resolves.toMatchObject({
+        ok: false,
+        error: expect.stringContaining('Dock')
+      })
+    }
+    expect(pty.destroys).toEqual([])
+    const after = (await store.load({ sideline: false })).projects[0].nodes
+    expect(after.some((n) => n.id === 'dock')).toBe(true)
+    expect(after.some((n) => n.id === 'dock-page')).toBe(true)
+  })
+
   it('refuses a different caller without killing or removing the owned spawn', async () => {
     const opened = await factory.openTerminal('term-source', {}, true)
     const id = (opened.result as { id: string }).id
