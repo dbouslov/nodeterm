@@ -47,7 +47,7 @@ describe('close --compact off screen (planStoredCompaction)', () => {
     // d moved up into b's slot: the hole is gone.
     expect(next.find((n) => n.id === 'd')!.position).toEqual({ x: 28, y: 152 })
     expect(next.find((n) => n.id === 'c')!.position).toEqual({ x: 168, y: 62 })
-    expect(plan.note).toBe(compactNote(plan.plan))
+    expect(plan.note).toBe(`${compactNote(plan.plan)} (project not on screen: laid out from the saved node sizes)`)
     expect(plan.note).toContain('re-packed g')
   })
 
@@ -67,7 +67,7 @@ describe('close --compact off screen (planStoredCompaction)', () => {
   it('writes nothing when no frame held a closed node', () => {
     const { plan } = closeOffScreen(project(), ['far'])
     expect(plan.upserts).toEqual([])
-    expect(plan.note).toBe(' — compact: no frame held these nodes')
+    expect(plan.note).toMatch(/^ — compact: no frame held these nodes/)
   })
 
   it('names a verify panel frame the close dissolved, instead of telling the caller to ungroup it', () => {
@@ -78,5 +78,16 @@ describe('close --compact off screen (planStoredCompaction)', () => {
     const { plan } = closeOffScreen(states, ['r1'])
     expect(plan.note).not.toContain('ungroup')
     expect(plan.note).toContain('removed the empty verify panel frame vp')
+  })
+})
+
+describe('a non-finite position is never written off screen (close --compact)', () => {
+  it('skips the compaction with a reason, and writes nothing', () => {
+    const states = project().map((n) => (n.id === 'a' ? { ...n, position: { x: Number.NaN, y: 62 } } : n))
+    const plan = planStoredCompaction(states, ['b'])
+    expect(plan.upserts).toEqual([])
+    expect(plan.note).toMatch(/not compacted/)
+    expect(plan.note).toMatch(/non-finite position/)
+    expect(plan.note).not.toMatch(/laid out from the saved/)
   })
 })

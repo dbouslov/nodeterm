@@ -46,6 +46,7 @@ import {
   type CanvasNode
 } from '../state/workspace'
 import { emptiedVerifyPanels } from './verifyPanelCleanup'
+import { nonFinitePositionIds } from './layoutVerbs'
 
 // The measure `arrangeNodes` packs by (see restructure.ts).
 const nodeW = (n: CanvasNode): number => n.measured?.width ?? (n.width as number) ?? 0
@@ -233,5 +234,19 @@ export function planStoredCompaction(
       w.height !== n.height
     )
   })
-  return { plan, upserts: flowToNodeStates(changed), note: compactNote(plan, dissolved) }
+  // Off screen nothing renders the result before it is saved: a non-finite position (a hand-edited
+  // project.json) is refused here, and the close goes ahead uncompacted (lib/layoutVerbs).
+  const bad = nonFinitePositionIds(changed)
+  if (bad.length) {
+    return {
+      plan,
+      upserts: [],
+      note: ` — not compacted: the layout came out with a non-finite position for ${bad.join(', ')} (a saved position in that project's file is not a number)`
+    }
+  }
+  return {
+    plan,
+    upserts: flowToNodeStates(changed),
+    note: `${compactNote(plan, dissolved)} (project not on screen: laid out from the saved node sizes)`
+  }
 }

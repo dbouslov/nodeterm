@@ -156,11 +156,24 @@ export type StoredLayoutPlan =
   | { ok: true; upserts: CanvasNodeState[]; message: string; result: Record<string, unknown> }
 
 /**
+ * Ids of `nodes` whose position is not a finite number. project.json is hand-editable, and one
+ * `"x": null` makes `arrangeNodes`' running offset NaN for every member after it; `JSON.stringify`
+ * then writes each one as `null`. Off screen nothing renders the result first, so the off-screen
+ * planners refuse to write it at all.
+ */
+export function nonFinitePositionIds(nodes: readonly { id: string; position: { x: number; y: number } }[]): string[] {
+  return nodes
+    .filter((n) => !Number.isFinite(n.position?.x) || !Number.isFinite(n.position?.y))
+    .map((n) => n.id)
+}
+
+/**
  * Run a layout plan over a project's SERIALIZED nodes. Only the nodes the plan changed (a new frame
  * included) come back, so nothing else in the project is round-tripped through the serializers.
  */
 export function planStoredLayout(
   stored: CanvasNodeState[],
+  verb: 'group' | 'arrange' | 'align',
   plan: (live: CanvasNode[]) => LayoutPlan
 ): StoredLayoutPlan {
   const live = nodeStatesToFlow(stored)
@@ -168,6 +181,13 @@ export function planStoredLayout(
   if (!out.ok) return out
   const before = new Set(live)
   const changed = out.nodes.filter((n) => !before.has(n))
+  const bad = nonFinitePositionIds(changed)
+  if (bad.length) {
+    return {
+      ok: false,
+      error: `${verb}: the layout came out with a non-finite position for ${bad.join(', ')} (a saved position in that project's file is not a number) — nothing was changed`
+    }
+  }
   return {
     ok: true,
     upserts: flowToNodeStates(changed),

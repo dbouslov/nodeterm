@@ -11486,7 +11486,7 @@ export function Canvas() {
             }
             const groupPlan = (live: CanvasNode[]) => planGroup(live, args, groupColor, snapGridNow())
             if (offCanvas) {
-              replyStoredLayout(planStoredLayout(offCanvas.project.nodes, groupPlan))
+              replyStoredLayout(planStoredLayout(offCanvas.project.nodes, 'group', groupPlan))
               return
             }
             const plan = groupPlan(nodesRef.current as CanvasNode[])
@@ -11569,7 +11569,7 @@ export function Canvas() {
           case 'align': {
             const arrangePlan = (live: CanvasNode[]) => planArrange(live, verb, args, snapGridNow())
             if (offCanvas) {
-              replyStoredLayout(planStoredLayout(offCanvas.project.nodes, arrangePlan))
+              replyStoredLayout(planStoredLayout(offCanvas.project.nodes, verb, arrangePlan))
               return
             }
             const plan = arrangePlan(nodesRef.current as CanvasNode[])
@@ -12561,7 +12561,7 @@ export function Canvas() {
                     (closeIds.length === 1
                       ? `closed ${closeIds[0]}`
                       : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`) +
-                    (storedCompact ? `${storedCompact.note} (project not on screen: laid out from the saved node sizes)` : '')
+                    (storedCompact ? storedCompact.note : '')
                 })
                 return
               }
