@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { ProjectKanban } from '@shared/types'
 import {
   addColumn, assignNode, assignedTo, defaultKanban, deleteColumn, moveColumn,
-  cardMeta, columnForNode, nextColumnColor, pruneAssignments, recolorColumn, renameColumn,
+  cardMeta, columnForNode, nextColumnColor, pruneAssignments, pruneOnLoad, recolorColumn, renameColumn,
   setCardDue, setCardPriority, toggleAssignee, unassigned,
   boardLabels, cardMatchesLabelFilter, createLabel, deleteLabel, labelColor, labelsForCard,
   recolorLabel, renameLabel, reorderLabels, toggleCardLabel,
@@ -370,5 +370,28 @@ describe('tag → label migration', () => {
     const m2 = migrateProjectTags(proj([{ id: 'n1', tags: ['x'] }], existing))
     expect(boardLabels(m2.kanban!)).toHaveLength(1)
     expect(labelsForCard(m2.kanban!, 'n1')[0]).toMatchObject({ name: 'x', color: 'red' })
+  })
+})
+
+describe('pruneOnLoad (the project load drops rows for chats closed while the board was shut)', () => {
+  it('a load naming 10 dead ids drops those rows and keeps the live ones', () => {
+    const dead = Array.from({ length: 10 }, (_, i) => `dead${i}`)
+    const k: ProjectKanban = {
+      ...board(),
+      assignments: [...board().assignments, ...dead.map((nodeId) => ({ nodeId, columnId: 'b' }))]
+    }
+    const next = pruneOnLoad(k, ['n1', 'n2', 'n3', 'other'])
+    expect(next?.assignments.map((a) => a.nodeId)).toEqual(['n1', 'n2', 'n3'])
+    expect(next?.columns).toEqual(k.columns)
+  })
+
+  it('an empty node list leaves the board untouched', () => {
+    // An empty canvas is no proof every card is dead (a load that found nothing, a fresh clone).
+    const k = board()
+    expect(pruneOnLoad(k, [])).toBe(k)
+  })
+
+  it('no board stays no board', () => {
+    expect(pruneOnLoad(undefined, ['n1'])).toBeUndefined()
   })
 })

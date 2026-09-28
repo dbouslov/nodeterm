@@ -563,7 +563,7 @@ import type {
   TranscriptHit
 } from '@shared/types'
 import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/KanbanView'
-import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
+import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, pruneOnLoad, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { planStoredMinimize } from '../lib/storedMinimize'
 import { emptiedVerifyPanels, pruneEmptyVerifyPanels } from '../lib/verifyPanelCleanup'
@@ -2624,6 +2624,10 @@ export function Canvas() {
     // of pairing them with this project's id. See useNodesEpoch.
     installEpoch(project.id, flow)
     tracePersist('load', { project: project.id, reload: preserveViewportRef.current, nodes: flow.length })
+    // Board rows for chats closed while the board was shut: the board only prunes on its own edits,
+    // so without this they sat in project.json for good. The next save writes the pruned board.
+    const prunedKanban = pruneOnLoad(project.kanban, flow.map((n) => n.id))
+    if (prunedKanban && prunedKanban !== project.kanban) useProjects.getState().setProjectKanban(project.id, prunedKanban)
     // Worktree facts are per project: drop the previous project's (reset also clears its
     // statuses), then re-resolve from this project's cwd. SSH projects are skipped — local git
     // cannot reason about a remote path. Fire-and-forget: the store is epoch-guarded + fails open.
