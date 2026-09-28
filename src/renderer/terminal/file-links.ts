@@ -1,8 +1,11 @@
 // Cmd/Ctrl+click links in terminal output. `createUrlLinkProvider` handles http(s) URLs;
 // `createFileLinkProvider` handles path-like tokens: absolute (`/x/y`), dot-relative
 // (`./x`, `../x`) and bare relatives with at least one slash (`src/a.ts`), with optional
-// `:line[:col]` suffixes (compiler/grep output). `~` paths are skipped in v1 (no home
-// resolution).
+// `:line[:col]` suffixes (compiler/grep output), and home-relative `~/x` paths. A `~` path stays
+// `~`-rooted all the way to the filesystem call: the core that owns the filesystem expands it
+// against ITS home (`expandHomePath` in core/fs-handlers.ts; an SSH project's remote shell does it
+// for `sshFs`) — the renderer does not know that home, and on the Server Edition it is another
+// machine's.
 //
 // Existence (and dir-ness) is verified before a file link is offered, via a short-TTL cache
 // of parent-directory listings — one fs.list covers every sibling on a compiler-error screen.
@@ -71,19 +74,29 @@ export interface PathConventionOpts {
   windows?: boolean
 }
 
+/** Characters that, right before a `~`, mean it is not the start of a home path (`a~/x`). */
+const HOME_LEAD_BLOCK_RE = /[\w.@+~\/-]/
+
 export function matchFileTokens(lineText: string, opts: PathConventionOpts = {}): FileToken[] {
   const out: FileToken[] = []
   if (opts.windows) return matchWindowsFileTokens(lineText)
   for (const m of lineText.matchAll(TOKEN_RE)) {
     let text = m[0]
-    // URLs (and protocol-ish tokens) belong to the web-links addon. A token preceded by
-    // `~` is a home-relative path minus its tilde (no home resolution in v1) — skip it
-    // rather than mis-resolve `~/x` as the absolute `/x`.
+    let start = m.index
+    // URLs (and protocol-ish tokens) belong to the web-links addon.
     const before = lineText.slice(Math.max(0, m.index - 8), m.index)
     // `\w+:\/{1,2}$` (not just `://`): the optional leading-`/` in TOKEN_RE can swallow the
     // second slash of `://`, so a URL's token starts at that slash and `before` ends `https:/`.
     if (/\w+:\/{1,2}$/.test(before) || text.includes('//')) continue
-    if (m.index > 0 && lineText[m.index - 1] === '~') continue
+    // A token preceded by `~` is a home-relative path minus its tilde. Re-attach the tilde when it
+    // stands at a word start (`~/x`, ` ~/x`, `(~/x`) so it never mis-resolves as the absolute `/x`.
+    // Anything else before the `~` (`a~/x`, `~user/x`) is not a home path — skip it, as before.
+    if (m.index > 0 && lineText[m.index - 1] === '~') {
+      const lead = m.index > 1 ? lineText[m.index - 2] : ''
+      if (!text.startsWith('/') || HOME_LEAD_BLOCK_RE.test(lead)) continue
+      text = '~' + text
+      start = m.index - 1
+    }
     text = text.replace(TRAILING_PUNCT, '')
     if (text.length < 3) continue
     let path = text
@@ -94,7 +107,7 @@ export function matchFileTokens(lineText: string, opts: PathConventionOpts = {})
       line = parseInt(suffix[2], 10)
     }
     if (!path || !path.includes('/')) continue
-    out.push({ text, startIndex: m.index, path, line })
+    out.push({ text, startIndex: start, path, line })
   }
   return out
 }
@@ -215,7 +228,13 @@ export function resolveFileToken(
   opts: PathConventionOpts = {}
 ): string | null {
   if (opts.windows) return resolveWindowsFileToken(path, cwd)
-  const raw = path.startsWith('/') ? path : cwd ? `${cwd.replace(/\/+$/, '')}/${path}` : null
+  // `~/x` is rooted at the home dir, never at cwd; the `~` is kept for the core to expand.
+  const raw =
+    path.startsWith('/') || path.startsWith('~/')
+      ? path
+      : cwd
+        ? `${cwd.replace(/\/+$/, '')}/${path}`
+        : null
   if (!raw) return null
   const segs = raw.split('/').filter((s) => s && s !== '.')
   const tilde = segs[0] === '~'

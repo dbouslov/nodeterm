@@ -40,7 +40,8 @@ describe('buildLoopCards — the cron/loop cards drawn under an agent', () => {
     expect(cards[0]).toMatchObject({
       id: 'loop-a',
       type: 'loop',
-      position: { x: -150, y: 660 },
+      // First in the agent's card row, GROUP_GAP (24) under it (lib/cardBand).
+      position: { x: 100, y: 624 },
       width: 230,
       height: 92,
       data: { title: 'check deploy', ownerNodeId: 'a', loopKind: 'cron' }
@@ -71,7 +72,7 @@ describe('buildLoopCards — the cron/loop cards drawn under an agent', () => {
 
 describe('the cards reach list and geometry (#7)', () => {
   it('geometry reports the card with its owner and counts its overlaps and sticking out', () => {
-    // The laid-out card hangs 60px under a 400px agent: its default rect (-150..80, 660..752)
+    // The laid-out card hangs 24px under a 400px agent: its default rect (200..430, 624..716)
     // sits on top of `b`, and past the bottom of the 700px frame both sit in.
     const nodes = [frame('f', 0, 0, 900, 700), agent('a', 200, 200, 'f'), agent('b', 0, 650, 'f')]
     const { nodes: cards } = buildLoopCards(nodes, { a: cron('t') }, base)
@@ -81,8 +82,8 @@ describe('the cards reach list and geometry (#7)', () => {
       title: 't',
       parentId: 'f',
       owner: 'a',
-      x: -50,
-      y: 660,
+      x: 200,
+      y: 624,
       width: 230,
       height: 92
     })
@@ -106,16 +107,23 @@ describe('the cards reach list and geometry (#7)', () => {
     expect(String(long.data.title).endsWith('…')).toBe(true)
   })
 
-  it('geometry counts card problems apart from node problems in the summary', () => {
+  it('geometry counts card problems as node problems, apart only next to a pinned node', () => {
     const nodes = [frame('f', 0, 0, 900, 700), agent('a', 200, 200, 'f'), agent('b', 0, 650, 'f')]
     const { nodes: cards } = buildLoopCards(nodes, { a: cron('t') }, base)
     const reply = geometryReply([...nodes, ...cards])
     if (!reply.ok) throw new Error(reply.error)
     const [summary, ...lines] = reply.message.split('\n')
     // a (y 200..600) and b (y 650..1050) do not touch; b hangs past the 700px frame; the card lies
-    // on b and past the frame. Only b's problem is a node problem.
-    expect(summary).toBe('2 nodes, 1 frame, 0 overlaps, 1 outside its frame; 1 card: 1 overlap, 1 outside its frame')
-    expect(lines.filter((l) => l.startsWith('card overlap:'))).toHaveLength(1)
-    expect(lines.filter((l) => l.startsWith('card outside:'))).toHaveLength(1)
+    // on b and past the frame. The card sits where a's band should keep room, so both are findings.
+    expect(summary).toBe('2 nodes, 1 frame, 1 overlap, 2 outside their frames; 1 card: 0 overlaps')
+    expect(lines.filter((l) => l.startsWith('overlap:'))).toHaveLength(1)
+    expect(lines.filter((l) => l.startsWith('card '))).toHaveLength(0)
+    // Pinned, a keeps no band: its card's problems are counted apart.
+    const pinned = nodes.map((n) => (n.id === 'a' ? { ...n, data: { ...n.data, pinned: true } } : n))
+    const apart = geometryReply([...pinned, ...buildLoopCards(pinned, { a: cron('t') }, base).nodes])
+    if (!apart.ok) throw new Error(apart.error)
+    expect(apart.message.split('\n')[0]).toBe(
+      '2 nodes, 1 frame, 0 overlaps, 1 outside its frame; 1 card: 1 overlap, 1 outside its frame'
+    )
   })
 })

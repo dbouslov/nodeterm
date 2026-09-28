@@ -22,6 +22,7 @@ import { boundAccountId } from '@shared/agents/account-binding'
 import { agentEnvSnapshot } from '../lib/agentEnv'
 import { uuid } from '@renderer/lib/uuid'
 import { expandRectToGrid, snapNodeToGrid, type Rect } from '../lib/nodeSizing'
+import { bandOf } from '../lib/cardBand'
 import { claudeCliCapsNow, grokCliCapsNow } from './permissionMode'
 import { ensureGrokTakenIds, grokTakenIdsNow } from './grokSessionIds'
 import { mintFreeGrokSessionId } from '@shared/agents/grok-session-mint'
@@ -87,6 +88,8 @@ export interface NodeData {
   verifyPanel?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
+  /** Canvas px reserved under the node for its docked card row — see `CanvasNodeState.cardBand`. */
+  cardBand?: number
   /** Expanded height to restore when un-collapsing (kept out of the persisted size). */
   expandedHeight?: number
   /**
@@ -1191,6 +1194,8 @@ export const GROUP_HEADER = 34
 
 const nodeW = (n: CanvasNode) => n.measured?.width ?? (n.width as number) ?? 0
 const nodeH = (n: CanvasNode) => n.measured?.height ?? (n.height as number) ?? 0
+/** The height layout packs a node by: its own plus the card band it keeps (lib/cardBand `applied`). */
+const layoutH = (n: CanvasNode) => nodeH(n) + bandOf(n)
 
 /**
  * Geometry for a frame that has to wrap `bounds`, with its label header above. `bounds` and the
@@ -1302,7 +1307,7 @@ export function arrangeNodes(
     }
     pos.set(m.id, { x, y })
     x += nodeW(m) + gap
-    rowH = Math.max(rowH, nodeH(m))
+    rowH = Math.max(rowH, layoutH(m))
   })
   return nodes.map((nd) => (pos.has(nd.id) ? { ...nd, position: pos.get(nd.id)! } : nd))
 }
@@ -1750,7 +1755,7 @@ export function groupSelectedNodes(
   const minX = Math.min(...members.map((n) => n.position.x))
   const minY = Math.min(...members.map((n) => n.position.y))
   const maxX = Math.max(...members.map((n) => n.position.x + nodeW(n)))
-  const maxY = Math.max(...members.map((n) => n.position.y + nodeH(n)))
+  const maxY = Math.max(...members.map((n) => n.position.y + layoutH(n)))
 
   const parentId = members[0].parentId
   const box = groupBox(nodes, parentId, { minX, minY, maxX, maxY }, grid)
@@ -1826,7 +1831,7 @@ export function fitGroupToChildren(
   const minX = Math.min(...children.map(absX))
   const minY = Math.min(...children.map(absY))
   const maxX = Math.max(...children.map((c) => absX(c) + nodeW(c)))
-  const maxY = Math.max(...children.map((c) => absY(c) + nodeH(c)))
+  const maxY = Math.max(...children.map((c) => absY(c) + layoutH(c)))
   // Same box as a fresh grouping, so a re-fit cannot pull a frame off the grid that
   // `groupSelectedNodes` just put on it.
   const box = groupBox(nodes, group.parentId, { minX, minY, maxX, maxY }, grid)
@@ -2027,6 +2032,12 @@ export function reorderNodeBefore(
   return groupsFirst(result)
 }
 
+/** `cardBand` comes from a git-shared, hand-editable file: only a finite number 0..2000 survives,
+ *  so a stray value can never push a column off the canvas. */
+export function normalizeCardBand(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2000 ? v : undefined
+}
+
 /** Converts persisted node states into live React Flow nodes (parents first). */
 export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
   // React Flow requires a parent node to appear before its children. With nested frames a flat
@@ -2085,6 +2096,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         pinned: n.pinned === true ? true : undefined,
         verifyPanel: n.verifyPanel === true ? true : undefined,
         hideFanout: n.hideFanout,
+        cardBand: normalizeCardBand(n.cardBand),
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
         // node data — so every surface that renders an icon gets a value this module vouched for
         // rather than each one re-deciding. An unrecognized icon becomes no icon.
@@ -2169,6 +2181,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         pinned: n.data.pinned === true ? true : undefined,
         verifyPanel: n.data.verifyPanel === true ? true : undefined,
         hideFanout: n.data.hideFanout,
+        cardBand: normalizeCardBand(n.data.cardBand),
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out
         // untyped. Re-validating on the way OUT (not just on the way in) also means a value a
         // peer canvas mutation or a future caller put on live node data cannot be written to the

@@ -5,6 +5,7 @@ import type { CanvasNode } from '../state/workspace'
 import type { AgentNodeStatus } from '../state/agentStatus'
 import type { EdgeData } from './edgeKinds'
 import { containerOrigin, snapPointInRootSpace } from './gridSnap'
+import { cardOffset, cardRowOf, clampToChat } from './cardBand'
 
 /**
  * The cron / schedule / loop cards drawn under an agent node: ONE builder for the canvas render
@@ -80,8 +81,13 @@ export function loopCardTitle(task: string | undefined): string {
   return t.length > LOOP_CARD_TITLE_MAX ? `${t.slice(0, LOOP_CARD_TITLE_MAX - 1)}…` : t
 }
 
-/** One loop card (plus its fan-out edge) per agent node on `nodes` with a live, undismissed loop.
- *  Pure. */
+/** The agents that draw a loop card: a live, undismissed loop. The subagent cards pack after it. */
+export function loopParentIds(byId: Readonly<Record<string, AgentNodeStatus>>): Set<string> {
+  return new Set(Object.keys(byId).filter((id) => byId[id].loop && !byId[id].loop!.dismissed))
+}
+
+/** One loop card (plus its fan-out edge) per agent node on `nodes` with a live, undismissed loop,
+ *  first in its agent's card row (lib/cardBand). Pure. */
 export function buildLoopCards(
   nodes: readonly CanvasNode[],
   byId: Readonly<Record<string, AgentNodeStatus>>,
@@ -96,10 +102,12 @@ export function buildLoopCards(
     if (!st.loop || st.loop.dismissed) continue
     const parent = nodes.find((n) => n.id === pid)
     if (!parent || parent.data.hideFanout) continue
-    const ph = parent.measured?.height ?? (parent.height as number) ?? 400
     const accent = agentConfig((parent.data.agentId as string) ?? 'claude')?.color ?? '#d97757'
     const snap = ui.snap ? { grid: ui.snap, origin: containerOrigin(parent.parentId, nodes as CanvasNode[]) } : undefined
     const lid = `loop-${pid}`
+    const row = cardRowOf(parent, true, [], ui.sizes)
+    const dims = ephemeralDims(ui, lid, 230, 460, 92, 320)
+    const width = clampToChat(parent, dims.width)
     eNodes.push({
       id: lid,
       type: 'loop',
@@ -108,7 +116,7 @@ export function buildLoopCards(
       // with the group). Deliberately no extent:'parent' — the fan-out may hang below the
       // frame border without being clamped into it.
       ...(parent.parentId ? { parentId: parent.parentId } : {}),
-      position: offsetFrom(parent, ui.positions[lid], { x: -250, y: ph + 60 }, snap),
+      position: offsetFrom(parent, ui.positions[lid], cardOffset(parent, row, lid), snap),
       draggable: true,
       // NOT selectable: React Flow's rubber band would otherwise sweep a whole fan-out of cards
       // into the selection alongside the real nodes, and every selection action (Group,
@@ -116,7 +124,10 @@ export function buildLoopCards(
       // drawn around the wrong things. Cards select one at a time, by click (`select` below).
       selectable: false,
       selected: ui.selectedId === lid,
-      ...ephemeralDims(ui, lid, 230, 460, 92, 320),
+      // No wider than its agent, so the row never hangs past the agent's right edge.
+      ...dims,
+      width,
+      style: { ...dims.style, width },
       data: {
         // The card's NAME for `list` / `geometry` (the card itself draws `loopTask`). A cron prompt
         // is often multi-line, and `list` prints its title raw — one line, capped, or a prompt

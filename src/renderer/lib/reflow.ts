@@ -25,14 +25,12 @@ import type { NodeChange } from '@xyflow/react'
 import { PLACEMENT_GAP } from '@shared/placement'
 import { fitAncestorChain, isPinned, type CanvasNode } from '../state/workspace'
 import type { Rect } from './nodeSizing'
+import { applied } from './cardBand'
 
-// The measure the layout packs by, as in workspace.ts: React Flow's `measured` first.
-const nodeW = (n: CanvasNode): number => n.measured?.width ?? (n.width as number) ?? 0
-const nodeH = (n: CanvasNode): number => n.measured?.height ?? (n.height as number) ?? 0
-
-/** A node's rect in its container's space, the shape `reflow` takes as `prevRect`. */
+/** A node's rect in its container's space, the shape `reflow` takes as `prevRect`: its applied
+ *  rect (lib/cardBand), so a chat's card band counts on both sides of every change. */
 export function nodeRect(n: CanvasNode): Rect {
-  return { x: n.position.x, y: n.position.y, width: nodeW(n), height: nodeH(n) }
+  return applied(n)
 }
 
 type Dir = 'down' | 'right' | 'up' | 'left'

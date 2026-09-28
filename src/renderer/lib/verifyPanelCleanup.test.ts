@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import type { CanvasNodeState } from '@shared/types'
-import { applyMutationToFlow, nodeStatesToFlow, type CanvasNode } from '../state/workspace'
+import { applyMutationToFlow, flowToNodeStates, nodeStatesToFlow, type CanvasNode } from '../state/workspace'
+import { useProjects } from '../state/projects'
 import { emptiedVerifyPanels, isVerifyPanelFrame, pruneEmptyVerifyPanels } from './verifyPanelCleanup'
+import { layoutTeamFrame, layoutVerifyPanel } from './verifyPanelLayout'
 
 const state = (id: string, extra: Partial<CanvasNodeState> = {}): CanvasNodeState => ({
   id,
@@ -123,5 +125,50 @@ describe('a peer upsert of a verify panel frame (applyMutationToFlow hydrates on
   it('appends a new panel frame', () => {
     const next = applyMutationToFlow(canvas, { op: 'upsert', node: frame('vq', 'Verify: other', { verifyPanel: true }) })
     expect(next.some((n) => n.id === 'vq')).toBe(true)
+  })
+})
+
+describe('a spawn-team frame dissolves like a review panel', () => {
+  // A team frame used to be left unmarked, so closing every member left an empty frame behind on
+  // the conductor's canvas for good. It is marked now; `verify` still never reuses it.
+  const caller = state('caller', { position: { x: 0, y: 0 }, size: { width: 600, height: 400 } })
+  const mem = (id: string, title = id): CanvasNodeState =>
+    state(id, { position: { x: 0, y: 0 }, size: { width: 600, height: 400 }, title })
+  const spawnTeam = (): { nodes: CanvasNode[]; groupId: string } =>
+    layoutTeamFrame(live([caller, mem('m1', 'Builder'), mem('m2', 'Tester')]), {
+      srcId: 'caller',
+      panelIds: ['m1', 'm2'],
+      label: 'X'
+    })
+
+  it('closing every member on screen takes the frame with it', () => {
+    const team = spawnTeam()
+    expect(emptiedVerifyPanels(team.nodes, new Set(['m1', 'm2']))).toEqual([team.groupId])
+    expect(emptiedVerifyPanels(team.nodes, new Set(['m1']))).toEqual([])
+  })
+
+  it('closing every member off screen takes the frame with it', () => {
+    const team = spawnTeam()
+    useProjects.setState({
+      projects: [
+        { id: 'p1', name: 'P1', color: '#111', viewport: { x: 0, y: 0, zoom: 1 }, nodes: flowToNodeStates(team.nodes) }
+      ],
+      activeProjectId: 'p1'
+    })
+    useProjects.getState().removeNodes('p1', ['m1', 'm2'])
+    const left = useProjects.getState().getProject('p1')!.nodes.map((n) => n.id)
+    expect(left).toEqual(['caller'])
+  })
+
+  it('verify with the team\'s label makes its own frame', () => {
+    const team = spawnTeam()
+    const panel = layoutVerifyPanel([...team.nodes, ...live([mem('r1', 'Verify: correctness')])], {
+      srcId: 'caller',
+      panelIds: ['r1'],
+      label: 'X'
+    })
+    expect(panel.reused).toBe(false)
+    expect(panel.groupId).not.toBe(team.groupId)
+    expect(panel.nodes.filter((n) => n.parentId === team.groupId).map((n) => n.id)).toEqual(['m1', 'm2'])
   })
 })

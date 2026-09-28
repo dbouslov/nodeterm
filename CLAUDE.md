@@ -456,7 +456,14 @@ project's nodes only.** The contract:
   work) and latched to the first run, so switching the setting on mid-session never reaches into
   storage and locks a canvas somebody is working on.
 - Before any project switch / add / delete, `commitActiveToStore()` serializes the live
-  React Flow nodes back into the store, so nothing is lost. Then disk is written.
+  React Flow nodes back into the store, so nothing is lost. Then disk is written. The commit is
+  guarded by the epoch tag `nodesProjectIdRef` (`canCommitCanvas`), and **that tag must live in
+  React STATE beside the nodes** (`canvas/nodesEpoch.ts`), never in a ref alone: the load effect's
+  `setNodes(flow)` is a DefaultLane update, every zustand write after it is a SyncLane re-render
+  that skips it, and the render-time `nodesRef` mirror then paired the PREVIOUS project's nodes
+  with the NEW project's tag. A commit in that window wrote an SSH project's 7 nodes over a local
+  project's 18 in its `.nodeterm/project.json` (2026-09-26). `nodesEpoch.test.tsx` reproduces the
+  interleaving with real React (no `act`, which would flush both lanes together and hide it).
 - Switching away unmounts the old project's `TerminalNode`s → their tmux clients detach but
   the sessions keep running; switching back reattaches. tmux session names are per-node-id
   (globally unique), so projects never collide.
@@ -766,7 +773,12 @@ Lifecycle, by intent:
   (250 ms) until a SHELL owns the pane, then echo-deliver `resumeCommand(...)` — the same
   `claude --resume` / `codex resume` the cold restore uses. **Nothing is ever killed**: if the CLI
   has not quit within `RESTART_EXIT_TIMEOUT_MS` (6 s) the run reports `exit-timeout` and leaves the
-  session running. A `working` **or `blocked`** session is refused — `/exit` typed into a
+  session running. **A user-asked restart gets a late window on top** (`RESTART_LATE_EXIT_MS`, 60 s,
+  spent only while the pane still reads): issue #899 was a 19 h cron session whose CLI quit a moment
+  AFTER the 6 s, with nothing left watching — the node sat at a bare shell with no agent and no
+  resume. The Eco sweep and Pause keep the bare 6 s (the sweep is serialized canvas-wide). The
+  exit-timeout notice (`exitTimeoutNotice`) hands over the bare resume line for exactly that
+  late-quit case. A `working` **or `blocked`** session is refused — `/exit` typed into a
   permission prompt would ANSWER it, not quit — and a node is held one-restart-at-a-time until the
   resume line has actually LEFT the pane (an un-submitted line is where a second `/exit` would be
   spliced in). The bulk action runs the same per-node closure sequentially over every idle agent
@@ -1251,6 +1263,12 @@ session.
   have no remote fs API with which to verify a token; relay tabs do have a core-bound, jailed fs
   API and therefore support file links. Windows existence matching is case-insensitive and accepts
   both separators; UNC tokens are refused whole before they can be reinterpreted as cwd-relative.
+  **Home-relative `~/x` tokens** (Claude Code prints its plan file as `~/.claude/plans/<name>.md`)
+  stay `~`-rooted all the way to the fs call and are expanded by the core that OWNS the filesystem
+  — `expandHomePath` in `core/fs-handlers.ts` for desktop/Server Edition, the remote shell for
+  `sshFs` — because the renderer does not know that home. A `~` after a path character (`a~/x`)
+  or `~user/x` is not a home path and yields no link. The relay's jailed `fs.*` calls fs-ops
+  directly and does not expand, so a relay tab's `~` token fails closed (no link).
 - **Agent** (`createAgentNode(agentId, …)`) — a terminal preset that runs an agent CLI as its
   `initialCommand` (runs once on open via `transport.write`, then cleared), with `data.agentId`
   set. Builtins (`claude`/`codex`/`gemini`) come from `AGENT_CONFIG` (clay color etc.).

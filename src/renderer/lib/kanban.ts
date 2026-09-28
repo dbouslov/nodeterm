@@ -164,6 +164,14 @@ export function pruneAssignments(k: ProjectKanban, liveIds: string[]): ProjectKa
   return next
 }
 
+/** `pruneAssignments` for the project load: the board's rows for chats closed while the board was
+ *  shut (its own prune only runs on a board edit) go when the project opens. An empty node list is
+ *  no proof every card is dead, so it leaves the board untouched. Same object when nothing drops. */
+export function pruneOnLoad(k: ProjectKanban | undefined, liveIds: string[]): ProjectKanban | undefined {
+  if (!k || liveIds.length === 0) return k
+  return pruneAssignments(k, liveIds)
+}
+
 /** The column a node is assigned to, resolved against a project's board — undefined when
  *  unassigned, dangling (column deleted elsewhere), or the project has no board yet. All
  *  three mean Ungrouped, and the canvas shows no column pill for Ungrouped. */

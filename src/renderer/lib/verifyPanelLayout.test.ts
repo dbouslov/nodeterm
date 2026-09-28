@@ -26,6 +26,8 @@ const child = (id: string, parentId: string, x: number, y: number, w: number, h:
   node(id, x, y, w, h, { parentId, extent: 'parent' })
 
 const member = (id: string): CanvasNode => node(id, 0, 0, 600, 400)
+/** A `verify` reviewer as Canvas makes one: titled `Verify: <lens>`, which is what a reuse checks. */
+const reviewer = (id: string): CanvasNode => node(id, 0, 0, 600, 400, { data: { title: `Verify: ${id}`, color: '#fff', group: null } })
 
 type R = { x: number; y: number; w: number; h: number }
 const rectOf = (n: CanvasNode, all: CanvasNode[]): R => ({
@@ -98,12 +100,12 @@ describe('layoutVerifyPanel — a review panel never lands on anything', () => {
   })
 
   it('a re-verify with the same label reuses the earlier panel frame instead of stacking a new one', () => {
-    const first = layoutVerifyPanel([...canvas(), member('r1'), member('r2')], {
+    const first = layoutVerifyPanel([...canvas(), reviewer('r1'), reviewer('r2')], {
       srcId: 'caller',
       panelIds: ['r1', 'r2'],
       label: 'Verify: Build'
     })
-    const second = layoutVerifyPanel([...first.nodes, member('q1'), member('q2')], {
+    const second = layoutVerifyPanel([...first.nodes, reviewer('q1'), reviewer('q2')], {
       srcId: 'caller',
       panelIds: ['q1', 'q2'],
       label: 'Verify: Build'
@@ -125,11 +127,20 @@ describe('layoutVerifyPanel — a review panel never lands on anything', () => {
     expect(nodes.filter((n) => n.parentId === 'mine')).toEqual([])
   })
 
+  it('never reuses a marked frame with no member: the reviewer check has nothing to judge', () => {
+    // An empty marked frame (e.g. a team frame restored empty) proves nothing about who made it.
+    const empty = frame('empty', 28, 500, 600, 300, 'Verify: Build', 'go')
+    const start = [...canvas(), { ...empty, data: { ...empty.data, verifyPanel: true } }, reviewer('r1')]
+    const { groupId, reused } = layoutVerifyPanel(start, { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
+    expect(reused).toBe(false)
+    expect(groupId).not.toBe('empty')
+  })
+
   it('marks the panel frame, and the mark survives a save and reload, so the next round still reuses it', () => {
-    const first = layoutVerifyPanel([...canvas(), member('r1')], { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
+    const first = layoutVerifyPanel([...canvas(), reviewer('r1')], { srcId: 'caller', panelIds: ['r1'], label: 'Verify: Build' })
     expect(first.nodes.find((n) => n.id === first.groupId)!.data.verifyPanel).toBe(true)
     const reloaded = nodeStatesToFlow(flowToNodeStates(first.nodes)) as CanvasNode[]
-    const second = layoutVerifyPanel([...reloaded, member('q1')], { srcId: 'caller', panelIds: ['q1'], label: 'Verify: Build' })
+    const second = layoutVerifyPanel([...reloaded, reviewer('q1')], { srcId: 'caller', panelIds: ['q1'], label: 'Verify: Build' })
     expect(second.reused).toBe(true)
     expect(second.groupId).toBe(first.groupId)
   })
@@ -199,7 +210,8 @@ describe('layoutTeamFrame — spawn-team uses the same placement, never reuse', 
     const g = nodes.find((n) => n.id === groupId)!
     expect(g.parentId).toBe('go')
     expect(g.data.title).toBe('Team')
-    expect(g.data.verifyPanel).toBeUndefined()
+    // Marked, so the frame dissolves with its last member (verifyPanelCleanup); never reused.
+    expect(g.data.verifyPanel).toBe(true)
     expect(overlaps(nodes)).toEqual([])
     expect(strays(nodes)).toEqual([])
   })

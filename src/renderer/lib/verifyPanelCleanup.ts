@@ -8,7 +8,8 @@
 // THE RULES (each pinned in verifyPanelCleanup.test.ts):
 // 1. A panel frame is a group marked `verifyPanel` (only a literal `true`, as on both serializer
 //    seams), or a LEGACY group whose title starts with "Verify: " — frames made before the mark
-//    existed carry the title and nothing else.
+//    existed carry the title and nothing else. A `spawn-team` frame is marked too, so it goes the
+//    same way when its last member closes.
 // 2. A close that leaves a panel frame with no child removes that frame too (`emptiedVerifyPanels`),
 //    on screen (`deleteNodes`) and off screen (`closeStoredNodes`). Only a frame that HELD a closed
 //    node is considered: this is "the last member closed", not a sweep.

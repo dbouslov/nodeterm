@@ -323,8 +323,9 @@ import {
 } from '../lib/nodeFocus'
 import { runSnapshot, settledPaint, snapshotViewRefusal, SNAPSHOT_MARGIN_PX, SNAPSHOT_NOT_ON_SCREEN } from '../lib/canvasSnapshot'
 import { geometryReply } from '../lib/geometry'
-import { buildLoopCards, loopCardListRows, type LoopCardUi } from '../lib/loopCards'
+import { buildLoopCards, loopCardListRows, loopParentIds, type LoopCardUi } from '../lib/loopCards'
 import { buildSubagentCards } from '../lib/subagentCards'
+import { CardBandDriver, SLIDE_MS, cardRowBands, setCardBand } from '../lib/cardBand'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
 import { NO_INSETS, measurePinnedInsets, type ScreenInsets } from '../lib/pinnedInsets'
 import { ZONE_GUTTER_PX, ZONES, zoneTargetRect, type ZoneId } from '../lib/nodeZones'
@@ -346,6 +347,7 @@ import {
   agentHibernateFns,
   agentPauseFns,
   agentRestartFn,
+  exitTimeoutNotice,
   guardConcurrentRestart,
   planBulkRestart,
   queryPaneWithin,
@@ -562,7 +564,7 @@ import type {
   TranscriptHit
 } from '@shared/types'
 import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/KanbanView'
-import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
+import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, pruneOnLoad, resolveColumnRef, unassigned } from '../lib/kanban'
 import { planRetire, planStoredRetire } from '../lib/retire'
 import { planStoredMinimize } from '../lib/storedMinimize'
 import { emptiedVerifyPanels, pruneEmptyVerifyPanels } from '../lib/verifyPanelCleanup'
@@ -575,6 +577,7 @@ import { frameChatSize, resizeChats, withChatSize } from '../lib/chatSize'
 import { snapResizeChanges } from '../lib/resizeSnap'
 import { canClearDirty, canCreateOnCanvas, commitSkipReason } from '../state/persistGuards'
 import { tracePersist, traceErrorCode } from '../lib/persistTrace'
+import { useNodesEpoch } from './nodesEpoch'
 import { isHidden } from '../lib/ui-visibility'
 import { boardLogEvents } from '../lib/boardLogDiff'
 import { useBoardLog } from '../state/boardLog'
@@ -722,9 +725,10 @@ function cardsNow(nodes: readonly CanvasNode[]): CanvasNode[] {
   }
   // The subagent cards too (lib/subagentCards): drawn the same way, invisible to the verbs the
   // same way.
+  const status = useAgentStatus.getState().byId
   return [
-    ...buildLoopCards(nodes, useAgentStatus.getState().byId, cardUi).nodes,
-    ...buildSubagentCards(nodes, ui.byId, cardUi).nodes
+    ...buildLoopCards(nodes, status, cardUi).nodes,
+    ...buildSubagentCards(nodes, ui.byId, cardUi, loopParentIds(status)).nodes
   ]
 }
 
@@ -895,6 +899,14 @@ const setGroupLabelBoost = (zoom: number): void => {
   document.documentElement.classList.toggle('group-labels-compact', boost >= 2)
 }
 
+/** `--nt-zoom` on the flow wrapper sizes the node status rings (styles.css): about 3 screen pixels
+ *  at any zoom. Written on project load and RING_ZOOM_SETTLE_MS after the last viewport change,
+ *  never per frame (see onMove). */
+const RING_ZOOM_SETTLE_MS = 120
+const setRingZoom = (wrap: HTMLDivElement | null, zoom: number): void => {
+  wrap?.style.setProperty('--nt-zoom', String(zoom || 1))
+}
+
 /** Zoom a double-click on empty canvas pulls back to — far enough out to see the neighbours a
  *  focused node was hiding, still close enough to read a terminal's headers. */
 const PANE_OVERVIEW_ZOOM = 0.55
@@ -972,8 +984,11 @@ const newNodeSize = (): BoxSize => {
 }
 
 
+// An uncolored node's minimap stroke stays neutral: blue is the unread state (`--glow-unread`).
+const MINIMAP_NEUTRAL = 'rgba(var(--tint-rgb), 0.35)'
+
 const minimapNodeColor = (n: Node): string =>
-  (n.data as { color?: string })?.color ?? '#0a84ff'
+  (n.data as { color?: string })?.color ?? MINIMAP_NEUTRAL
 
 /** The agent a terminal node was CREATED as. Deliberately NOT `agentIdOf`, whose extra hook-status
  *  fallback also reports a plain terminal someone typed `claude` into by hand: TerminalNode's
@@ -1037,20 +1052,17 @@ function StatusAwareMiniMap({ onNodeDoubleClick }: { onNodeDoubleClick: (node: N
     },
     [onNodeDoubleClick]
   )
-  // Status language matches the canvas glows/badges: amber = working, red = needs you,
-  // clay = unread. The classes below add the minimap-scale glow/pulse (styles.css).
-  //
-  // Unread is CLAY (#d97757) — the agent-hook colour the RUNNING badge and the node's working glow
-  // already use — and not the accent blue it used to be: blue is also the fallback stroke for a
-  // node that carries no colour of its own, so "finished while you were away" was painted the
-  // exact shade as "nothing to report" and vanished into the map.
+  // Status language matches the canvas rings (styles.css `--glow-*`): teal = working, red = needs
+  // you, blue = unread. The classes below add the minimap-scale glow/pulse (styles.css); the
+  // unread pulse also thickens the stroke, which is what sets it apart from the blue fallback
+  // stroke of a node that carries no colour of its own.
   const nodeStrokeColor = useCallback(
     (n: Node): string => {
       const st = statusById[n.id]
-      if (st?.state === 'working') return '#ffd60a'
+      if (st?.state === 'working') return 'var(--glow-working)'
       if (st?.state === 'waiting' || st?.state === 'blocked') return '#ff453a'
-      if (st?.unread) return '#d97757'
-      return (n.data as { color?: string })?.color ?? '#0a84ff'
+      if (st?.unread) return 'var(--glow-unread)'
+      return (n.data as { color?: string })?.color ?? MINIMAP_NEUTRAL
     },
     [statusById]
   )
@@ -1559,14 +1571,16 @@ export function Canvas() {
     clearModels
   ])
   const viewportRef = useRef<Viewport>({ x: 0, y: 0, zoom: 1 })
-  const nodesRef = useRef<CanvasNode[]>(nodes)
   /**
-   * WHICH project's nodes `nodesRef` currently holds — the epoch tag that pairs with
-   * `activeProjectId` (see canCommitCanvas). Written only where the load effect installs a
-   * project's nodes, and invalidated (null) on its bail-out paths; null until the first load, so
-   * the initial empty `useNodesState([])` can never be committed as some project's canvas.
+   * `nodesRef` mirrors the live node array; `nodesProjectIdRef` says WHICH project's nodes it holds
+   * — the epoch tag that pairs with `activeProjectId` (see canCommitCanvas). Both are mirrored from
+   * React state as ONE pair (useNodesEpoch): the tag used to be a ref written only by the load
+   * effect, and a SyncLane re-render between that effect and its `setNodes` landing re-mirrored the
+   * PREVIOUS project's nodes under the NEW project's tag (field bug 2026-09-26). Installed by the
+   * load effect, cleared (null) on its bail-out paths; null until the first load, so the initial
+   * empty `useNodesState([])` can never be committed as some project's canvas.
    */
-  const nodesProjectIdRef = useRef<string | null>(null)
+  const { nodesRef, nodesProjectIdRef, installEpoch } = useNodesEpoch(nodes)
   /**
    * The project whose webview nodes the NEXT load must retire into the keep-alive pool. Separate
    * from `nodesProjectIdRef` on purpose: the epoch tag is invalidated on the load effect's
@@ -1735,7 +1749,6 @@ export function Canvas() {
   /** The active project runs on a remote host → every worktree affordance is off (see
    *  WORKTREE_SSH_HINT). Reactive, so the menus rebuild when the user switches projects. */
   const isSshProject = !!activeSshServer
-  nodesRef.current = nodes
   // The context-link push reads the live canvas from a timer, so it takes the edges, the nodes and
   // the project they belong to from ONE render: across a switch `nodesRef` and `nodesProjectIdRef`
   // are re-pointed before the new edges land (see lib/contextLinkSync).
@@ -2200,7 +2213,7 @@ export function Canvas() {
     const eEdges: Edge[] = loops.edges
     // Subagent cards, laid out under their agent — the same builder answers `list` / `geometry`
     // (lib/subagentCards).
-    const subs = buildSubagentCards(nodes, agentById, ui)
+    const subs = buildSubagentCards(nodes, agentById, ui, loopParentIds(claudeById))
     eNodes.push(...subs.nodes)
     eEdges.push(...subs.edges)
     return { ephemeralNodes: eNodes, ephemeralEdges: eEdges }
@@ -2527,13 +2540,13 @@ export function Canvas() {
     // Both bail-outs below leave the PREVIOUS project's nodes mounted in React Flow. Invalidate the
     // epoch tag on the way out so nothing commits them under the new id (field bug 2026-08-10).
     if (!activeProjectId) {
-      nodesProjectIdRef.current = null
+      installEpoch(null)
       tracePersist('load-bail', { reason: 'no-active-project', loading: loadingRef.current })
       return
     }
     const project = useProjects.getState().getProject(activeProjectId)
     if (!project) {
-      nodesProjectIdRef.current = null
+      installEpoch(null)
       tracePersist('load-bail', {
         reason: 'unknown-project',
         active: activeProjectId,
@@ -2615,12 +2628,16 @@ export function Canvas() {
     )
     setNodes(flow)
     // React Flow now holds THIS project's canvas: the commit guard may pair it with the active id
-    // again. Both refs are assigned HERE, synchronously, because `setNodes` only lands on the next
-    // render — mirroring the nodes (same idiom as the peer-mutation path) keeps the array and its
-    // epoch tag atomic, so no timer firing in between can commit the previous project's nodes.
-    nodesRef.current = flow
-    nodesProjectIdRef.current = project.id
+    // again. installEpoch assigns both refs HERE, synchronously, because `setNodes` only lands on a
+    // later render — and queues the tag as STATE in the same lane as that `setNodes`, so a SyncLane
+    // re-render in between (any store write below) mirrors the old nodes WITH the old tag instead
+    // of pairing them with this project's id. See useNodesEpoch.
+    installEpoch(project.id, flow)
     tracePersist('load', { project: project.id, reload: preserveViewportRef.current, nodes: flow.length })
+    // Board rows for chats closed while the board was shut: the board only prunes on its own edits,
+    // so without this they sat in project.json for good. The next save writes the pruned board.
+    const prunedKanban = pruneOnLoad(project.kanban, flow.map((n) => n.id))
+    if (prunedKanban && prunedKanban !== project.kanban) useProjects.getState().setProjectKanban(project.id, prunedKanban)
     // Worktree facts are per project: drop the previous project's (reset also clears its
     // statuses), then re-resolve from this project's cwd. SSH projects are skipped — local git
     // cannot reason about a remote path. Fire-and-forget: the store is epoch-guarded + fails open.
@@ -2659,6 +2676,7 @@ export function Canvas() {
       setViewport(project.viewport)
       setZoomPct(Math.round(project.viewport.zoom * 100))
       setGroupLabelBoost(project.viewport.zoom)
+      setRingZoom(flowWrapRef.current, project.viewport.zoom)
       // A project can load already zoomed IN past the crisp threshold (saved viewport) — seed the
       // gate before the mount-time IntersectionObserver reports make every node request a context
       // it would only have to give back.
@@ -2728,7 +2746,7 @@ export function Canvas() {
     }, 0)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId, reloadNonce, setNodes, setViewport])
+  }, [activeProjectId, reloadNonce, setNodes, setViewport, installEpoch])
 
   // Keep-alive pool hygiene: a PERMANENTLY deleted project's ghosts must die now, not at the next
   // switch (an invisible page is still a live Chromium process). Keyed on the id signature — the
@@ -3619,6 +3637,103 @@ export function Canvas() {
     },
     [setNodes]
   )
+
+  // Helper cards count in layout (lib/cardBand): each chat keeps room under it for its card row, and
+  // the chats below make room once per wave. The driver decides WHEN (trailing window, holds); this
+  // only feeds it the canvas, the per-chat keydown/pointer facts, and applies what it returns.
+  const bandKeysRef = useRef(new Map<string, number>())
+  const bandPointerRef = useRef<string | null>(null)
+  // Per element, the timer that takes its slide class off: a second commit inside the slide
+  // restarts it, so the first commit's timer cannot strip the class the second one added.
+  const bandSlideTimers = useRef(new Map<HTMLElement, ReturnType<typeof setTimeout>>())
+  const cardBandRef = useRef<CardBandDriver>(null as unknown as CardBandDriver)
+  if (!cardBandRef.current) {
+    cardBandRef.current = new CardBandDriver({
+      nodes: () => nodesRef.current as CanvasNode[],
+      rows: (ns) => {
+        const ui = useAgentNodes.getState()
+        return cardRowBands(ns, loopParentIds(useAgentStatus.getState().byId), ui.byId, ui.sizes)
+      },
+      env: () => ({
+        busy: draggingRef.current || resizeStartRef.current.size > 0,
+        lastKeydown: bandKeysRef.current,
+        pointerOver: bandPointerRef.current
+      }),
+      grid: snapGridNow,
+      commit: (step) => {
+        // Compared inside the updater: a second application of the same band is a no-op.
+        setNodes((ns) => step.apply.reduce((acc, a) => setCardBand(acc, a.id, a.band, snapGridNow()), ns))
+        // Slide what moved, and its cards, for this one change only.
+        const moved = new Set(step.moved)
+        const byId = useAgentNodes.getState().byId
+        const ids = [
+          ...moved,
+          ...[...moved].map((id) => `loop-${id}`),
+          ...Object.keys(byId).filter((id) => moved.has(byId[id].parentNodeId))
+        ]
+        const els = ids.flatMap((id) => [
+          ...document.querySelectorAll<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`)
+        ])
+        const timers = bandSlideTimers.current
+        for (const el of els) {
+          el.classList.add('nt-band-slide')
+          clearTimeout(timers.get(el))
+          timers.set(
+            el,
+            setTimeout(() => {
+              el.classList.remove('nt-band-slide')
+              timers.delete(el)
+            }, SLIDE_MS + 50)
+          )
+        }
+        markDirty()
+      }
+    })
+  }
+  useEffect(() => {
+    // Keydowns of closed nodes are forgotten, so the map stays the size of the canvas.
+    const keys = bandKeysRef.current
+    if (keys.size) {
+      const live = new Set(nodes.map((n) => n.id))
+      for (const id of keys.keys()) if (!live.has(id)) keys.delete(id)
+    }
+    cardBandRef.current.run()
+  }, [nodes, agentById, loopSig, ephSizes])
+  useEffect(() => {
+    const driver = cardBandRef.current
+    const nodeIdOf = (t: EventTarget | null): string | null =>
+      (t instanceof Element && t.closest('.react-flow__node')?.getAttribute('data-id')) || null
+    const onKey = (e: KeyboardEvent): void => {
+      const id = nodeIdOf(e.target)
+      if (id) bandKeysRef.current.set(id, Date.now())
+    }
+    const onOver = (e: PointerEvent): void => {
+      const id = nodeIdOf(e.target)
+      if (id === bandPointerRef.current) return
+      bandPointerRef.current = id
+      if (driver.held.size) driver.run()
+    }
+    // The pointer left the window: nothing is under it, so a pointer hold ends now, not at the cap.
+    const onOut = (e: PointerEvent): void => {
+      if (e.relatedTarget !== null || bandPointerRef.current === null) return
+      bandPointerRef.current = null
+      if (driver.held.size) driver.run()
+    }
+    // Opening a card is a peek: a click anywhere else collapses it.
+    const onDown = (e: PointerEvent): void => useAgentNodes.getState().collapseExpanded(nodeIdOf(e.target) ?? undefined)
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('pointerover', onOver, true)
+    window.addEventListener('pointerout', onOut, true)
+    window.addEventListener('pointerdown', onDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('pointerover', onOver, true)
+      window.removeEventListener('pointerout', onOut, true)
+      window.removeEventListener('pointerdown', onDown, true)
+      driver.dispose()
+      for (const t of bandSlideTimers.current.values()) clearTimeout(t)
+    }
+  }, [])
 
   // Resolve a node's agent id, with a tags fallback for not-yet-migrated legacy nodes and a
   // hook-status fallback for plain terminals where the user launched an agent CLI by hand:
@@ -6508,6 +6623,18 @@ export function Canvas() {
       )
       markDirty()
     }
+    // The bare resume line for the exit-timeout notice, read from the same two sources the node's
+    // restart closure used (live hook id, else the persisted minted one). Null when either is
+    // unknown or unusable — `resumeCommand` refuses an unsafe id and has no line for a custom agent.
+    const exitTimeoutResumeLine = (id: string): string | null => {
+      const node = nodesRef.current.find((n) => n.id === id)
+      const agentId = node?.data.agentId as AgentId | undefined
+      const sid = restartSessionId(
+        useAgentStatus.getState().byId[id]?.sessionId,
+        node?.data.agentSessionId
+      )
+      return agentId && sid ? resumeCommand(agentId, sid) : null
+    }
     const targetLabel =
       targetAgentId == null
         ? undefined
@@ -6533,11 +6660,9 @@ export function Canvas() {
               kind: 'error',
               // Deliberately does NOT claim the session is still running: what we know is that the
               // pane never came back to a shell within the timeout, so the resume was not sent.
-              // Nothing is ever force-killed, so the pane is exactly as the CLI left it — which is
-              // what the user has to go and look at.
-              text:
-                `${action} failed: the pane did not return to a shell in time, so the CLI was not ` +
-                'relaunched. Nothing was killed — check the pane.'
+              // Nothing is ever force-killed — but a CLI that quits AFTER we stopped watching leaves
+              // a bare shell with no agent (issue #899), so the notice carries the resume line.
+              text: exitTimeoutNotice(action, exitTimeoutResumeLine(nodeId))
             }
           : {
               kind: 'error',
@@ -9278,6 +9403,7 @@ export function Canvas() {
 
   const zoomRafRef = useRef<number | null>(null)
   const gestureSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ringZoomSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onMove = useCallback(
     (_e: unknown, vp: Viewport) => {
       viewportRef.current = vp
@@ -9305,6 +9431,13 @@ export function Canvas() {
         gestureSettleRef.current = null
         setWebglGesture(false)
       }, WEBGL_GESTURE_SETTLE_MS)
+      // The status ring width only once the zoom settles: `--nt-zoom` inherits, so a per-frame write
+      // would restyle every node subtree (xterm included) on every frame of the gesture.
+      if (ringZoomSettleRef.current) clearTimeout(ringZoomSettleRef.current)
+      ringZoomSettleRef.current = setTimeout(() => {
+        ringZoomSettleRef.current = null
+        setRingZoom(flowWrapRef.current, viewportRef.current.zoom)
+      }, RING_ZOOM_SETTLE_MS)
       // Coalesce the zoom-% readout to one update per frame so a zoom gesture doesn't
       // re-render the whole Canvas on every intermediate viewport event.
       if (zoomRafRef.current == null) {
@@ -10351,7 +10484,7 @@ export function Canvas() {
           // travel the human's view. It reads the owning project's serialized nodes.
           if (verb === 'geometry') {
             const stored = nodeStatesToFlow(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
-            reply(geometryReply([...stored, ...cardsNow(stored)], args.frame))
+            reply(geometryReply([...stored, ...cardsNow(stored)], args.frame, { held: cardBandRef.current.held }))
             return
           }
           if (!needsLiveCanvas(verb)) {
@@ -11143,7 +11276,7 @@ export function Canvas() {
           case 'geometry': {
             // Read-only, like `list`: no dialog, nothing changes. The logic is lib/geometry.
             const live = nodesRef.current as CanvasNode[]
-            reply(geometryReply([...live, ...cardsNow(live)], args.frame))
+            reply(geometryReply([...live, ...cardsNow(live)], args.frame, { held: cardBandRef.current.held }))
             return
           }
           case 'open-terminal': {

@@ -13,10 +13,12 @@
 // 2. A re-verify with the SAME label, from the same container, reuses that panel frame: the new
 //    round goes below the earlier one inside it. Nothing of the earlier round is closed (those are
 //    sessions); the caller closes a finished round itself (`close --node … --compact`).
-//    Only a frame `verify` made is reused (`data.verifyPanel`, persisted): a user's own frame, a
-//    team or a worktree frame that happens to carry the title is never taken over. And a reuse whose
-//    growth would run over a PINNED node (which `settle` cannot move) falls through to rule 1.
-//    A team (`layoutTeamFrame`) is never reused.
+//    Only a frame `verify` made is reused (`data.verifyPanel`, persisted, at least one member, and
+//    every member a `Verify: ` reviewer): a user's own frame, a team or a worktree frame that
+//    happens to carry the title is never taken over. And a reuse whose growth would run over a
+//    PINNED node (which `settle` cannot move) falls through to rule 1.
+//    A team (`layoutTeamFrame`) is never reused. Its frame is marked `verifyPanel` too, so it
+//    dissolves when its last member closes (lib/verifyPanelCleanup).
 
 import { ancestorFrameIds, placeChild, type Box } from '@shared/placement'
 import {
@@ -34,6 +36,8 @@ import { settle } from './reflow'
 
 const MEMBER = { w: 600, h: 400 }
 const GAP = 40 // arrangeNodes' default gap, so a reused round sits as far below as rows sit apart
+/** Every `verify` reviewer and verdict node is titled this way (Canvas); a team member is not. */
+const REVIEWER_PREFIX = 'Verify: '
 
 const w = (n: CanvasNode): number => n.measured?.width ?? (n.width as number) ?? MEMBER.w
 const h = (n: CanvasNode): number => n.measured?.height ?? (n.height as number) ?? MEMBER.h
@@ -66,7 +70,9 @@ export function layoutVerifyPanel(nodes: CanvasNode[], opts: LayoutOpts): Layout
       n.data.verifyPanel === true &&
       !panel.has(n.id) &&
       (n.parentId ?? undefined) === container &&
-      (n.data.title as string | undefined) === opts.label
+      (n.data.title as string | undefined) === opts.label &&
+      nodes.some((k) => k.parentId === n.id) &&
+      nodes.every((k) => k.parentId !== n.id || String(k.data.title ?? '').startsWith(REVIEWER_PREFIX))
   )
   if (earlier) {
     const reused = reuseFrame(nodes, earlier, opts.panelIds, grid)
@@ -79,7 +85,7 @@ export function layoutVerifyPanel(nodes: CanvasNode[], opts: LayoutOpts): Layout
 export function layoutTeamFrame(nodes: CanvasNode[], opts: LayoutOpts): LayoutResult {
   const src = nodes.find((n) => n.id === opts.srcId)
   if (!src) throw new Error(`spawn-team: no caller node ${opts.srcId}`)
-  return newFrame(nodes, src, openedFrameId(nodes, src, []), opts, opts.grid ?? 0, false)
+  return newFrame(nodes, src, openedFrameId(nodes, src, []), opts, opts.grid ?? 0, true)
 }
 
 /** Rule 2: the new round below the earlier one, inside its frame — or null when the frame's growth
