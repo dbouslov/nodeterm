@@ -569,11 +569,15 @@ export interface CanvasState {
  *    that echo is the ACK that tells the sender where its edit landed in the total order).
  *  - `seq` is stamped by the reflector (src/core/canvas-sync.ts) and is the TOTAL ORDER. It is
  *    server-authoritative: a client-supplied `seq` is overwritten at ingest, never trusted.
+ *  - `origin: 'core'` is ALSO reflector-authoritative: a client-supplied one is deleted at ingest.
+ *    The core adds it only on a copy that came from an OWNER client (or the core itself) and goes to
+ *    an owner client, and it is the ONE thing that lets a receiver take the node's machine-local
+ *    `pendingLaunch` as sent (@shared/node-exec `mutationTrustsLaunch`).
  * The relay's host↔client mirror (src/main/remote) uses the same vocabulary and simply omits both.
  */
 export type CanvasMutation =
-  | { op: 'upsert'; node: CanvasNodeState; src?: string; seq?: number }
-  | { op: 'remove'; id: string; src?: string; seq?: number }
+  | { op: 'upsert'; node: CanvasNodeState; src?: string; seq?: number; origin?: 'core' }
+  | { op: 'remove'; id: string; src?: string; seq?: number; origin?: 'core' }
 
 /** Canvas pan/zoom state. */
 export interface Viewport {

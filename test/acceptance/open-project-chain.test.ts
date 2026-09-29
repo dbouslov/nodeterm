@@ -136,7 +136,7 @@ describe('the open-project → targeted-open chain', () => {
     live.data.initialCommand = 'claude "work in repoA"'
     const armedState = flowToNodeStates([armForColdOpen(live)])[0]
     expect(
-      useProjects.getState().applyNodeMutation(r1.project.id, { op: 'upsert', node: armedState })
+      useProjects.getState().applyOwnNodeMutation(r1.project.id, { op: 'upsert', node: armedState })
     ).toBe(true)
     const stored = useProjects
       .getState()
