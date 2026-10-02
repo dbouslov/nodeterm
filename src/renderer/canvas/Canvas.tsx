@@ -2829,13 +2829,19 @@ export function Canvas() {
   }, [])
 
   // A commit that throws must re-arm the debounce like a refused write, never stop it: see
-  // persistOnce for the field bug.
+  // persistOnce for the field bug. `projects` is replaced by every store `set`, so its identity
+  // says whether the commit landed before the throw.
   const persist = useCallback(
     () =>
-      persistOnce(commitActiveToStore, writeDisk, (err) => {
-        console.warn('[canvas] canvas commit failed', err)
-        setSaveDelivery((prev) => nextSaveDelivery(prev, Date.now()))
-      }),
+      persistOnce(
+        commitActiveToStore,
+        writeDisk,
+        (err) => {
+          console.warn('[canvas] canvas commit failed', err)
+          setSaveDelivery((prev) => nextSaveDelivery(prev, Date.now()))
+        },
+        () => useProjects.getState().projects
+      ),
     [commitActiveToStore, writeDisk]
   )
 

@@ -148,10 +148,11 @@ describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop
   // Field bug 2026-10-02: the live canvas stopped saving for 10 h with no trace line at all. The
   // commit half of a save (serialize React Flow → store) ran outside every catch, `void persist()`
   // ate the throw, `dirty` stayed true, and no dep of the autosave effect ever changed again.
-  it('reports the throw and resolves instead of rejecting', async () => {
-    const boom = new Error('commit blew up')
+  it('reports a throw BEFORE the store changed, resolves, and writes nothing', async () => {
+    const boom = new Error('serialize blew up')
     const refused: unknown[] = []
     let wrote = false
+    const store = { state: 'old' }
     await expect(
       persistOnce(
         () => {
@@ -160,12 +161,36 @@ describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop
         async () => {
           wrote = true
         },
-        (err) => refused.push(err)
+        (err) => refused.push(err),
+        () => store.state
       )
     ).resolves.toBeUndefined()
     expect(refused).toEqual([boom])
     // Nothing reached the store, so nothing may be written as if it had.
     expect(wrote).toBe(false)
+  })
+
+  it('still WRITES when the throw came after the store changed (a throwing subscriber)', async () => {
+    // zustand's set() lands the new state, THEN runs its listeners: a listener that throws leaves
+    // the store holding the live canvas. Skipping the write there would fail every retry the same
+    // way while the data to save is sitting right in the store.
+    const boom = new Error('subscriber blew up')
+    const refused: unknown[] = []
+    const store = { state: 'old' }
+    let written: string | null = null
+    await persistOnce(
+      () => {
+        store.state = 'new'
+        throw boom
+      },
+      async () => {
+        written = store.state
+      },
+      (err) => refused.push(err),
+      () => store.state
+    )
+    expect(refused).toEqual([boom])
+    expect(written).toBe('new')
   })
 
   it('and the refusal re-arms the autosave at the backoff delay', async () => {
@@ -177,7 +202,8 @@ describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop
       async () => {},
       () => {
         delivery = nextSaveDelivery(delivery, 0)
-      }
+      },
+      () => 'unchanged'
     )
     expect(autosaveDelay(true, false, delivery)).toBe(saveRetryDelay(1))
   })
@@ -189,7 +215,8 @@ describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop
       async () => {
         order.push('write')
       },
-      () => order.push('refused')
+      () => order.push('refused'),
+      () => order.length
     )
     expect(order).toEqual(['commit', 'write'])
   })

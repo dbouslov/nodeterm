@@ -83,20 +83,27 @@ export function autosaveDelay(
  * A throw from the COMMIT (serializing React Flow's nodes, the store update and the store's
  * synchronous subscribers) is a refused save like any other: it goes to `refuse`, whose
  * `nextSaveDelivery` is the autosave effect's re-arm dep, and it never escapes. `write` reports its
- * own refusals the same way. Field bug 2026-10-02: the commit ran outside every catch, the
+ * own refusals the same way.
+ *
+ * `snapshot` says whether the commit LANDED before it threw. zustand's `set` stores the new state
+ * and only then runs its listeners, so a throwing subscriber leaves the store holding the live
+ * canvas: that is still written (skipping it would fail every retry the same way). A throw before
+ * the store changed writes nothing, because the store does not hold the canvas. Field bug 2026-10-02: the commit ran outside every catch, the
  * `void persist()` in the debounce threw it away, `dirty` stayed TRUE, and no dep of the effect
  * ever changed again: no save and no trace line for ten hours while cards were opened and closed.
  */
 export async function persistOnce(
   commit: () => void,
   write: () => Promise<void>,
-  refuse: (err: unknown) => void
+  refuse: (err: unknown) => void,
+  snapshot: () => unknown
 ): Promise<void> {
+  const before = snapshot()
   try {
     commit()
   } catch (err) {
     refuse(err)
-    return
+    if (Object.is(snapshot(), before)) return
   }
   await write()
 }
