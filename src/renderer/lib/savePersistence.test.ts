@@ -1,9 +1,10 @@
 import fs from 'fs'
 import path from 'path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   autosaveDelay,
   nextSaveDelivery,
+  persistOnce,
   saveFailureMessage,
   saveRetryDelay,
   SAVE_DEBOUNCE_MS,
@@ -140,5 +141,88 @@ describe('the call site still honours the rule', () => {
     // That spelling IS the bug: it discards the rejection AND the exception. Every save must
     // either be awaited by a caller that reports, or carry its own .catch.
     expect(SRC).not.toContain('void api.workspace.save(')
+  })
+})
+
+describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop', () => {
+  // Field bug 2026-10-02: the live canvas stopped saving for 10 h with no trace line at all. The
+  // commit half of a save (serialize React Flow → store) ran outside every catch, `void persist()`
+  // ate the throw, `dirty` stayed true, and no dep of the autosave effect ever changed again.
+  it('reports a throw BEFORE the store changed, resolves, and writes nothing', async () => {
+    const boom = new Error('serialize blew up')
+    const refused: unknown[] = []
+    let wrote = false
+    const store = { state: 'old' }
+    await expect(
+      persistOnce(
+        () => {
+          throw boom
+        },
+        async () => {
+          wrote = true
+        },
+        (err) => refused.push(err),
+        () => store.state
+      )
+    ).resolves.toBeUndefined()
+    expect(refused).toEqual([boom])
+    // Nothing reached the store, so nothing may be written as if it had.
+    expect(wrote).toBe(false)
+  })
+
+  it('still WRITES when the throw came after the store changed (a throwing subscriber)', async () => {
+    // zustand's set() lands the new state, THEN runs its listeners: a listener that throws leaves
+    // the store holding the live canvas. Skipping the write there would fail every retry the same
+    // way while the data to save is sitting right in the store.
+    const boom = new Error('subscriber blew up')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const refused: unknown[] = []
+    const store = { state: 'old' }
+    let written: string | null = null
+    await persistOnce(
+      () => {
+        store.state = 'new'
+        throw boom
+      },
+      async () => {
+        written = store.state
+      },
+      (err) => refused.push(err),
+      () => store.state
+    )
+    expect(written).toBe('new')
+    // Not a refusal: the write is still running and reports its own failure. Refusing here armed
+    // a retry against the in-flight write and counted one failure twice.
+    expect(refused).toEqual([])
+    expect(warn).toHaveBeenCalledWith(expect.any(String), boom)
+    warn.mockRestore()
+  })
+
+  it('and the refusal re-arms the autosave at the backoff delay', async () => {
+    let delivery: SaveDelivery | undefined
+    await persistOnce(
+      () => {
+        throw new Error('x')
+      },
+      async () => {},
+      () => {
+        delivery = nextSaveDelivery(delivery, 0)
+      },
+      () => 'unchanged'
+    )
+    expect(autosaveDelay(true, false, delivery)).toBe(saveRetryDelay(1))
+  })
+
+  it('commits, then writes, when nothing throws', async () => {
+    const order: string[] = []
+    await persistOnce(
+      () => order.push('commit'),
+      async () => {
+        order.push('write')
+      },
+      () => order.push('refused'),
+      () => order.length
+    )
+    expect(order).toEqual(['commit', 'write'])
   })
 })
