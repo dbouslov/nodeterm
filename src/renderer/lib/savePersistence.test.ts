@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   autosaveDelay,
   nextSaveDelivery,
@@ -175,6 +175,7 @@ describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop
     // the store holding the live canvas. Skipping the write there would fail every retry the same
     // way while the data to save is sitting right in the store.
     const boom = new Error('subscriber blew up')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const refused: unknown[] = []
     const store = { state: 'old' }
     let written: string | null = null
@@ -189,8 +190,12 @@ describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop
       (err) => refused.push(err),
       () => store.state
     )
-    expect(refused).toEqual([boom])
     expect(written).toBe('new')
+    // Not a refusal: the write is still running and reports its own failure. Refusing here armed
+    // a retry against the in-flight write and counted one failure twice.
+    expect(refused).toEqual([])
+    expect(warn).toHaveBeenCalledWith(expect.any(String), boom)
+    warn.mockRestore()
   })
 
   it('and the refusal re-arms the autosave at the backoff delay', async () => {

@@ -87,8 +87,9 @@ export function autosaveDelay(
  *
  * `snapshot` says whether the commit LANDED before it threw. zustand's `set` stores the new state
  * and only then runs its listeners, so a throwing subscriber leaves the store holding the live
- * canvas: that is still written (skipping it would fail every retry the same way). A throw before
- * the store changed writes nothing, because the store does not hold the canvas. Field bug 2026-10-02: the commit ran outside every catch, the
+ * canvas: that is still written (skipping it would fail every retry the same way), and only logged,
+ * not refused, since `write` reports its own outcome. A throw before the store changed is refused
+ * and writes nothing, because the store does not hold the canvas. Field bug 2026-10-02: the commit ran outside every catch, the
  * `void persist()` in the debounce threw it away, `dirty` stayed TRUE, and no dep of the effect
  * ever changed again: no save and no trace line for ten hours while cards were opened and closed.
  */
@@ -102,8 +103,13 @@ export async function persistOnce(
   try {
     commit()
   } catch (err) {
-    refuse(err)
-    if (Object.is(snapshot(), before)) return
+    if (Object.is(snapshot(), before)) {
+      refuse(err)
+      return
+    }
+    // Landed: not a refusal. The write below reports its own failure; refusing here as well would
+    // arm a retry against the in-flight write and count one failure twice.
+    console.warn('[canvas] canvas commit threw after the store changed; writing anyway', err)
   }
   await write()
 }
