@@ -78,6 +78,30 @@ export function autosaveDelay(
 }
 
 /**
+ * One whole save: commit the live canvas into the store, then write the workspace.
+ *
+ * A throw from the COMMIT (serializing React Flow's nodes, the store update and the store's
+ * synchronous subscribers) is a refused save like any other: it goes to `refuse`, whose
+ * `nextSaveDelivery` is the autosave effect's re-arm dep, and it never escapes. `write` reports its
+ * own refusals the same way. Field bug 2026-10-02: the commit ran outside every catch, the
+ * `void persist()` in the debounce threw it away, `dirty` stayed TRUE, and no dep of the effect
+ * ever changed again: no save and no trace line for ten hours while cards were opened and closed.
+ */
+export async function persistOnce(
+  commit: () => void,
+  write: () => Promise<void>,
+  refuse: (err: unknown) => void
+): Promise<void> {
+  try {
+    commit()
+  } catch (err) {
+    refuse(err)
+    return
+  }
+  await write()
+}
+
+/**
  * The sentence the save-failure strip shows, or `null` while there is nothing to report.
  *
  * Says what was observed and never a cause that was not measured: from the renderer a refused

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   autosaveDelay,
   nextSaveDelivery,
+  persistOnce,
   saveFailureMessage,
   saveRetryDelay,
   SAVE_DEBOUNCE_MS,
@@ -140,5 +141,56 @@ describe('the call site still honours the rule', () => {
     // That spelling IS the bug: it discards the rejection AND the exception. Every save must
     // either be awaited by a caller that reports, or carry its own .catch.
     expect(SRC).not.toContain('void api.workspace.save(')
+  })
+})
+
+describe('persistOnce — a throwing COMMIT is a refused save, not a silent stop', () => {
+  // Field bug 2026-10-02: the live canvas stopped saving for 10 h with no trace line at all. The
+  // commit half of a save (serialize React Flow → store) ran outside every catch, `void persist()`
+  // ate the throw, `dirty` stayed true, and no dep of the autosave effect ever changed again.
+  it('reports the throw and resolves instead of rejecting', async () => {
+    const boom = new Error('commit blew up')
+    const refused: unknown[] = []
+    let wrote = false
+    await expect(
+      persistOnce(
+        () => {
+          throw boom
+        },
+        async () => {
+          wrote = true
+        },
+        (err) => refused.push(err)
+      )
+    ).resolves.toBeUndefined()
+    expect(refused).toEqual([boom])
+    // Nothing reached the store, so nothing may be written as if it had.
+    expect(wrote).toBe(false)
+  })
+
+  it('and the refusal re-arms the autosave at the backoff delay', async () => {
+    let delivery: SaveDelivery | undefined
+    await persistOnce(
+      () => {
+        throw new Error('x')
+      },
+      async () => {},
+      () => {
+        delivery = nextSaveDelivery(delivery, 0)
+      }
+    )
+    expect(autosaveDelay(true, false, delivery)).toBe(saveRetryDelay(1))
+  })
+
+  it('commits, then writes, when nothing throws', async () => {
+    const order: string[] = []
+    await persistOnce(
+      () => order.push('commit'),
+      async () => {
+        order.push('write')
+      },
+      () => order.push('refused')
+    )
+    expect(order).toEqual(['commit', 'write'])
   })
 })

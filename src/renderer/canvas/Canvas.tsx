@@ -156,6 +156,7 @@ import { shouldReleasePaneFocus } from '../lib/paneFocus'
 import {
   autosaveDelay,
   nextSaveDelivery,
+  persistOnce,
   type SaveDelivery
 } from '../lib/savePersistence'
 import { SaveFailureBar } from '../components/SaveFailureBar'
@@ -2827,10 +2828,16 @@ export function Canvas() {
     setResaveTick((v) => v + 1)
   }, [])
 
-  const persist = useCallback(async () => {
-    commitActiveToStore()
-    await writeDisk()
-  }, [commitActiveToStore, writeDisk])
+  // A commit that throws must re-arm the debounce like a refused write, never stop it: see
+  // persistOnce for the field bug.
+  const persist = useCallback(
+    () =>
+      persistOnce(commitActiveToStore, writeDisk, (err) => {
+        console.warn('[canvas] canvas commit failed', err)
+        setSaveDelivery((prev) => nextSaveDelivery(prev, Date.now()))
+      }),
+    [commitActiveToStore, writeDisk]
+  )
 
   // Global kanban reads ALL lanes from serialized `p.nodes`, but the active project's
   // live React Flow nodes may have uncommitted edits (title rename, new node). Commit
