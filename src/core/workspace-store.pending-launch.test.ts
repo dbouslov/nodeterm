@@ -161,4 +161,50 @@ describe('a relay peer\'s workspace:save cannot arm, replace or clear a held lau
     expect(kept.shell).toBe('/bin/zsh')
     expect(kept.ssh?.extraArgs).toBe(ssh.extraArgs)
   })
+
+  it('a peer save that lands before the store read the index (a restart) keeps the owner\'s launch', async () => {
+    await new WorkspaceStore().save(ws([project({ cwd: projRoot })]))
+    // `saveIpc` belongs to a store that has neither loaded nor saved: the restarted app.
+    await saveIpc(PEER, ws([project({ cwd: projRoot, nodes: [plain] })]))
+    expect((await loadNode()).pendingLaunch).toEqual(launch)
+  })
+
+  it('an unreadable index refuses that peer save rather than assume there is nothing to carry', async () => {
+    await new WorkspaceStore().save(ws([project({ cwd: projRoot })]))
+    const indexPath = path.join(userData, 'workspace.json')
+    const before = await fs.readFile(indexPath, 'utf-8')
+    await fs.writeFile(indexPath, '{ not json')
+    await saveIpc(PEER, ws([project({ cwd: projRoot, nodes: [plain] })]))
+    expect(await fs.readFile(indexPath, 'utf-8')).toBe('{ not json')
+    await fs.writeFile(indexPath, before)
+    expect((await loadNode()).pendingLaunch).toEqual(launch)
+  })
+
+  it('a pre-file inline entry: the launch is carried from its verbatim `project` copy', async () => {
+    // No dataFile: the entry keeps its exec values inside `project`, not `localExec`.
+    await fs.writeFile(path.join(userData, 'workspace.json'), JSON.stringify({
+      version: 3, activeProjectId: 'p1',
+      entries: [{ id: 'p1', name: 'foo', color: '#fff', project: project() }]
+    }))
+    const store = new WorkspaceStore()
+    const p = fakePlatform({ userDataDir: userData, isOwnerClient: (id) => id === OWNER })
+    initPlatform(p)
+    store.registerIpc()
+    await store.load()
+    await (p.handlers[IPC.workspaceSave] as typeof saveIpc)(
+      PEER, ws([project({ nodes: [{ ...plain, pendingLaunch: pwned }] })]))
+    expect((await loadNode()).pendingLaunch).toEqual(launch)
+  })
+})
+
+describe('a platform that does not know owners (no isOwnerClient)', () => {
+  it('treats every workspace:save as untrusted', async () => {
+    const p = fakePlatform({ userDataDir: userData })
+    initPlatform(p)
+    new WorkspaceStore().registerIpc()
+    const saveIpc = p.handlers[IPC.workspaceSave] as (senderId: number, ws: Workspace) => Promise<void>
+    await saveIpc(1, ws([project({ cwd: projRoot })]))
+    expect((await new WorkspaceStore().load()).projects[0].nodes[0].pendingLaunch).toBeUndefined()
+    expect(await fs.readFile(path.join(userData, 'workspace.json'), 'utf-8')).not.toContain('the brief')
+  })
 })

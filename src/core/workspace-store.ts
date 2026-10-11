@@ -1001,21 +1001,48 @@ export class WorkspaceStore {
    *  the ones this store last persisted, resolved inside the chain so the latest owner save is the
    *  one carried. */
   save(workspace: Workspace, trustExec = true): Promise<void> {
-    const run = this.saveChain.then(() =>
-      this.saveNow(trustExec ? workspace : this.withPersistedExec(workspace)))
+    const run = this.saveChain.then(async () => {
+      if (trustExec) return this.saveNow(workspace)
+      // A peer save can land before this store has read the index (an app restart, then the
+      // phone's autosave first). With nothing to look up it would strip the owner's exec fields
+      // for good, so read what is on disk; a read that fails for any reason but absence refuses.
+      const persisted = this.index ?? await this.readIndexForPeerSave()
+      if (persisted === 'unknown') {
+        this.trace('save-refused', { reason: 'peer-before-index-read' })
+        return
+      }
+      return this.saveNow(this.withPersistedExec(workspace, persisted))
+    })
     this.saveChain = run.catch(() => {})
     return run
+  }
+
+  /** workspace.json as on disk for `withPersistedExec`: `null` when there is none (nothing
+   *  persisted, so nothing to carry), `'unknown'` when it could not be read or is not a v3 index. */
+  private async readIndexForPeerSave(): Promise<WorkspaceIndexV3 | null | 'unknown'> {
+    let raw: string
+    try {
+      raw = await fs.readFile(this.indexPath, 'utf-8')
+    } catch (err) {
+      return (err as NodeJS.ErrnoException)?.code === 'ENOENT' ? null : 'unknown'
+    }
+    try {
+      const parsed = JSON.parse(raw) as WorkspaceIndexV3
+      return parsed?.version === 3 && Array.isArray(parsed.entries) ? parsed : 'unknown'
+    } catch {
+      return 'unknown'
+    }
   }
 
   /** The workspace with every node's exec fields (`shell`, `ssh.extraArgs`/`execTrusted`, held
    *  `pendingLaunch`) set to the ones already persisted for it, or none: a peer can neither set,
    *  replace nor clear one — the rule `carryLocalNodeExec` applies to its canvas mutations. An
    *  inline entry keeps them on its verbatim `project` copy instead of `localExec`. */
-  private withPersistedExec(workspace: Workspace): Workspace {
+  private withPersistedExec(workspace: Workspace, persisted: WorkspaceIndexV3 | null): Workspace {
     return {
       ...workspace,
       projects: workspace.projects.map((p) => {
-        const e = this.index?.entries.find((x) => x.id === p.id)
+        const e = persisted?.entries.find((x) => x.id === p.id)
         const ours = e?.localExec ?? (e?.project ? localNodeExec(e.project.nodes) : undefined)
         return { ...p, nodes: applyLocalNodeExec(p.nodes, ours) }
       })
