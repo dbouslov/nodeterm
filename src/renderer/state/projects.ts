@@ -24,6 +24,7 @@ import {
 } from '@shared/canvas-layout'
 import {
   applyCanvasMutation,
+  applyOwnCanvasMutation,
   createProject,
   removeNodesFreeingChildren,
   reorderGroupWithinParent
@@ -160,6 +161,14 @@ interface ProjectsState {
    * they deleted on the very next save — the data-loss shape canvas sync exists to fix.
    */
   applyNodeMutation(projectId: string, mutation: CanvasMutation): boolean
+  /**
+   * Applies a mutation THIS renderer authored (a cold open, an off-canvas display node, the
+   * headless start's outcome patch) to a project that is not on screen. Unlike `applyNodeMutation`
+   * nothing is stripped: the node's machine-local `pendingLaunch` is ours to set, and an upsert
+   * without one CLEARS it (the peer path carries the old one across instead — @shared/node-exec).
+   * Never route a peer's mutation through this.
+   */
+  applyOwnNodeMutation(projectId: string, mutation: CanvasMutation): boolean
   /** Renames a node within a project (source of truth for inactive projects). */
   renameNode(projectId: string, nodeId: string, title: string): void
   /** Recolors a node within a project. */
@@ -592,6 +601,16 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     set((s) => ({
       projects: mapProjectNodes(s.projects, projectId, (nodes) =>
         applyCanvasMutation(nodes, mutation)
+      )
+    }))
+    return true
+  },
+
+  applyOwnNodeMutation(projectId, mutation) {
+    if (!get().projects.some((p) => p.id === projectId)) return false
+    set((s) => ({
+      projects: mapProjectNodes(s.projects, projectId, (nodes) =>
+        applyOwnCanvasMutation(nodes, mutation)
       )
     }))
     return true

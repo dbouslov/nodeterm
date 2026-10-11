@@ -2,7 +2,7 @@
 // the relay host (src/main/remote), the renderer (Canvas), and the canvas-sync reflector
 // (src/core). Pure: no electron, no sockets, no disk.
 
-import { carryLocalNodeExec, sanitizeInboundNode } from './node-exec'
+import { carryLocalNodeExec, mutationTrustsLaunch, sanitizeInboundNode } from './node-exec'
 import { REF_MAX_LEN } from './presence'
 import type { CanvasMutation, CanvasNodeState } from './types'
 
@@ -152,13 +152,35 @@ export function applyCanvasMutation(
   m: CanvasMutation
 ): CanvasNodeState[] {
   if (m.op === 'remove') return states.filter((n) => n.id !== m.id)
-  const node = sanitizeInboundNode(m.node)
+  // A held launch (`pendingLaunch`) is machine-local too; only a core-vouched owner copy
+  // (`origin: 'core'`) may set or clear it (@shared/node-exec).
+  const trust = mutationTrustsLaunch(m)
+  const node = sanitizeInboundNode(m.node, trust)
   const idx = states.findIndex((n) => n.id === node.id)
   if (idx === -1) return [...states, node]
   const next = states.slice()
   // …and OUR exec fields stay on the node the upsert replaces: they are per-machine, so a peer
   // dragging our ssh terminal must not hand it back stripped of the jump host we configured.
-  next[idx] = carryLocalNodeExec(states[idx], node)
+  next[idx] = carryLocalNodeExec(states[idx], node, trust)
+  return next
+}
+
+/**
+ * Apply a mutation THIS renderer authored itself (a cold open into a background project, the
+ * headless start's outcome patch, an off-canvas display node). Nothing is stripped or carried: the
+ * write is ours, so its `pendingLaunch` is the one to keep — and an upsert without one CLEARS it,
+ * which the inbound path above can never do (it carries the old one across). Never call this with a
+ * mutation that arrived from anywhere else; that is what `applyCanvasMutation` is for.
+ */
+export function applyOwnCanvasMutation(
+  states: CanvasNodeState[],
+  m: CanvasMutation
+): CanvasNodeState[] {
+  if (m.op === 'remove') return states.filter((n) => n.id !== m.id)
+  const idx = states.findIndex((n) => n.id === m.node.id)
+  if (idx === -1) return [...states, m.node]
+  const next = states.slice()
+  next[idx] = m.node
   return next
 }
 

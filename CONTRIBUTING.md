@@ -513,6 +513,14 @@ reply carries it (`queued` / `queuedIds`), because a user who cannot see the fai
 orchestrator that is told "opened" both act on a session that is not there. If you add a bounded
 retry anywhere, ask what the clock actually starts on and where its exhaustion becomes visible.
 
+**A held launch is an exec field.** `pendingLaunch` is a command typed into a shell when its wait
+ends, so it is MACHINE-LOCAL like `shell` (`src/shared/node-exec.ts`): it rides workspace.json's
+`localExec`, never the git-shared `.nodeterm/project.json`, and a peer's or relay guest's value is
+dropped on `canvas:mut` and on `workspace:save` (a non-owner save keeps the persisted launch). A write your renderer authors into a background project goes through
+`applyOwnNodeMutation`, never the peer path `applyNodeMutation` (which strips the launch and cannot
+clear one). The same goes for the machine-local settings overlay (`project-settings:update-local`):
+its `launchCmd` / `env` / `shell` skip the consent dialog, so only an owner client may write it.
+
 **Never move the user's view on a background agent's say-so.** Canvas-control requests route by
 SOURCE, and React Flow holds only the ACTIVE project's nodes — so the dispatch used to travel to the
 caller's project before answering. For an OPEN that was a screen hijack: the user is looking at
@@ -565,7 +573,7 @@ an SSH ref (the same file on the host, with an offline `cache`), and a cwd-less 
 (`userData/inline-projects/<id>.json`, with the entry's `project` field kept as a cache for one
 release so an older build still reads it). Two habits follow. **Content goes in the file; anything
 this machine would legitimately disagree with another machine about — project id, viewport, default
-account, breadcrumbs, closed-session history, per-node `shell` — goes on the index entry**
+account, breadcrumbs, closed-session history, per-node `shell` and held `pendingLaunch` — goes on the index entry**
 (`IndexEntryV3`), or a `git worktree add` / a second instance hands one machine's state to another.
 And **`workspace.json` is one file with last-writer-wins semantics, so it may not be the only home
 of any content**: that is precisely what let a second app instance erase a cwd-less canvas. Between

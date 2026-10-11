@@ -39,9 +39,9 @@ import { useSettings } from './settings'
 // Re-exported so Canvas (and anything else in the renderer) keeps importing it from here, while the
 // single implementation lives in src/shared and is shared with the relay host + the canvas-sync
 // reflector.
-export { applyCanvasMutation } from '@shared/canvas-mutations'
+export { applyCanvasMutation, applyOwnCanvasMutation } from '@shared/canvas-mutations'
 export { accountNodeColor, agentAccountColor } from '@shared/agents/account-color'
-import { sanitizeInboundNode } from '@shared/node-exec'
+import { mutationTrustsLaunch, sanitizeInboundNode } from '@shared/node-exec'
 import { SYSTEM_NODE_COLORS } from '@shared/node-colors'
 
 // Preserve the renderer's long-standing import surface; validation and the palette now live in
@@ -2257,7 +2257,9 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
   // into this machine's "trusted" workspace.json on the next save.
   // The Dock flag (@shared/dock) is local too: a peer can neither set, clear nor duplicate it, so
   // it is stripped here and the local node's own flag is carried across below.
-  const incoming = nodeStatesToFlow([{ ...sanitizeInboundNode(m.node), fixture: undefined }])[0]
+  // …nor a held launch (`pendingLaunch`), unless the core vouched for an owner copy (@shared/node-exec).
+  const trustLaunch = mutationTrustsLaunch(m)
+  const incoming = nodeStatesToFlow([{ ...sanitizeInboundNode(m.node, trustLaunch), fixture: undefined }])[0]
   const idx = nodes.findIndex((n) => n.id === m.node.id)
   if (idx === -1) {
     // Append, then re-sort: React Flow requires a parent to appear BEFORE its children, and a peer
@@ -2285,6 +2287,8 @@ export function applyMutationToFlow(nodes: CanvasNode[], m: CanvasMutation): Can
       shell: prev.data.shell,
       fixture: prev.data.fixture,
       ...(keepDock ? { pinned: true } : {}),
+      // Ours, unless the core vouched for this copy — then it is authoritative, a clear included.
+      pendingLaunch: trustLaunch ? incoming.data.pendingLaunch : prev.data.pendingLaunch,
       ...(incoming.data.ssh && prev.data.ssh?.extraArgs
         ? {
             ssh: {

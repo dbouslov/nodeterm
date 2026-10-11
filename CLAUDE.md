@@ -2684,7 +2684,23 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   **Dependency edges (`--after`, 2026-07):** `open-terminal`/`open-claude`/`open-agent` accept
   `--after <id,id>`, which opens the node **armed** — `data.pendingLaunch` ({after, command},
   `PendingLaunch` in shared/types) holds the launch the factory built, and Canvas fires it once
-  every dep reports `done`. This is what makes the canvas a DAG instead of a fan-out. Load-bearing
+  every dep reports `done`. This is what makes the canvas a DAG instead of a fan-out.
+  **`pendingLaunch` is a MACHINE-LOCAL exec field, like `shell`** (@shared/node-exec): its `command`
+  is typed into a shell once the wait is over, and `after: []` or a vanished dep counts as over, so
+  a value that arrives from outside would run a command nobody here armed. It is persisted in
+  workspace.json's `IndexEntryV3.localExec` (every ref kind: folder, SSH, local-data), NEVER in
+  `.nodeterm/project.json` or an SSH mirror (`stripSharedNodeExec`), and a file that carries one is
+  ignored on read — the one-time legacy hoist deliberately does not adopt it either (provenance
+  cannot be told apart, so an armed node written by an older build loses its held launch on
+  upgrade). On `canvas:mut` a peer's value is stripped and OUR value carried across its upserts
+  (`carryLocalNodeExec`); a non-owner `workspace:save` gets the same rule (the store swaps in the
+  persisted exec fields per node, `WorkspaceStore.save(_, trustExec)`); the reflector forwards one only between OWNER clients
+  (`CorePlatform.isOwnerClient`: the app window, a cookie-authenticated Server Edition tab — never a
+  relay peer), stamped `origin: 'core'`, which a client cannot supply and a relay tab ignores. That
+  owner→owner leg is load-bearing: it is how two Server Edition tabs agree a launch was claimed, and
+  how a headless delivery's clear reaches the browser, so nothing types it twice. Our OWN writes
+  into a background project go through `applyOwnNodeMutation` (unstripped — a cold open keeps its
+  launch, a patch to `undefined` clears it); `applyNodeMutation` is the peer path. Load-bearing
   details: (1) **an unknown agent state is NOT "satisfied"** — right after a fan-out no upstream has
   emitted a hook event yet, and reading "no news" as "finished" would fire every dependent
   instantly; a **deleted** dep IS satisfied (it can never report); and a dep that is `done` with a
@@ -2754,7 +2770,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   rope drops that dep from `after` (`dropAfterDep`) and takes **nothing else** — the covered bridge
   survives, because "stop waiting for it" is not "stop being able to read its work"; an emptied
   list fires. Only the `open-*`/`verify` verbs write the rope, so `missingDepRopes` heals an armed
-  node that has none at **project load**: `pendingLaunch` is persisted and the rope is not, so a node
+  node that has none at **project load**: `pendingLaunch` is persisted (machine-locally) and the rope is not, so a node
   armed by any other path — or by a build older than this one — would otherwise hold a launch with
   no arrow saying what for. All edges route through the single `circuit` edge type
   (`canvas/edges/CircuitEdge.tsx`): orthogonal paths from the pure router in `lib/edge-routing/`

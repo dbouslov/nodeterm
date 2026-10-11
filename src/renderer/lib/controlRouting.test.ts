@@ -145,7 +145,7 @@ describe('needsLiveCanvas', () => {
   it('is false for sticky — a scheduled note sync must never travel the camera either', () => {
     // Same G5 shape as send/reply: routing is by SOURCE, and the verb's headline use is a cron
     // agent rewriting one note every few minutes. The non-active write path goes through the
-    // projects store (`applyNodeMutation`), not the live canvas.
+    // projects store (`applyOwnNodeMutation`), not the live canvas.
     expect(needsLiveCanvas('sticky')).toBe(false)
   })
 

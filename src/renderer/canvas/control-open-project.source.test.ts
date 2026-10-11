@@ -100,11 +100,11 @@ describe('the --project targeted-opens block (source pins)', () => {
 
   it('the gate order is refusal-before-write: every refusal precedes every store/canvas write', () => {
     // A refused target must write NOTHING. The flag refusal, the source checks, the
-    // unknown-target belt and the SSH belt all return before the first applyNodeMutation or
+    // unknown-target belt and the SSH belt all return before the first applyOwnNodeMutation or
     // setNodes — moving a write above any of them is the gate-before-write mutation.
     const body = targetedOpensBody()
     const firstWrite = Math.min(
-      ...['applyNodeMutation', 'setNodes'].map((s) => {
+      ...['applyOwnNodeMutation', 'setNodes'].map((s) => {
         const i = body.indexOf(s)
         return i === -1 ? body.length : i
       })
