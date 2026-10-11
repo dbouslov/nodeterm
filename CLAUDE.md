@@ -2694,7 +2694,7 @@ still sees a station that finished before a relaunch; see Dependency edges, item
   cannot be told apart, so an armed node written by an older build loses its held launch on
   upgrade). On `canvas:mut` a peer's value is stripped and OUR value carried across its upserts
   (`carryLocalNodeExec`); a non-owner `workspace:save` gets the same rule (the store swaps in the
-  persisted launch per node, `WorkspaceStore.save(_, trustLaunch)`); the reflector forwards one only between OWNER clients
+  persisted exec fields per node, `WorkspaceStore.save(_, trustExec)`); the reflector forwards one only between OWNER clients
   (`CorePlatform.isOwnerClient`: the app window, a cookie-authenticated Server Edition tab — never a
   relay peer), stamped `origin: 'core'`, which a client cannot supply and a relay tab ignores. That
   owner→owner leg is load-bearing: it is how two Server Edition tabs agree a launch was claimed, and

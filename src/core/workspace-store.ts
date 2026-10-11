@@ -6,7 +6,7 @@ import { IPC } from '../shared/ipc'
 import { platform } from './platform'
 import {
   DEFAULT_PROJECT_ID, EMPTY_WORKSPACE,
-  type BridgeLink, type CanvasNodeState, type KanbanColumn, type PendingLaunch, type Project, type Workspace,
+  type BridgeLink, type CanvasNodeState, type KanbanColumn, type Project, type Workspace,
   type WorkspaceV1
 } from '../shared/types'
 import {
@@ -25,7 +25,7 @@ import {
 } from '../shared/project-settings'
 import { readProjectCapabilities, type ProjectCapability } from '../shared/project-capabilities'
 import type { CapabilityAckMap } from './project-capability-consent'
-import { hoistLegacyNodeExec, type LocalNodeExecMap } from '../shared/node-exec'
+import { applyLocalNodeExec, hoistLegacyNodeExec, localNodeExec, type LocalNodeExecMap } from '../shared/node-exec'
 import { collisionSeed, derivedProjectId, freshProjectId } from '../shared/project-id'
 import {
   pruneLayoutViewports,
@@ -259,8 +259,8 @@ export class WorkspaceStore {
 
   registerIpc(): void {
     platform().handle(IPC.workspaceLoad, () => this.load())
-    // Peers (a phone, a teammate) save too — their renderer autosaves — but a held launch types a
-    // command into THIS machine's shell, so only the owner's save may set or clear one.
+    // Peers (a phone, a teammate) save too — their renderer autosaves — but the exec fields (a held
+    // launch, a shell, ssh args) run on THIS machine, so only the owner's save may set or clear them.
     platform().handleWithSender(IPC.workspaceSave, (senderId: number, workspace: Workspace) =>
       this.save(workspace, platform().isOwnerClient?.(senderId) === true))
     platform().handle(IPC.workspaceProbeFolder, (folder: string) => this.probeFolder(folder))
@@ -994,34 +994,28 @@ export class WorkspaceStore {
    *  projects went blank after tab switching" wipe. */
   private saveChain: Promise<unknown> = Promise.resolve()
 
-  /** `trustLaunch: false` is a relay peer's save (see `registerIpc`): its `pendingLaunch` values are
-   *  replaced by the ones this store last persisted, resolved inside the chain so the latest owner
-   *  save is the one carried. */
-  save(workspace: Workspace, trustLaunch = true): Promise<void> {
+  /** `trustExec: false` is a relay peer's save (see `registerIpc`): its exec fields are replaced by
+   *  the ones this store last persisted, resolved inside the chain so the latest owner save is the
+   *  one carried. */
+  save(workspace: Workspace, trustExec = true): Promise<void> {
     const run = this.saveChain.then(() =>
-      this.saveNow(trustLaunch ? workspace : this.withPersistedLaunches(workspace)))
+      this.saveNow(trustExec ? workspace : this.withPersistedExec(workspace)))
     this.saveChain = run.catch(() => {})
     return run
   }
 
-  /** The workspace with every node's held launch set to the one already persisted for it (or none):
-   *  a peer can neither arm, replace nor clear one — the same rule `carryLocalNodeExec` applies to
-   *  its canvas mutations. */
-  private withPersistedLaunches(workspace: Workspace): Workspace {
-    const persisted = (projectId: string, nodeId: string): PendingLaunch | undefined => {
-      const e = this.index?.entries.find((x) => x.id === projectId)
-      return e?.localExec?.[nodeId]?.pendingLaunch ??
-        e?.project?.nodes.find((n) => n.id === nodeId)?.pendingLaunch
-    }
+  /** The workspace with every node's exec fields (`shell`, `ssh.extraArgs`/`execTrusted`, held
+   *  `pendingLaunch`) set to the ones already persisted for it, or none: a peer can neither set,
+   *  replace nor clear one — the rule `carryLocalNodeExec` applies to its canvas mutations. An
+   *  inline entry keeps them on its verbatim `project` copy instead of `localExec`. */
+  private withPersistedExec(workspace: Workspace): Workspace {
     return {
       ...workspace,
-      projects: workspace.projects.map((p) => ({
-        ...p,
-        nodes: p.nodes.map(({ pendingLaunch: _theirs, ...n }) => {
-          const ours = persisted(p.id, n.id)
-          return ours ? { ...n, pendingLaunch: ours } : n
-        })
-      }))
+      projects: workspace.projects.map((p) => {
+        const e = this.index?.entries.find((x) => x.id === p.id)
+        const ours = e?.localExec ?? (e?.project ? localNodeExec(e.project.nodes) : undefined)
+        return { ...p, nodes: applyLocalNodeExec(p.nodes, ours) }
+      })
     }
   }
 

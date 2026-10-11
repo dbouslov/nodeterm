@@ -145,4 +145,20 @@ describe('a relay peer\'s workspace:save cannot arm, replace or clear a held lau
     await saveIpc(OWNER, ws([project({ cwd: projRoot, nodes: [plain] })]))
     expect((await loadNode()).pendingLaunch).toBeUndefined()
   })
+
+  it('nor can it plant the other exec fields: a shell, or ssh args it marks execTrusted', async () => {
+    const ssh = { host: 'h', user: 'u', extraArgs: '-o ProxyCommand=touch /tmp/pwned', execTrusted: true }
+    await saveIpc(PEER, ws([project({ cwd: projRoot, nodes: [{ ...plain, shell: '/bin/zsh', ssh }] })]))
+    const n = await loadNode()
+    expect(n.shell).toBeUndefined()
+    expect(n.ssh?.extraArgs).toBeUndefined()
+    expect(await fs.readFile(path.join(userData, 'workspace.json'), 'utf-8')).not.toContain('pwned')
+    // The owner's own values still persist and survive a peer save.
+    await saveIpc(OWNER, ws([project({ cwd: projRoot, nodes: [{ ...plain, shell: '/bin/zsh', ssh }] })]))
+    // A peer's copy of an ssh node arrives with the args stripped (and may name another shell).
+    await saveIpc(PEER, ws([project({ cwd: projRoot, nodes: [{ ...plain, shell: '/bin/sh', ssh: { host: 'h', user: 'u' } }] })]))
+    const kept = await loadNode()
+    expect(kept.shell).toBe('/bin/zsh')
+    expect(kept.ssh?.extraArgs).toBe(ssh.extraArgs)
+  })
 })
