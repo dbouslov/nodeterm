@@ -5,6 +5,7 @@ import path from 'path'
 import { initPlatform, resetPlatformForTests } from './platform'
 import { fakePlatform } from './platform-fake'
 import { WorkspaceStore } from './workspace-store'
+import { IPC } from '../shared/ipc'
 import type { CanvasNodeState, PendingLaunch, Project, Workspace } from '../shared/types'
 
 /**
@@ -99,5 +100,49 @@ describe('a project.json that carries pendingLaunch is ignored', () => {
     const index = JSON.parse(await fs.readFile(path.join(userData, 'workspace.json'), 'utf-8'))
     expect(JSON.stringify(index)).not.toContain('pwned')
     expect(await projectFile()).not.toContain('pwned')
+  })
+})
+
+describe('a relay peer\'s workspace:save cannot arm, replace or clear a held launch', () => {
+  const OWNER = 1
+  const PEER = 1_000_001
+  const pwned: PendingLaunch = { after: [], command: 'touch /tmp/pwned' }
+  let saveIpc: (senderId: number, ws: Workspace) => Promise<void>
+
+  beforeEach(() => {
+    const p = fakePlatform({ userDataDir: userData, isOwnerClient: (id) => id === OWNER })
+    initPlatform(p)
+    new WorkspaceStore().registerIpc()
+    saveIpc = p.handlers[IPC.workspaceSave] as typeof saveIpc
+  })
+
+  const loadNode = async (): Promise<CanvasNodeState> => (await new WorkspaceStore().load()).projects[0].nodes[0]
+  const plain: CanvasNodeState = { ...armedNode, pendingLaunch: undefined }
+
+  it('a peer-shaped save carrying pendingLaunch does not survive into the loaded node', async () => {
+    await saveIpc(PEER, ws([project({ cwd: projRoot, nodes: [{ ...plain, pendingLaunch: pwned }] })]))
+    expect((await loadNode()).pendingLaunch).toBeUndefined()
+    const index = await fs.readFile(path.join(userData, 'workspace.json'), 'utf-8')
+    expect(index).not.toContain('pwned')
+  })
+
+  it('cwd-less project: same', async () => {
+    await saveIpc(PEER, ws([project({ nodes: [{ ...plain, pendingLaunch: pwned }] })]))
+    expect((await loadNode()).pendingLaunch).toBeUndefined()
+  })
+
+  it('the owner\'s armed launch is carried across a peer save that replaces or omits it', async () => {
+    await saveIpc(OWNER, ws([project({ cwd: projRoot })]))
+    await saveIpc(PEER, ws([project({ cwd: projRoot, nodes: [{ ...plain, pendingLaunch: pwned }] })]))
+    expect((await loadNode()).pendingLaunch).toEqual(launch)
+    await saveIpc(PEER, ws([project({ cwd: projRoot, nodes: [plain] })]))
+    expect((await loadNode()).pendingLaunch).toEqual(launch)
+  })
+
+  it('the owner\'s own saves still set and clear it', async () => {
+    await saveIpc(OWNER, ws([project({ cwd: projRoot })]))
+    expect((await loadNode()).pendingLaunch).toEqual(launch)
+    await saveIpc(OWNER, ws([project({ cwd: projRoot, nodes: [plain] })]))
+    expect((await loadNode()).pendingLaunch).toBeUndefined()
   })
 })

@@ -61,6 +61,23 @@ describe('machine-local index round-trip', () => {
     const local = { 'term-abc': { pendingLaunch: { command: 'x', after: 'dep' } as unknown as PendingLaunch } }
     expect(applyLocalNodeExec([node()], local)[0].pendingLaunch).toBeUndefined()
   })
+  it('drops a hold a newer build gated on something this build cannot enforce (it would fire at once)', () => {
+    const gated = [
+      { after: [], command: 'x', manualOnly: true },
+      { after: [], command: 'x', attempted: true },
+      { after: [], command: 'x', afterPr: { repo: 'o/r', pr: 1 } },
+      { after: [], command: 'x', afterSuccess: { ids: ['dep'] } }
+    ]
+    for (const held of gated) {
+      const local = { 'term-abc': { pendingLaunch: held as unknown as PendingLaunch } }
+      expect(applyLocalNodeExec([node()], local)[0].pendingLaunch).toBeUndefined()
+    }
+    // …while an ungated hold, and one only marked NOT attempted, still load.
+    for (const held of [{ after: [], command: 'x' }, { after: [], command: 'x', attempted: false }]) {
+      const local = { 'term-abc': { pendingLaunch: held as unknown as PendingLaunch } }
+      expect(applyLocalNodeExec([node()], local)[0].pendingLaunch).toMatchObject({ command: 'x' })
+    }
+  })
   it('never writes into the caller\'s node objects', () => {
     const input = node()
     applyLocalNodeExec([input], { 'term-abc': { pendingLaunch: ours } })

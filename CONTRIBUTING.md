@@ -516,7 +516,7 @@ retry anywhere, ask what the clock actually starts on and where its exhaustion b
 **A held launch is an exec field.** `pendingLaunch` is a command typed into a shell when its wait
 ends, so it is MACHINE-LOCAL like `shell` (`src/shared/node-exec.ts`): it rides workspace.json's
 `localExec`, never the git-shared `.nodeterm/project.json`, and a peer's or relay guest's value is
-dropped on `canvas:mut`. A write your renderer authors into a background project goes through
+dropped on `canvas:mut` and on `workspace:save` (a non-owner save keeps the persisted launch). A write your renderer authors into a background project goes through
 `applyOwnNodeMutation`, never the peer path `applyNodeMutation` (which strips the launch and cannot
 clear one).
 

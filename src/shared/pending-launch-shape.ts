@@ -20,6 +20,10 @@ export function normalizePendingLaunch(value: unknown): PendingLaunch | undefine
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const v = value as Record<string, unknown>
   if (typeof v.command !== 'string') return undefined
+  // A newer build's gates this build does not enforce: kept as unknown fields, the hold would fire
+  // at once. `manualOnly`/`attempted: true` wait for ▶; `afterPr`/`afterSuccess` wait on more than `after`.
+  if (v.manualOnly === true || v.attempted === true) return undefined
+  if (v.afterPr !== undefined || v.afterSuccess !== undefined) return undefined
   if (v.after !== undefined && !isStringList(v.after)) return undefined
   if (v.executor !== undefined && v.executor !== 'server') return undefined
   if (v.awaitWorking !== undefined && !isStringList(v.awaitWorking)) return undefined

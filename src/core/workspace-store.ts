@@ -6,7 +6,7 @@ import { IPC } from '../shared/ipc'
 import { platform } from './platform'
 import {
   DEFAULT_PROJECT_ID, EMPTY_WORKSPACE,
-  type BridgeLink, type CanvasNodeState, type KanbanColumn, type Project, type Workspace,
+  type BridgeLink, type CanvasNodeState, type KanbanColumn, type PendingLaunch, type Project, type Workspace,
   type WorkspaceV1
 } from '../shared/types'
 import {
@@ -259,7 +259,10 @@ export class WorkspaceStore {
 
   registerIpc(): void {
     platform().handle(IPC.workspaceLoad, () => this.load())
-    platform().handle(IPC.workspaceSave, (workspace: Workspace) => this.save(workspace))
+    // Peers (a phone, a teammate) save too — their renderer autosaves — but a held launch types a
+    // command into THIS machine's shell, so only the owner's save may set or clear one.
+    platform().handleWithSender(IPC.workspaceSave, (senderId: number, workspace: Workspace) =>
+      this.save(workspace, platform().isOwnerClient?.(senderId) === true))
     platform().handle(IPC.workspaceProbeFolder, (folder: string) => this.probeFolder(folder))
     platform().handle(IPC.workspaceProjectFileState, (cwd: unknown) =>
       typeof cwd === 'string' && cwd ? this.projectFileState(cwd) : 'unreadable')
@@ -991,10 +994,35 @@ export class WorkspaceStore {
    *  projects went blank after tab switching" wipe. */
   private saveChain: Promise<unknown> = Promise.resolve()
 
-  save(workspace: Workspace): Promise<void> {
-    const run = this.saveChain.then(() => this.saveNow(workspace))
+  /** `trustLaunch: false` is a relay peer's save (see `registerIpc`): its `pendingLaunch` values are
+   *  replaced by the ones this store last persisted, resolved inside the chain so the latest owner
+   *  save is the one carried. */
+  save(workspace: Workspace, trustLaunch = true): Promise<void> {
+    const run = this.saveChain.then(() =>
+      this.saveNow(trustLaunch ? workspace : this.withPersistedLaunches(workspace)))
     this.saveChain = run.catch(() => {})
     return run
+  }
+
+  /** The workspace with every node's held launch set to the one already persisted for it (or none):
+   *  a peer can neither arm, replace nor clear one — the same rule `carryLocalNodeExec` applies to
+   *  its canvas mutations. */
+  private withPersistedLaunches(workspace: Workspace): Workspace {
+    const persisted = (projectId: string, nodeId: string): PendingLaunch | undefined => {
+      const e = this.index?.entries.find((x) => x.id === projectId)
+      return e?.localExec?.[nodeId]?.pendingLaunch ??
+        e?.project?.nodes.find((n) => n.id === nodeId)?.pendingLaunch
+    }
+    return {
+      ...workspace,
+      projects: workspace.projects.map((p) => ({
+        ...p,
+        nodes: p.nodes.map(({ pendingLaunch: _theirs, ...n }) => {
+          const ours = persisted(p.id, n.id)
+          return ours ? { ...n, pendingLaunch: ours } : n
+        })
+      }))
+    }
   }
 
   private async saveNow(workspace: Workspace): Promise<void> {
