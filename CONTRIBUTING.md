@@ -518,7 +518,8 @@ ends, so it is MACHINE-LOCAL like `shell` (`src/shared/node-exec.ts`): it rides 
 `localExec`, never the git-shared `.nodeterm/project.json`, and a peer's or relay guest's value is
 dropped on `canvas:mut` and on `workspace:save` (a non-owner save keeps the persisted launch). A write your renderer authors into a background project goes through
 `applyOwnNodeMutation`, never the peer path `applyNodeMutation` (which strips the launch and cannot
-clear one).
+clear one). The same goes for the machine-local settings overlay (`project-settings:update-local`):
+its `launchCmd` / `env` / `shell` skip the consent dialog, so only an owner client may write it.
 
 **Never move the user's view on a background agent's say-so.** Canvas-control requests route by
 SOURCE, and React Flow holds only the ACTIVE project's nodes — so the dispatch used to travel to the

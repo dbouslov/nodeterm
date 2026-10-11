@@ -361,6 +361,19 @@ describe('project settings — ssh leg', () => {
 })
 
 describe('project settings IPC registration', () => {
+  // A relay peer's request reaches a handler the way the shells' `dispatch()` delivers it: the
+  // sender id goes first only to a handler registered with `handleWithSender`.
+  const withSender = new Set<string>()
+  beforeEach(() => {
+    withSender.clear()
+    fake.handleWithSender = (ch, fn) => {
+      withSender.add(ch)
+      fake.handlers[ch] = fn as (...args: any[]) => unknown
+    }
+  })
+  const dispatch = (id: number, ch: string, ...args: unknown[]): unknown =>
+    withSender.has(ch) ? fake.handlers[ch](id, ...args) : fake.handlers[ch](...args)
+
   it('registers the three channels and round-trips through platform handlers', async () => {
     // fakePlatform's `handle` already records into `fake.handlers` (a plain object keyed by
     // channel) — no monkey-patching needed, just read handlers back off it.
@@ -371,8 +384,25 @@ describe('project settings IPC registration', () => {
     expect(await handlers['project-settings:write-shared']('p1', { terminal: { shell: '/bin/zsh' } })).toBe(true)
     const snap = (await handlers['project-settings:read']('p1')) as { shared: { terminal?: { shell?: string } } | null }
     expect(snap.shared?.terminal?.shell).toBe('/bin/zsh')
-    expect(await handlers['project-settings:update-local']('p1', { ignoreShared: { setup: true } })).toBe(true)
+    fake.isOwnerClient = (id) => id === 1
+    expect(await dispatch(1, 'project-settings:update-local', 'p1', { ignoreShared: { setup: true } })).toBe(true)
     expect(await handlers['project-settings:read']('nope')).toBeNull()
+  })
+
+  it('a relay peer cannot write the machine-local overlay (it is the owner\'s own, unconsented, typing)', async () => {
+    fake.isOwnerClient = (id) => id === 1
+    const store = new WorkspaceStore()
+    store.registerIpc()
+    await store.save(ws([project({ cwd: projRoot })]))
+    const update = (id: number, ...args: unknown[]) => dispatch(id, 'project-settings:update-local', ...args)
+    const planted = { agents: { launchCmd: 'touch /tmp/pwned', env: { PATH: '/tmp/evil' } } }
+    expect(await update(1_000_001, 'p1', planted)).toBe(false)
+    expect((await store.readProjectSettings('p1'))?.local).toBeUndefined()
+    expect(await fs.readFile(path.join(userData, 'workspace.json'), 'utf-8')).not.toContain('pwned')
+    // No owner check on the platform at all is the safe answer too.
+    fake.isOwnerClient = undefined
+    expect(await update(1, 'p1', planted)).toBe(false)
+    expect((await new WorkspaceStore().readProjectSettings('p1'))?.local).toBeUndefined()
   })
 })
 

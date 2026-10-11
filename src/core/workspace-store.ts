@@ -270,9 +270,12 @@ export class WorkspaceStore {
       typeof projectId === 'string' ? this.readProjectSettings(projectId) : null)
     platform().handle(IPC.projectSettingsWriteShared, (projectId: unknown, doc: ProjectSettingsDoc) =>
       typeof projectId === 'string' ? this.writeProjectSettings(projectId, doc) : false)
-    platform().handle(IPC.projectSettingsUpdateLocal,
-      (projectId: unknown, local: ProjectLocalSettings | undefined) =>
-        typeof projectId === 'string' ? this.updateLocalProjectSettings(projectId, local) : false)
+    // The local overlay is this machine's own typing — its launchCmd / env / shell skip the consent
+    // dialog the shared doc goes through — so a relay peer (a teammate, a phone) may not write it.
+    platform().handleWithSender(IPC.projectSettingsUpdateLocal,
+      (senderId: number, projectId: unknown, local: ProjectLocalSettings | undefined) =>
+        platform().isOwnerClient?.(senderId) === true && typeof projectId === 'string'
+          ? this.updateLocalProjectSettings(projectId, local) : false)
   }
 
   /**
