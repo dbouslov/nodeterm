@@ -10692,7 +10692,9 @@ export function Canvas() {
                     (coldGroup.groupId ? ` in group ${coldGroup.groupId}` : '') +
                     (coldCwd ? `, cwd ${coldCwd}` : ''),
                   ...(coldAfterIds.length ? [`armed to wait for: ${coldAfterIds.join(', ')}`] : []),
-                  'That project is not on screen, so the session(s) would be queued and start when it is next viewed.'
+                  'That project is not on screen: a session with a launch to run would start in the background at once ' +
+                    '(only its view waits); one waiting on --after, a bare terminal, or one in a closed or SSH project ' +
+                    'would be queued and start when it is next viewed.'
                 ].join('\n'),
                 result: {
                   dryRun: true,

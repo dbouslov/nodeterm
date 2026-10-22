@@ -1082,7 +1082,7 @@ Verbs:
   node attaches when the user views that project; one waiting on \`--after\`, or in a closed or
   SSH project, starts when the user next views that project. Every flag still applies
   (\`--cwd\`, \`--count\`, \`--group\`, \`--after\`, \`--prompt\`), the rope and the context link
-  back to you are still drawn, and the reply says the session is queued. If your project is
+  back to you are still drawn, and the reply says whether the session is running or queued. If your project is
   **closed**, the node is still saved into it and the reply says so; the tab is not reopened for
   you. So: opening a station is safe to do at any time, but a station you opened while the user was
   elsewhere may not be running yet — read \`queued\` before you route work to it.

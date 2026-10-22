@@ -322,11 +322,23 @@ describe('coldOpenMessage — ONE sentence for both cold-open sites', () => {
     expect(closed).toContain('that project is closed')
   })
 
-  it('says the session starts NOW when it is started in the background (#38)', () => {
-    expect(coldOpenMessage(1, 'claude', 'School', ['t1'], { background: true })).toBe(
-      'opened 1 claude session(s) in "School" (t1) — queued; starting in the background now, ' +
-        'and it attaches to the canvas when that project is next viewed'
+  it('says the session is RUNNING when it is started in the background (#38)', () => {
+    // The off-screen pass spawns its tmux session at once (seen live: `nt-<id>` created the same
+    // second as the reply, attached=0), so only the VIEW waits. Saying "queued" here told
+    // orchestrators a running session had not started.
+    const msg = coldOpenMessage(1, 'claude', 'School', ['t1'], { background: true })
+    expect(msg).toBe(
+      'opened 1 claude session(s) in "School" (t1) — running: its session starts in the ' +
+        'background now; only its view waits until that project is next viewed'
     )
+    expect(msg).not.toContain('queued')
+    expect(msg).not.toContain('starts when')
+  })
+
+  it('keeps the queued wording when nothing starts until the project is viewed', () => {
+    const msg = coldOpenMessage(1, 'terminal', 'School', ['t1'], { background: false })
+    expect(msg).toContain('queued; starts when that project is next viewed')
+    expect(msg).not.toContain('running')
   })
 })
 

@@ -290,7 +290,7 @@ export function coldOpenMessage(
   return (
     `opened ${count} ${what} session(s) in "${projectName}" (${ids.join(', ')}) — ` +
     (opts.background
-      ? 'queued; starting in the background now, and it attaches to the canvas when that project is next viewed'
+      ? 'running: its session starts in the background now; only its view waits until that project is next viewed'
       : 'queued; starts when that project is next viewed') +
     (opts.closed ? ' (that project is closed — reopen it from the welcome screen)' : '')
   )
