@@ -434,6 +434,7 @@ import {
 } from '@shared/agents/config'
 import { withPermissionMode } from '@shared/agents/approval-mode'
 import { promptFilePathError } from '@shared/agents/launch'
+import { AGENT_DEFAULT_MCP } from '@shared/agents/mcp-scope'
 import {
   encodeUtf8Base64,
   shouldSpillPrompt,
@@ -9991,7 +9992,8 @@ export function Canvas() {
                     coldMode,
                     owner.id,
                     args.model,
-                    coldPromptFile
+                    coldPromptFile,
+                    args.mcp ?? AGENT_DEFAULT_MCP
                   )
               // Arm it: the project is not mounted, so nothing would deliver an `initialCommand`
               // and serialization drops it. `--after` rides the same held launch — an empty `after`
@@ -10681,6 +10683,7 @@ export function Canvas() {
                     (intoGroupId ? ` in group ${intoGroupId}` : '') +
                     (agentCwd ? `, cwd ${agentCwd}` : '') +
                     (args.model ? `, model ${args.model}` : '') +
+                    `, mcp ${args.mcp ?? AGENT_DEFAULT_MCP}` +
                     (promptFile
                       ? `, prompt from file ${promptFile}`
                       : args.prompt
@@ -10725,7 +10728,10 @@ export function Canvas() {
                   // interpolation site and emits nothing for an agent outside MODEL_SWITCH_CAPABLE,
                   // so an unsupported agent's command line stays byte-identical.
                   args.model,
-                  promptFile ?? promptLaunch.promptFile
+                  promptFile ?? promptLaunch.promptFile,
+                  // Agent-opened chats start without the user's MCP servers unless `--mcp` opts in
+                  // (`mcp-scope.ts`); a non-claude agent ignores it.
+                  args.mcp ?? AGENT_DEFAULT_MCP
                 ),
                 after ?? [],
                 undefined,
@@ -11334,7 +11340,8 @@ export function Canvas() {
                 r.model,
                 // Per-role promptFile (parser-validated + existence-checked above); wins over
                 // `prompt` in the assembler.
-                r.promptFile ?? roleLaunches[i].promptFile
+                r.promptFile ?? roleLaunches[i].promptFile,
+                r.mcp ?? AGENT_DEFAULT_MCP
               )
               return r.title ? { ...node, data: { ...node.data, title: r.title, titleAuto: false } } : node
             })

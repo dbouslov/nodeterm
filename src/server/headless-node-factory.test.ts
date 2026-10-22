@@ -1118,7 +1118,8 @@ describe('HeadlessNodeFactory', () => {
   })
 
   it.each([
-    ['claude', "claude 'do work'"],
+    // Canvas-control launches start claude with no user MCP servers (mcp-scope.ts).
+    ['claude', "claude 'do work' --strict-mcp-config"],
     ['codex', "codex 'do work' --ask-for-approval untrusted"],
     ['gemini', "gemini 'do work'"]
   ] as const)('assembles the %s launch through the shared command builder', async (agent, command) => {
@@ -1227,7 +1228,7 @@ describe('HeadlessNodeFactory', () => {
     let workspace = await store.load({ sideline: false })
     expect(workspace.projects[0].nodes.find((node) => node.id === id)?.pendingLaunch).toEqual({
       after: ['term-upstream'],
-      command: "claude 'consume result'",
+      command: "claude 'consume result' --strict-mcp-config",
       executor: 'server'
     })
     expect(workspace.projects[0].bridges).toEqual(
@@ -1240,7 +1241,7 @@ describe('HeadlessNodeFactory', () => {
     states['term-upstream'] = 'done'
     await factory.refreshArmed()
     await factory.refreshArmed()
-    expect(pty.sends).toEqual([{ nodeId: id, text: "claude 'consume result'" }])
+    expect(pty.sends).toEqual([{ nodeId: id, text: "claude 'consume result' --strict-mcp-config" }])
     workspace = await store.load({ sideline: false })
     expect(workspace.projects[0].nodes.find((node) => node.id === id)?.pendingLaunch).toBeUndefined()
   })
@@ -1282,7 +1283,7 @@ describe('HeadlessNodeFactory', () => {
     states[upstreamId] = 'done'
     factory.onAgentEvent({ nodeId: upstreamId, state: 'done' })
     await factory.refreshArmed()
-    expect(pty.sends).toEqual([{ nodeId: downstreamId, text: "claude 'consume result'" }])
+    expect(pty.sends).toEqual([{ nodeId: downstreamId, text: "claude 'consume result' --strict-mcp-config" }])
     workspace = await store.load({ sideline: false })
     expect(workspace.projects[0].nodes.find((node) => node.id === downstreamId)?.pendingLaunch)
       .toBeUndefined()
@@ -1304,7 +1305,7 @@ describe('HeadlessNodeFactory', () => {
       true
     )
     const downstreamId = (downstreamReply.result as { id: string }).id
-    expect(pty.sends).toEqual([{ nodeId: downstreamId, text: "claude 'consume result'" }])
+    expect(pty.sends).toEqual([{ nodeId: downstreamId, text: "claude 'consume result' --strict-mcp-config" }])
     const workspace = await store.load({ sideline: false })
     expect(workspace.projects[0].nodes.find((node) => node.id === downstreamId)?.pendingLaunch)
       .toBeUndefined()

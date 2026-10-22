@@ -30,6 +30,13 @@ describe('parseTeamSpec — the happy path', () => {
       roles: [{ title: 'UI', promptFile: '/tmp/brief.md', agent: 'claude' }]
     })
   })
+  it('normalizes a per-role mcp scope and refuses an unknown name', () => {
+    expect(parseTeamSpec('[{"prompt":"x","mcp":"Chrome"}]', KNOWN)).toEqual({
+      ok: true,
+      roles: [{ prompt: 'x', agent: 'claude', mcp: 'chrome' }]
+    })
+    expect(err('[{"prompt":"x","mcp":"slack"}]')).toMatch(/role #1: --mcp: unknown "slack"/)
+  })
   it('accepts a custom agent id when it is in the known set', () => {
     const r = parseTeamSpec('[{"prompt":"x","agent":"custom:mine"}]', KNOWN)
     expect(r.ok).toBe(true)

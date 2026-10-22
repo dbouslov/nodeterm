@@ -28,6 +28,7 @@ import {
 import { withPermissionMode } from './approval-mode'
 import { resolveAgentConfig } from './custom-agent'
 import { withAgentModel } from './model-gateway'
+import { withAgentMcp } from './mcp-scope'
 
 export interface LaunchInputs {
   agentId: AgentId
@@ -54,6 +55,8 @@ export interface LaunchInputs {
   permissionMode?: AgentPermissionMode
   /** Per-node model override, applied through the effective base harness. */
   model?: string
+  /** Per-node MCP scope (`mcp-scope.ts`). Undefined = no MCP flags, the user's full set. */
+  mcp?: string
   /** A minted session id for FIRST launch (claude-base only, when the CLI supports `--session-id`).
    *  Ignored on resume. */
   sessionId?: string
@@ -78,6 +81,8 @@ export interface ResumeInputs {
   permissionMode?: AgentPermissionMode
   /** Per-node model override, applied through the effective base harness. */
   model?: string
+  /** Per-node MCP scope (`mcp-scope.ts`). Undefined = no MCP flags, the user's full set. */
+  mcp?: string
   /** Should a SHARED_IDENTITY_CAPABLE agent (codex) name its managed launcher on resume? Same
    *  semantics as `LaunchInputs.sharedIdentity`. */
   sharedIdentity?: boolean
@@ -223,9 +228,13 @@ export function assembleLaunchCommand(
     // Session-id minting: claude-base + CLI supports the flag. On resume this branch is never
     // taken (assembleResumeCommand does not pass sessionId).
     if (inputs.sessionId && mintsSessionId(capId) && inputs.sessionIdFlagSupported) {
-      return withAgentModel(withSessionId(withMode, capId, inputs.sessionId), capId, inputs.model)
+      return withAgentMcp(
+        withAgentModel(withSessionId(withMode, capId, inputs.sessionId), capId, inputs.model),
+        capId,
+        inputs.mcp
+      )
     }
-    return withAgentModel(withMode, capId, inputs.model)
+    return withAgentMcp(withAgentModel(withMode, capId, inputs.model), capId, inputs.mcp)
   }
 
   const command = usesSep ? `${flagged(baseCmd)} ${sep} ${promptArg}` : flagged(withPrompt)
@@ -263,6 +272,6 @@ export function assembleResumeCommand(
   const withMode = inputs.permissionMode
     ? withPermissionMode(base, capId, inputs.permissionMode)
     : base
-  const command = withAgentModel(withMode, capId, inputs.model)
+  const command = withAgentMcp(withAgentModel(withMode, capId, inputs.model), capId, inputs.mcp)
   return { command, missingEnv: [...m1, ...m2] }
 }

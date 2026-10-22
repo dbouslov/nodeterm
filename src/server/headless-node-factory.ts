@@ -26,6 +26,7 @@ import {
   type BuiltinAgentId
 } from '../shared/agents/config'
 import { assembleLaunchCommand } from '../shared/agents/launch'
+import { AGENT_DEFAULT_MCP } from '../shared/agents/mcp-scope'
 import type { AgentState, NormalizedAgentEvent } from '../shared/agents/normalize'
 import { oneLine } from '../shared/one-line'
 import type {
@@ -1240,7 +1241,8 @@ export class HeadlessNodeFactory {
               sessionIdFlagSupported,
               launchCmdOverride: settings.agentLaunchCommands?.[agentId as BuiltinAgentId],
               sharedIdentity: codexSharedIdentity,
-              model: args.model
+              model: args.model,
+              mcp: args.mcp ?? AGENT_DEFAULT_MCP
             },
             this.deps.env ?? process.env
           ).command
@@ -1273,6 +1275,7 @@ export class HeadlessNodeFactory {
           cwd,
           ...(verb === 'open-agent' ? { agentId: agentId as AgentId } : {}),
           ...(args.model && verb === 'open-agent' ? { agentModel: args.model } : {}),
+          ...(verb === 'open-agent' ? { agentMcp: args.mcp ?? AGENT_DEFAULT_MCP } : {}),
           ...(mintedSessionId ? { agentSessionId: mintedSessionId } : {}),
           ...(source.node.accountId && verb === 'open-agent' &&
           (agentId === 'claude' || agentId === 'codex')

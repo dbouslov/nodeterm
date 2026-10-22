@@ -7,6 +7,7 @@ import { HOOK_ENDPOINT_FALLBACK_SH, STALE_ENDPOINT_HINT } from './agents/hook-en
 import { codexSandboxGuidanceLines } from './context-link-core'
 import { NODE_TOKEN_READ_SH } from './agents/node-token-sh'
 import { AGENT_CONFIG, AGENT_HOOK_TARGETS, BUILTIN_AGENT_IDS } from '@shared/agents/config'
+import { normalizedAgentMcp } from '@shared/agents/mcp-scope'
 import { RETRYABLE } from './agents/agent-message-decide'
 import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from './agents/agent-message-flow'
 import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from './browser-outcomes'
@@ -287,6 +288,11 @@ export function parseControlRequest(
   // (src/core/project-grants.ts) — the caller's path is hostile input and this presence check is
   // only the polite half.
   if (v === 'open-project' && !args.cwd) return { error: 'open-project requires --cwd <abs-path>' }
+  if ((v === 'open-claude' || v === 'open-agent') && args.mcp !== undefined) {
+    const mcp = normalizedAgentMcp(args.mcp)
+    if ('error' in mcp) return { error: `${v}: ${mcp.error}` }
+    return { verb: v, args: { ...args, mcp: mcp.value } }
+  }
   return { verb: v, args }
 }
 
@@ -343,8 +349,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `list` — current nodes (id, kind, title). Start here when you need a node id.',
     '- `help` — print the verb list. Answered by the shim itself, so it works even if the app is down.',
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]` — open N plain terminals.',
-    '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]` — open N Claude sessions.',
-    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open`,
+    '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--mcp S] [--group <id>] [--after <id,id>] [--project <id>]` — open N Claude sessions.',
+    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--mcp S] [--group <id>] [--after <id,id>] [--project <id>]\` — open`,
     '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
     '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
     '  start until every listed station has finished a turn SUCCESSFULLY. It is',
@@ -394,6 +400,11 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  and copilot (and custom agents based on them); any other agent ignores it and launches',
     '  exactly as it would without the flag. The id is passed to the CLI as-is, so a name that',
     '  agent does not recognise fails inside the session, not at open time — name a model you know.',
+    '  `--mcp <names>` (claude only) picks the MCP servers the session starts with. Default `none`:',
+    '  no user MCP servers, which saves ~6K tokens at start and ~7K more after the first tool call.',
+    '  `chrome` adds claude-in-chrome. Naming any of `gmail`, `calendar`, `drive`, `docs` (or `all`)',
+    '  loads the user\'s full set: those connectors cannot be picked one by one. Comma-separate',
+    '  names; spawn-team roles take the same value as `"mcp"`.',
     '- `open-project --cwd </abs/path> [--name N] [--color C]` — register (or find) the project for a',
     '  local directory; the reply carries `{ projectId, name, cwd, created }`. Idempotent: the same',
     '  cwd always returns the same project, never a duplicate. Creating/adding asks the user to',
@@ -810,8 +821,8 @@ Verbs:
 - \`help\` — print the verb list. The shim answers this itself, without reaching the app, so it
   is also what to run when you are unsure whether the control endpoint is alive.
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]\` — open N plain terminals (default 1).
-- \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N Claude sessions (default 1).
-- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N sessions of any agent CLI.
+- \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--mcp S] [--group <id>] [--after <id,id>] [--project <id>]\` — open N Claude sessions (default 1).
+- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--mcp S] [--group <id>] [--after <id,id>] [--project <id>]\` — open N sessions of any agent CLI.
   \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
   hands its worktree path down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once
@@ -882,6 +893,11 @@ Verbs:
   as it would have — the flag is never an error, so a mixed fan-out needs no special-casing. The
   id goes to the CLI verbatim: an unknown name fails inside the session on its first turn, not at
   open time, so name a model you know that CLI accepts rather than guessing.
+  \`--mcp <names>\` (claude only) picks the MCP servers the session starts with. Default \`none\`:
+  no user MCP servers, which saves ~6K tokens at start and ~7K more after the first tool call.
+  \`chrome\` adds claude-in-chrome. Naming any of \`gmail\`, \`calendar\`, \`drive\`, \`docs\` (or
+  \`all\`) loads the user's full set: those connectors cannot be picked one by one. Comma-separate
+  names; spawn-team roles take the same value as \`"mcp"\`.
 - \`open-project --cwd </abs/path> [--name N] [--color C]\` — register (or find) the project for a
   local directory; the reply carries \`{ projectId, name, cwd, created }\`. Idempotent: the same
   cwd always returns the same project, never a duplicate — and \`--name\`/\`--color\` apply only

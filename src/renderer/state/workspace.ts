@@ -148,6 +148,8 @@ export interface NodeData {
   agentId?: AgentId
   /** Model selected for this node through the shared model gateway. */
   agentModel?: string
+  /** MCP scope a canvas-control launch chose (`mcp-scope.ts`); re-applied on every relaunch. */
+  agentMcp?: string
   /**
    * Claude nodes only: the managed Claude account (config-dir isolated) this node runs under.
    * Persisted so cold-restore resume reads the transcript from the right account dir.
@@ -628,7 +630,10 @@ export function createAgentNode(
    *  brief survives the single-line typed delivery. Validated by the caller
    *  (`promptFilePathError` + an existence check) — the factory trusts it. Trailing/optional so
    *  every existing caller is unchanged. */
-  promptFile?: string
+  promptFile?: string,
+  /** MCP scope (`mcp-scope.ts`, e.g. `none` for canvas-control launches). Persisted as
+   *  `data.agentMcp` so every relaunch keeps it; undefined = no MCP flags, as before. */
+  mcp?: string
 ): CanvasNode {
   const { label, color: agentColor } = resolveAgent(agentId)
   // ONE binding decision, shared with the phone-registration path (core/project-node-append) so
@@ -713,7 +718,8 @@ export function createAgentNode(
       // A model picked at creation (e.g. Transfer-to-agent-with-model). `withAgentModel` appends
       // `--model <value>` for a switch-capable agent and no-ops otherwise, so the line stays
       // byte-identical when no model is chosen.
-      model
+      model,
+      mcp
     },
     // The boot-time snapshot of the desktop env (empty on browser/relay by design, where the
     // missing-env warning below is the honest outcome — the same markers the preview shows).
@@ -747,6 +753,7 @@ export function createAgentNode(
       // A model chosen at creation (Transfer-to-agent-with-model). Persisted so cold-restore and
       // later restarts keep it; `withAgentModel` re-applies it on relaunch. Only stamped when set.
       ...(model ? { agentModel: model } : {}),
+      ...(mcp ? { agentMcp: mcp } : {}),
       cwd: ssh ? ssh.remoteCwd : cwd,
       initialCommand,
       ...(ssh ? { ssh: ssh.server, sshRemoteTmux: true } : {})
@@ -1972,6 +1979,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         highScore: n.highScore,
         agentId,
         agentModel: n.agentModel,
+        agentMcp: n.agentMcp,
         accountId: n.accountId,
         agentSessionId: n.agentSessionId,
         pendingLaunch: n.pendingLaunch,
@@ -2054,6 +2062,7 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
         highScore: n.data.highScore,
         agentId: n.data.agentId,
         agentModel: n.data.agentModel,
+        agentMcp: n.data.agentMcp,
         accountId: n.data.accountId,
         agentSessionId: n.data.agentSessionId,
         pendingLaunch: n.data.pendingLaunch,

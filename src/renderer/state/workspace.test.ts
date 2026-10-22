@@ -848,6 +848,21 @@ describe('model on agent node factory', () => {
   })
 })
 
+describe('MCP scope on agent node factory', () => {
+  it('stamps agentMcp, ends the launch line with the strict flag, and round-trips it', () => {
+    const node = createAgentNode('claude', 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'none')
+    expect(node.data.agentMcp).toBe('none')
+    expect(node.data.initialCommand).toMatch(/ --strict-mcp-config$/)
+    const back = nodeStatesToFlow(flowToNodeStates([node]))
+    expect(back[0].data.agentMcp).toBe('none')
+  })
+  it('a node opened with no scope (the UI path) keeps the old launch line', () => {
+    const node = createAgentNode('claude', 0)
+    expect(node.data.agentMcp).toBeUndefined()
+    expect(node.data.initialCommand).not.toContain('mcp')
+  })
+})
+
 describe('accountId serialization', () => {
   it('round-trips data.accountId on a terminal node', () => {
     const node = {

@@ -367,6 +367,8 @@ export interface CanvasNodeState {
   agentId?: AgentId
   /** Model selected for this agent node through the shared model gateway. */
   agentModel?: string
+  /** MCP scope a canvas-control launch chose (`mcp-scope.ts`); re-applied on every relaunch. */
+  agentMcp?: string
   /** Set while this node is armed but not yet launched — see PendingLaunch. */
   pendingLaunch?: PendingLaunch
   /**

@@ -21,6 +21,17 @@ import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from '../core/browser-outcom
 import { BROWSER_CAPABILITY_OFF_MESSAGE } from './browser-drive'
 
 describe('parseControlRequest', () => {
+  it('normalizes --mcp on open-claude / open-agent and refuses an unknown name', () => {
+    expect(parseControlRequest('open-claude', { mcp: 'Gmail,calendar' })).toEqual({
+      verb: 'open-claude',
+      args: { mcp: 'calendar,gmail' }
+    })
+    expect(parseControlRequest('open-agent', { agent: 'claude', mcp: 'none' })).toEqual({
+      verb: 'open-agent',
+      args: { agent: 'claude', mcp: 'none' }
+    })
+    expect(parseControlRequest('open-claude', { mcp: 'slack' })).toHaveProperty('error')
+  })
   it('accepts known verbs', () => {
     expect(parseControlRequest('list', {})).toEqual({ verb: 'list', args: {} })
     expect(parseControlRequest('open-claude', { count: '2' })).toEqual({

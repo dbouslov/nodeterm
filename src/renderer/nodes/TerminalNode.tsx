@@ -3443,6 +3443,7 @@ export function TerminalNode({
               sessionId: resume.sessionId,
               permissionMode: mode,
               model: data.agentModel,
+              mcp: data.agentMcp,
               sharedIdentity: shared,
               // The launch-command override rides the relaunch too, so a wrapper user's node comes
               // back through its wrapper after a reboot — the moment env/account setup matters.
@@ -3507,6 +3508,7 @@ export function TerminalNode({
                     sessionId: undefined,
                     permissionMode: mode,
                     model: data.agentModel,
+                    mcp: data.agentMcp,
                     sharedIdentity: shared,
                     launchCmdOverride: agentLaunchOverride(agentId, ownerProjectId)
                   },
@@ -3699,6 +3701,7 @@ export function TerminalNode({
             sessionId: agentSessionId,
             permissionMode: await ensureActivePermissionMode(target),
             model: selectedModel ?? undefined,
+            mcp: getNode(id)?.data.agentMcp as string | undefined,
             // The launch-command override rides the restart too (the global layer is undefined for
             // a custom target, which already owns its launchCmd) — it is a property of how the
             // agent launches, so the owning project's own value applies here as well.
@@ -3826,6 +3829,7 @@ export function TerminalNode({
             customAgent,
             sessionId: agentSessionId,
             permissionMode: await ensureActivePermissionMode(agentId),
+            mcp: data.agentMcp,
             sharedIdentity: false,
             // The launch-command override lives on the user's own PATH (or is an absolute path),
             // not in a generated launcher dir, so it rides the wake too — project layer included.

@@ -99,7 +99,7 @@ export interface RecreateContext {
 }
 
 const COSMETIC_KEYS = [
-  'title', 'titleAuto', 'color', 'group', 'tags', 'collapsed', 'expandedHeight', 'shell', 'agentModel', 'annotation'
+  'title', 'titleAuto', 'color', 'group', 'tags', 'collapsed', 'expandedHeight', 'shell', 'agentModel', 'agentMcp', 'annotation'
 ] as const
 
 function withCosmetics(node: CanvasNode, data: NodeData): CanvasNode {

@@ -229,6 +229,25 @@ describe('assembleLaunchCommand — custom agents', () => {
   })
 })
 
+describe('MCP scope (mcp-scope.ts)', () => {
+  it('a fresh claude launch with mcp none ends with the strict flag, after the model', () => {
+    expect(
+      assembleLaunchCommand(
+        { agentId: 'claude', initialPrompt: 'go', model: 'opus', sessionId: 'sid-1', sessionIdFlagSupported: true, mcp: 'none' },
+        ENV
+      ).command
+    ).toBe("claude 'go' --session-id sid-1 --model 'opus' --strict-mcp-config")
+  })
+  it('a resume keeps the scope, so a restored node does not re-load every server', () => {
+    expect(
+      assembleResumeCommand({ agentId: 'claude', sessionId: 'abc-123', mcp: 'chrome' }, ENV).command
+    ).toBe('claude --resume abc-123 --strict-mcp-config --chrome')
+  })
+  it('codex ignores the scope', () => {
+    expect(assembleLaunchCommand({ agentId: 'codex', mcp: 'none' }, ENV).command).toBe('codex')
+  })
+})
+
 describe('assembleResumeCommand', () => {
   it('claude resumes with --resume', () => {
     expect(assembleResumeCommand({ agentId: 'claude', sessionId: 'abc-123' }, ENV).command).toBe(

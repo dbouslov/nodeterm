@@ -150,6 +150,7 @@ export function stateToReopenSnapshot(entry: ClosedSessionEntry): ReopenNodeSnap
       highScore: n.highScore,
       agentId: n.agentId,
       agentModel: n.agentModel,
+      agentMcp: n.agentMcp,
       accountId: n.accountId,
       agentSessionId: n.agentSessionId,
       ssh: n.ssh,

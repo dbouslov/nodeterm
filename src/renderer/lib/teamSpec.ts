@@ -7,6 +7,7 @@
 // off, a typo'd `agent` id opened a broken node that failed only inside its pane. Each of those is
 // now a named refusal — the caller learns which role and which field, before anything opens.
 import { promptFilePathError } from '@shared/agents/launch'
+import { normalizedAgentMcp } from '@shared/agents/mcp-scope'
 
 export const TEAM_MAX_ROLES = 8
 
@@ -17,11 +18,13 @@ export interface TeamRole {
   /** Defaulted to 'claude' when the role names none — the historical behavior, made explicit. */
   agent: string
   model?: string
+  /** Normalized MCP scope (`mcp-scope.ts`); absent = the canvas-control default. */
+  mcp?: string
 }
 
 export type TeamSpecResult = { ok: true; roles: TeamRole[] } | { ok: false; error: string }
 
-const SHAPE = '{title?, prompt|promptFile, agent?, model?}'
+const SHAPE = '{title?, prompt|promptFile, agent?, model?, mcp?}'
 
 /** A role's name for an error message: its title when it has one, else its 1-based position. */
 function roleName(r: { title?: unknown }, i: number): string {
@@ -70,7 +73,7 @@ export function parseTeamSpec(raw: string, knownAgentIds: ReadonlySet<string>): 
     }
     const role = r as Record<string, unknown>
     const name = roleName(role, i)
-    for (const field of ['title', 'prompt', 'promptFile', 'agent', 'model'] as const) {
+    for (const field of ['title', 'prompt', 'promptFile', 'agent', 'model', 'mcp'] as const) {
       if (role[field] !== undefined && typeof role[field] !== 'string') {
         return { ok: false, error: `role ${name}: "${field}" must be a string` }
       }
@@ -97,12 +100,15 @@ export function parseTeamSpec(raw: string, knownAgentIds: ReadonlySet<string>): 
         error: `role ${name}: unknown agent "${agent}" — known agents: ${[...knownAgentIds].join(', ')}`
       }
     }
+    const mcp = typeof role.mcp === 'string' ? normalizedAgentMcp(role.mcp) : undefined
+    if (mcp && 'error' in mcp) return { ok: false, error: `role ${name}: ${mcp.error}` }
     roles.push({
       ...(typeof role.title === 'string' && role.title.trim() ? { title: role.title.trim() } : {}),
       ...(prompt ? { prompt } : {}),
       ...(promptFile ? { promptFile } : {}),
       agent,
-      ...(typeof role.model === 'string' && role.model.trim() ? { model: role.model.trim() } : {})
+      ...(typeof role.model === 'string' && role.model.trim() ? { model: role.model.trim() } : {}),
+      ...(mcp ? { mcp: mcp.value } : {})
     })
   }
   return { ok: true, roles }
