@@ -1114,6 +1114,16 @@ describe('the --project clause tells the truth about travel (review #363 I-1 + M
     }
   })
 
+  it('both bodies say a cold open reported running keeps `queued: true` but is already up', () => {
+    // The background start (#38) answers "running" while `queued` stays true for the batch; an
+    // agent told "queued node = no process" would wait on a session that is already running.
+    for (const [name, body] of bodies) {
+      expect(body, name).toMatch(
+        /A cold open whose reply says running keeps `queued: true`, but its session is already up;\s+only a reply that says queued has no process behind it\./
+      )
+    }
+  })
+
   it('both bodies say the DISPLAY verbs do not switch the view either — and are never queued', () => {
     // The second half of the same promise, and the half an agent meets most often: a skill that
     // renders its report as HTML reaches for `show-web` every time it finishes. Two facts it acts

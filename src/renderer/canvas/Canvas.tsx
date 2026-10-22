@@ -10693,7 +10693,7 @@ export function Canvas() {
                     (coldCwd ? `, cwd ${coldCwd}` : ''),
                   ...(coldAfterIds.length ? [`armed to wait for: ${coldAfterIds.join(', ')}`] : []),
                   'That project is not on screen: a session with a launch to run would start in the background at once ' +
-                    '(only its view waits); one waiting on --after, a bare terminal, or one in a closed or SSH project ' +
+                    '(only its view waits); one waiting on --after, a bare terminal, or one in a closed, SSH or relay project ' +
                     'would be queued and start when it is next viewed.'
                 ].join('\n'),
                 result: {
@@ -10897,8 +10897,8 @@ export function Canvas() {
                   ? `\nwaiting for ${coldAfterIds.join(', ')} before running` +
                     (coldDepLinked.length ? ' (and linked to read them)' : '')
                   : ''),
-              // Every node on this branch has no process behind it until that project is viewed,
-              // whether or not it holds a command — the same rule the `--project` branch states.
+              // `queued` stays true for the whole batch; startsInBackground decides whether the
+              // sentence says running or queued.
               result: {
                 ids: coldIds,
                 id: coldIds[0],

@@ -522,7 +522,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  agent) starts in the background within seconds; the node attaches when the user views that',
     '  project. One waiting on `--after`, or in a closed or SSH project, starts when the user next views',
     '  that project. The reply says which and reports `queued: true` — do not poll for it,',
-    '  and do not report the session as started. `--cwd`/`--count`/`--group`/`--after`/`--prompt`',
+    '  and when the reply says queued, do not report the session as started. `--cwd`/`--count`/`--group`/`--after`/`--prompt`',
     '  all still apply. If your project is CLOSED the node is still saved into it and the reply',
     '  says the project is closed; the tab is not reopened for you.',
     '  `--project <id>` opens the node(s) in another',
@@ -539,6 +539,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  exists on the canvas but has no process behind it: do not route work to it, do not',
     '  `send` to it and do not report it as started. It launches itself when its wait ends,',
     '  then reports through the ordinary status hooks — there is nothing to poll.',
+    '  A cold open whose reply says running keeps `queued: true`, but its session is already up;',
+    '  only a reply that says queued has no process behind it.',
     '  `queued: false` means the session is running.',
     '  `--prompt` arrives on ONE LINE: every run of whitespace in it, newlines included, is',
     '  collapsed to a single space before the session starts (the prompt rides the launch command',
@@ -1093,6 +1095,8 @@ Verbs:
   A queued node exists on the canvas but has **no process behind it**, so do not route work
   to it, do not \`send\` to it and do not report it as started. It launches itself when its wait
   ends and then reports through the ordinary status hooks, so there is nothing to poll.
+  A cold open whose reply says running keeps \`queued: true\`, but its session is already up;
+  only a reply that says queued has no process behind it.
   \`queued: false\` means the session is running.
   \`--prompt\` arrives on ONE LINE. Every run of whitespace in it — newlines included — is
   collapsed to a single space before the session starts, because the prompt is passed as an
